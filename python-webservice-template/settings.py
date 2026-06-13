@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,17 +22,17 @@ class Settings(BaseSettings):
     mcp_name: str = "python-template"
     mcp_instructions: str = "Tools for this template application."
 
-    postgres_url: str = "postgresql://appuser:password@localhost:5432/appdb"
+    postgres_url: SecretStr = SecretStr("postgresql://appuser:password@localhost:5432/appdb")
     postgres_pool_min_size: int = 2
     postgres_pool_max_size: int = 10
 
     clickhouse_host: str = "localhost"
     clickhouse_port: int = 8123
     clickhouse_user: str = "default"
-    clickhouse_password: str = ""
+    clickhouse_password: SecretStr = SecretStr("")
     clickhouse_database: str = "default"
 
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: SecretStr = SecretStr("redis://localhost:6379/0")
 
     flight_host: str = "localhost"
     flight_port: int = 8815          # pyarrow Flight default
@@ -55,7 +56,7 @@ class Settings(BaseSettings):
     solace_port: int = 55555
     solace_vpn: str = "default"
     solace_username: str = "admin"
-    solace_password: str = "admin"
+    solace_password: SecretStr = SecretStr("admin")
     solace_topic: str = "ingest/batches"
 
 

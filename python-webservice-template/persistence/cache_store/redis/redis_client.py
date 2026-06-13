@@ -11,7 +11,7 @@ class RedisClient:
 
     async def __aenter__(self) -> aioredis.Redis:
         async def _connect() -> aioredis.Redis:
-            client = aioredis.Redis.from_url(self._settings.redis_url)
+            client = aioredis.Redis.from_url(self._settings.redis_url.get_secret_value())
             await client.ping()          # smoke-test: raises if Redis is unreachable
             return client
 

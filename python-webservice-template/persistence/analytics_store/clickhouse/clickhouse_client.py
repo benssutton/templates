@@ -14,7 +14,7 @@ class ClickHouseClient:
             host=self._settings.clickhouse_host,
             port=self._settings.clickhouse_port,
             username=self._settings.clickhouse_user,
-            password=self._settings.clickhouse_password,
+            password=self._settings.clickhouse_password.get_secret_value(),
             database=self._settings.clickhouse_database,
         )
         return self._client
