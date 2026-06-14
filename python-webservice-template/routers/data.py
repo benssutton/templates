@@ -4,7 +4,6 @@ import pyarrow as pa
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from core.correlation import timed
-
 from core.dependencies import DataServiceDep, StreamIngestServiceDep
 from schemas.data import DataRowsResponse
 
