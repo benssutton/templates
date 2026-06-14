@@ -18,4 +18,4 @@ async def test_middleware_generates_id_when_absent():
     app = create_app(Settings())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.get("/")
-    assert len(r.headers["X-Request-ID"]) >= 8     # generated UUID hex
+    assert len(r.headers["X-Request-ID"]) == 32    # uuid4().hex is always 32 hex chars

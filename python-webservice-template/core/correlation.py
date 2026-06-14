@@ -25,8 +25,15 @@ def get_correlation_id() -> str:
     return correlation_id_var.get()
 
 
-def set_correlation_id(value: str) -> None:
-    correlation_id_var.set(value)
+def set_correlation_id(value: str) -> contextvars.Token:
+    """Set the correlation ID and return the reset token.
+
+    Callers that need to restore the previous value (e.g. per-batch ingest
+    loops that want clean isolation between batches) should call
+    `correlation_id_var.reset(token)` when done.  Fire-and-forget callers
+    (e.g. the streaming ingest thread) can safely discard the return value.
+    """
+    return correlation_id_var.set(value)
 
 
 def new_id() -> str:
