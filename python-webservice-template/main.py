@@ -106,6 +106,8 @@ def create_app(settings: Settings) -> FastAPI:
         request.app.state.container.last_request_at = datetime.now(timezone.utc)
         return await call_next(request)
 
+    # ServerTimingMiddleware must be FIRST (innermost) — Starlette LIFO ordering —
+    # so `total` measures handler + downstream I/O time and all boundaries are captured.
     app.add_middleware(ServerTimingMiddleware)
     app.add_middleware(
         CORSMiddleware,

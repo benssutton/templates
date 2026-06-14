@@ -12,9 +12,9 @@ async def test_data_read_emits_server_timing(test_client):
 
 
 async def test_request_without_boundaries_has_only_total(test_client):
-    # /health/live has no instrumented boundaries; its Server-Timing must carry
-    # only `total`, proving background streaming writes never leak into a
-    # request's samples (request-scoped ContextVar isolation).
+    # /health/live has no instrumented boundaries, so its Server-Timing must
+    # carry only `total`. (The request-scoped isolation invariant itself is
+    # proven rigorously in tests/test_boundary_timing.py and test_correlation.py.)
     r = await test_client.get("/health/live")
     assert r.status_code == 200
     server_timing = r.headers.get("Server-Timing", "")
