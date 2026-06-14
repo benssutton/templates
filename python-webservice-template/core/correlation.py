@@ -13,6 +13,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
+from core.boundary_timing import record_boundary
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
@@ -73,11 +74,14 @@ _timing_log = logging.getLogger(__name__)
 @asynccontextmanager
 async def timed(label: str):
     """Log the wall-clock duration of an awaited boundary, tagged with the
-    current correlation ID (added by CorrelationIdFilter). Structured as a
-    context manager so an OpenTelemetry span could wrap the same boundary later
-    without changing call sites."""
+    current correlation ID (added by CorrelationIdFilter), and record it as a
+    Server-Timing sample for the current request (added by record_boundary).
+    Structured as a context manager so an OpenTelemetry span could wrap the same
+    boundary later without changing call sites."""
     start = time.perf_counter()
     try:
         yield
     finally:
-        _timing_log.debug("%s %.2fms", label, (time.perf_counter() - start) * 1000)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        _timing_log.debug("%s %.2fms", label, elapsed_ms)
+        record_boundary(label, elapsed_ms)
