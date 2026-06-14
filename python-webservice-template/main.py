@@ -10,6 +10,7 @@ from mcp.server.fastmcp import FastMCP
 from core.container import Container
 from core.correlation import CorrelationIdMiddleware
 from core.logging_config import configure_logging
+from core.boundary_timing import ServerTimingMiddleware
 from core.request_limits import MaxBodySizeMiddleware
 from settings import get_settings, Settings
 from persistence.analytics_store.clickhouse.clickhouse_client import ClickHouseClient
@@ -105,6 +106,7 @@ def create_app(settings: Settings) -> FastAPI:
         request.app.state.container.last_request_at = datetime.now(timezone.utc)
         return await call_next(request)
 
+    app.add_middleware(ServerTimingMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_allow_origins,
