@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -65,6 +65,15 @@ class Settings(BaseSettings):
     cors_allow_methods: list[str] = ["*"]
     cors_allow_headers: list[str] = ["*"]
     cors_allow_credentials: bool = False     # must stay False while origins == ["*"]
+
+    @model_validator(mode="after")
+    def _cors_credentials_check(self) -> "Settings":
+        if self.cors_allow_credentials and "*" in self.cors_allow_origins:
+            raise ValueError(
+                "cors_allow_credentials=True is incompatible with cors_allow_origins=['*']. "
+                "Specify explicit origins when enabling credentials."
+            )
+        return self
 
     # Solace — only resolved when ingest_transport="solace"
     solace_host: str = "localhost"
