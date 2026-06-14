@@ -245,6 +245,31 @@ async def test_dependency_down_fails_readiness(
             pass
 
 
+async def test_health_probe_error_is_generic_not_leaky(
+    postgres_container, clickhouse_container, test_clickhouse_client, streaming_flight_server,
+):
+    dedicated_redis = RedisContainer(REDIS_IMAGE)
+    dedicated_redis.start()
+    try:
+        redis_url = f"redis://localhost:{int(dedicated_redis.get_exposed_port(6379))}/0"
+        settings = _settings(
+            postgres_container, clickhouse_container, redis_url, streaming_flight_server.port,
+        )
+        async with lifespan_test_client(settings) as client:
+            assert (await _poll_ready(client, 200)).status_code == 200
+            dedicated_redis.stop()
+            resp = await _poll_ready(client, 503, timeout=15.0)
+            assert resp.status_code == 503
+            redis_check = {c["name"]: c for c in resp.json()["checks"]}["redis"]
+            assert redis_check["status"] == "down"
+            assert redis_check["error"] == "unavailable"
+    finally:
+        try:
+            dedicated_redis.stop()
+        except Exception:
+            pass
+
+
 async def test_streaming_assigns_distinct_per_batch_ids(
     postgres_container, clickhouse_container, test_clickhouse_client,
     redis_container, streaming_flight_server, cid_caplog,

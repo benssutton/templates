@@ -43,9 +43,10 @@ class ConfigService:
             return ProbeResult(name="postgres", status="up", latency_ms=round(latency_ms, 2))
         except Exception as exc:
             latency_ms = (time.perf_counter() - start) * 1000
+            log.error("postgres health check failed: %s", exc)
             return ProbeResult(
                 name="postgres",
                 status="down",
                 latency_ms=round(latency_ms, 2),
-                error=str(exc),
+                error="unavailable",
             )

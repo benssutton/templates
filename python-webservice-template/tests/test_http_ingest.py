@@ -174,7 +174,6 @@ async def test_reinsert_after_delete_wins_over_http(test_client_http: AsyncClien
 async def test_http_ingest_propagates_request_id_to_store_write(
     test_client_http: AsyncClient, cid_caplog,
 ):
-    import logging
     batch = make_batch([(201, "http", "v1", "upsert")])
     with cid_caplog.at_level(logging.DEBUG):
         res = await test_client_http.post(

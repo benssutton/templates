@@ -66,7 +66,8 @@ class HealthService:
                 error="timeout",
             )
         except Exception as exc:
-            return ProbeResult(name=name, status="down", latency_ms=0.0, error=str(exc))
+            log.error("%s health check raised: %s", name, exc)
+            return ProbeResult(name=name, status="down", latency_ms=0.0, error="unavailable")
 
     async def _gather_dependencies(self) -> list[ProbeResult]:
         return list(await asyncio.gather(

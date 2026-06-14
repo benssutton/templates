@@ -48,9 +48,10 @@ class DataService:
             )
         except Exception as exc:
             latency_ms = (time.perf_counter() - start) * 1000
+            log.error("clickhouse health check failed: %s", exc)
             return ProbeResult(
                 name="clickhouse",
                 status="down",
                 latency_ms=round(latency_ms, 2),
-                error=str(exc),
+                error="unavailable",
             )
