@@ -2,7 +2,7 @@
 W3C Server-Timing response header.
 
 ServerTimingMiddleware installs a fresh sample list on a ContextVar at the start
-of each HTTP request; core.correlation.timed() appends (label, milliseconds) to
+of each HTTP request; core.correlation.timed() (once wired) appends (label, milliseconds) to
 that list as each instrumented boundary completes. On the response's
 `http.response.start` the middleware renders the samples — plus a synthetic
 `total` for the whole handler — into a Server-Timing header.
@@ -31,7 +31,9 @@ boundary_samples_var: contextvars.ContextVar[list[tuple[str, float]] | None] = (
     contextvars.ContextVar("boundary_samples", default=None)
 )
 
-# Server-Timing metric names must be tokens; map any other char to underscore.
+# Server-Timing metric names must be tokens. We deliberately normalise every
+# non-[A-Za-z0-9_] char (including hyphens) to underscore so header tokens stay
+# in lockstep with the k6 parser, which matches [A-Za-z0-9_]+.
 _TOKEN_RE = re.compile(r"[^A-Za-z0-9_]")
 
 
@@ -70,13 +72,13 @@ class ServerTimingMiddleware:
             await self.app(scope, receive, send)
             return
 
-        token = boundary_samples_var.set([])
+        samples: list[tuple[str, float]] = []
+        token = boundary_samples_var.set(samples)
         start = time.perf_counter()
 
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
                 total_ms = (time.perf_counter() - start) * 1000
-                samples = boundary_samples_var.get() or []
                 try:
                     MutableHeaders(scope=message)["Server-Timing"] = _render_header(
                         samples, total_ms
