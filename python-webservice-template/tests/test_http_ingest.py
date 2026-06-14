@@ -143,3 +143,18 @@ async def test_lsm_query_limit_zero_returns_all_rows():
     rows, total = store.query(limit=0)
     assert total == 2
     assert len(rows) == 2
+
+
+async def test_reinsert_after_delete_wins_over_http(test_client_http: AsyncClient):
+    # upsert -> delete -> re-upsert through the real ingest endpoint; the latest
+    # write must win even after the delete has been compacted away.
+    for value, op in [("v1", "upsert"), ("v1", "delete"), ("v2", "upsert")]:
+        batch = make_batch([(500, "rk", value, op)])
+        res = await test_client_http.post(
+            "/data/ingest",
+            content=_serialize_batch(batch),
+            headers={"Content-Type": "application/vnd.apache.arrow.stream"},
+        )
+        assert res.status_code == 202
+    row = await _poll_for_value(test_client_http, 500, "v2")
+    assert row["value"] == "v2"

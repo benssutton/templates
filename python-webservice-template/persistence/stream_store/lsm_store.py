@@ -84,7 +84,14 @@ class LSMStore:
 
     def _compact(self) -> None:
         merged = _merge_frame(tuple(self._runs), self._key_columns)
-        self._runs = [merged] if merged is not None else []
+        if merged is None:
+            self._runs = []
+            return
+        # Full compaction collapses every run into one, so a delete tombstone has
+        # finished shadowing older versions and can be reclaimed here. A later
+        # re-insert of the same key arrives with a higher seqno and wins anyway.
+        merged = merged.filter(pl.col("op") != "delete")
+        self._runs = [merged] if merged.height > 0 else []
 
     def _publish(self) -> None:
         self._snapshot = _Snapshot(runs=tuple(self._runs),
