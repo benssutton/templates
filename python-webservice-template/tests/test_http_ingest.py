@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import threading
 import time
 
@@ -174,8 +175,6 @@ async def test_oversized_decoded_batch_is_dropped(
     postgres_container, clickhouse_container, test_clickhouse_client,
     redis_container, empty_flight_server, caplog,
 ):
-    import logging
-
     pg_port = int(postgres_container.get_exposed_port(5432))
     ch_port = int(clickhouse_container.get_exposed_port(8123))
     redis_port = int(redis_container.get_exposed_port(6379))
