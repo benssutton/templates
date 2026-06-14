@@ -48,9 +48,9 @@ def create_lifespan(settings: Settings, mcp: FastMCP):
             redis_client = await stack.enter_async_context(RedisClient(settings))
             container.register_singleton(CacheService, CacheService(redis_client))
 
+            # ClickHouseClient pings inside connect_with_backoff, so a live,
+            # smoke-tested client is guaranteed here (or startup has aborted).
             ch_client = await stack.enter_async_context(ClickHouseClient(settings))
-            if not await ch_client.ping():
-                raise RuntimeError("ClickHouse startup ping failed")
             container.register_singleton(DataService, DataService(ch_client))
 
             ConsumerClass = _CONSUMERS[settings.ingest_transport]

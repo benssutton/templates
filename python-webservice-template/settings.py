@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     # Ingestion transport selector
     ingest_transport: Literal["flight", "solace"] = "flight"
 
+    # Connection retry/backoff (Postgres, Redis, ClickHouse startup)
+    connect_max_attempts: int = 5
+    connect_base_delay: float = 1.0
+    connect_max_delay: float = 30.0
+
     # Observability
     metrics_enabled: bool = True
     health_check_timeout_seconds: float = 2.0                 # per-dependency ping timeout

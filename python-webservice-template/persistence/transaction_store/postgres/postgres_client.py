@@ -17,6 +17,9 @@ class PostgresClient:
                 max_size=self._settings.postgres_pool_max_size,
             ),
             label="Postgres",
+            max_attempts=self._settings.connect_max_attempts,
+            base_delay=self._settings.connect_base_delay,
+            max_delay=self._settings.connect_max_delay,
         )
         return self._pool
 

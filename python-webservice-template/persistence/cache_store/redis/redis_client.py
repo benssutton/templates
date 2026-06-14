@@ -15,7 +15,13 @@ class RedisClient:
             await client.ping()          # smoke-test: raises if Redis is unreachable
             return client
 
-        self._client = await connect_with_backoff(_connect, label="Redis")
+        self._client = await connect_with_backoff(
+            _connect,
+            label="Redis",
+            max_attempts=self._settings.connect_max_attempts,
+            base_delay=self._settings.connect_base_delay,
+            max_delay=self._settings.connect_max_delay,
+        )
         return self._client
 
     async def __aexit__(self, *_: object) -> None:
