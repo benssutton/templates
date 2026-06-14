@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     ingest_stale_fails_readiness: bool = False                # stale -> 503 only if True
     ingest_max_disconnect_seconds: float | None = 60.0        # non-CONNECTED longer than this -> SIGTERM; None disables
 
+    # Inbound size limits
+    max_request_body_bytes: int = 16 * 1024 * 1024     # 16 MiB; over-limit HTTP body -> 413
+    max_ingest_batch_bytes: int = 16 * 1024 * 1024     # 16 MiB; over-limit stream batch -> dropped+logged
+
     # Solace — only resolved when ingest_transport="solace"
     solace_host: str = "localhost"
     solace_port: int = 55555

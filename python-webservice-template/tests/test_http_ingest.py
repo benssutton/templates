@@ -145,6 +145,16 @@ async def test_lsm_query_limit_zero_returns_all_rows():
     assert len(rows) == 2
 
 
+async def test_post_ingest_oversized_body_returns_413(test_client_http: AsyncClient):
+    payload = b"\x00" * (17 * 1024 * 1024)   # > default 16 MiB
+    res = await test_client_http.post(
+        "/data/ingest",
+        content=payload,
+        headers={"Content-Type": "application/vnd.apache.arrow.stream"},
+    )
+    assert res.status_code == 413
+
+
 async def test_reinsert_after_delete_wins_over_http(test_client_http: AsyncClient):
     # upsert -> delete -> re-upsert through the real ingest endpoint; the latest
     # write must win even after the delete has been compacted away.

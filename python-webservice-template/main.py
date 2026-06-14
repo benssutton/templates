@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from mcp.server.fastmcp import FastMCP
 
 from core.container import Container
+from core.request_limits import MaxBodySizeMiddleware
 from settings import get_settings, Settings
 from persistence.analytics_store.clickhouse.clickhouse_client import ClickHouseClient
 from persistence.cache_store.redis.redis_client import RedisClient
@@ -94,6 +95,7 @@ def create_app(settings: Settings) -> FastAPI:
         lifespan=create_lifespan(settings, mcp),
     )
     app.state.container = container
+    app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_request_body_bytes)
 
     @app.middleware("http")
     async def _track_last_request(request, call_next):
