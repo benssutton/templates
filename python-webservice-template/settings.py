@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     max_request_body_bytes: int = 16 * 1024 * 1024     # 16 MiB; over-limit HTTP body -> 413
     max_ingest_batch_bytes: int = 16 * 1024 * 1024     # 16 MiB; over-limit stream batch -> dropped+logged
 
+    # Correlation ID header name (inbound adoption + response echo).
+    correlation_id_header: str = "X-Request-ID"
+
     # CORS — permissive by default for local UI dev; tighten per deployment.
     cors_allow_origins: list[str] = ["*"]
     cors_allow_methods: list[str] = ["*"]

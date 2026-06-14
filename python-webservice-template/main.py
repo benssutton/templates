@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from mcp.server.fastmcp import FastMCP
 
 from core.container import Container
+from core.correlation import CorrelationIdMiddleware
+from core.logging_config import configure_logging
 from core.request_limits import MaxBodySizeMiddleware
 from settings import get_settings, Settings
 from persistence.analytics_store.clickhouse.clickhouse_client import ClickHouseClient
@@ -79,6 +81,7 @@ def create_app(settings: Settings) -> FastAPI:
     (e.g. test apps with different transports running in the same pytest
     session).
     """
+    configure_logging()
     container = Container(settings)
 
     mcp = FastMCP(
@@ -109,6 +112,7 @@ def create_app(settings: Settings) -> FastAPI:
         allow_headers=settings.cors_allow_headers,
         allow_credentials=settings.cors_allow_credentials,
     )
+    app.add_middleware(CorrelationIdMiddleware, header_name=settings.correlation_id_header)
     # MaxBodySizeMiddleware must be LAST (outermost) — Starlette LIFO ordering.
     app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_request_body_bytes)
 
