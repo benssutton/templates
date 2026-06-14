@@ -95,12 +95,15 @@ def create_app(settings: Settings) -> FastAPI:
         lifespan=create_lifespan(settings, mcp),
     )
     app.state.container = container
-    app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_request_body_bytes)
 
     @app.middleware("http")
     async def _track_last_request(request, call_next):
         request.app.state.container.last_request_at = datetime.now(timezone.utc)
         return await call_next(request)
+
+    # Add last so it wraps all other middleware — Starlette applies add_middleware
+    # in LIFO order, making the last call the outermost layer at request time.
+    app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_request_body_bytes)
 
     app.include_router(health.router, prefix="/health")
     app.include_router(data.router, prefix="/data")

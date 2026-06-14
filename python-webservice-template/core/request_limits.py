@@ -43,6 +43,11 @@ class MaxBodySizeMiddleware:
         started = False
 
         async def guarded_send(message: Message) -> None:
+            # When Content-Length is absent (chunked upload), the route handler
+            # fully reads all chunks via counting_receive before calling send.
+            # The 413 is therefore returned AFTER the handler has processed the
+            # full body — trading wasted CPU for correct protocol semantics.
+            # The Content-Length fast-path above avoids this cost for standard clients.
             nonlocal started
             if too_large and not started:
                 await self._reject(send)
