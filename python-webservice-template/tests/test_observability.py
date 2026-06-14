@@ -292,6 +292,53 @@ async def test_streaming_assigns_distinct_per_batch_ids(
     assert len(cids) >= 2                # and a DISTINCT one per batch
 
 
+async def test_ingest_never_started_metric_is_nan():
+    """ingest_seconds_since_last_batch must be NaN (not 0.0) before the first
+    batch arrives so monitoring systems can distinguish 'never ingested' from
+    'just ingested'."""
+    import math
+    from schemas.health import (
+        AppInfo, DetailedStatusResponse, HostStats, IngestHealth,
+        ProcessStats, ProbeResult, RequestInfo, SystemSnapshot, UptimeInfo,
+    )
+    from services.metrics import MetricsService
+
+    class _FakeHealthService:
+        async def detailed_status(self):
+            return DetailedStatusResponse(
+                app=AppInfo(title="t", version="1", status="testing"),
+                uptime=UptimeInfo(process_seconds=1.0, system_boot_seconds=0.0),
+                dependencies=[],
+                ingest=IngestHealth(
+                    transport="flight",
+                    connection_state="connected",
+                    thread_alive=True,
+                    seconds_since_last_batch=None,
+                    rows_ingested_total=0,
+                ),
+                requests=RequestInfo(),
+                system=SystemSnapshot(
+                    process=ProcessStats(cpu_percent=0.0, memory_rss_bytes=0, num_threads=0, open_files=0),
+                    host=HostStats(cpu_percent=0.0, memory_total_bytes=0, memory_available_bytes=0, memory_percent=0.0),
+                ),
+            )
+
+    from settings import Settings
+    metrics = MetricsService(Settings())
+    await metrics.refresh(_FakeHealthService())
+
+    text = metrics.render()[0].decode()
+    secs_line = next(
+        (l for l in text.splitlines() if l.startswith("ingest_seconds_since_last_batch ")),
+        None,
+    )
+    assert secs_line is not None, "ingest_seconds_since_last_batch metric not found"
+    raw_value = secs_line.split(" ")[1]
+    assert math.isnan(float(raw_value)), (
+        f"expected NaN for never-ingested gauge, got {raw_value!r}"
+    )
+
+
 async def test_get_data_logs_clickhouse_timing(
     postgres_container, clickhouse_container, test_clickhouse_client,
     redis_container, streaming_flight_server, cid_caplog,
