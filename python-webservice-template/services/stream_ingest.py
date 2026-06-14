@@ -10,6 +10,7 @@ from typing import Callable
 
 import pyarrow as pa
 
+from core.correlation import new_id, set_correlation_id
 from ingestion.base import BatchConsumer, ConnectionState
 from persistence.stream_store.lsm_store import LSMStore
 from schemas.data import DataRowResponse, DataRowsResponse
@@ -79,6 +80,7 @@ class StreamIngestService:
         self._store.ingest(batch)
         self._last_batch_at = datetime.now(timezone.utc)
         self._rows_total += batch.num_rows
+        log.debug("ingested batch: rows=%d", batch.num_rows)
 
     def _ingest_loop(self) -> None:
         consecutive_failures = 0
@@ -91,6 +93,7 @@ class StreamIngestService:
                 for batch in self._consumer.batches():
                     consecutive_failures = 0
                     delay = _INGEST_BASE_DELAY
+                    set_correlation_id(new_id())     # per-batch ID for this thread's logs
                     try:
                         self._record_ingest(batch)
                     except Exception:

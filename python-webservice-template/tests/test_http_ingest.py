@@ -171,6 +171,25 @@ async def test_reinsert_after_delete_wins_over_http(test_client_http: AsyncClien
     assert row["value"] == "v2"
 
 
+async def test_http_ingest_propagates_request_id_to_store_write(
+    test_client_http: AsyncClient, cid_caplog,
+):
+    import logging
+    batch = make_batch([(201, "http", "v1", "upsert")])
+    with cid_caplog.at_level(logging.DEBUG):
+        res = await test_client_http.post(
+            "/data/ingest",
+            content=_serialize_batch(batch),
+            headers={
+                "Content-Type": "application/vnd.apache.arrow.stream",
+                "X-Request-ID": "req-xyz",
+            },
+        )
+    assert res.status_code == 202
+    ingest_logs = [r for r in cid_caplog.records if "ingested batch" in r.getMessage()]
+    assert ingest_logs and any(r.correlation_id == "req-xyz" for r in ingest_logs)
+
+
 async def test_oversized_decoded_batch_is_dropped(
     postgres_container, clickhouse_container, test_clickhouse_client,
     redis_container, empty_flight_server, caplog,

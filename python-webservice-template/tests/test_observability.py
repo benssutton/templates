@@ -243,3 +243,42 @@ async def test_dependency_down_fails_readiness(
             dedicated_redis.stop()
         except Exception:
             pass
+
+
+async def test_streaming_assigns_distinct_per_batch_ids(
+    postgres_container, clickhouse_container, test_clickhouse_client,
+    redis_container, streaming_flight_server, cid_caplog,
+):
+    import asyncio
+    import logging
+    settings = _settings(
+        postgres_container, clickhouse_container,
+        f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
+        streaming_flight_server.port, ingest_max_disconnect_seconds=None,
+    )
+    with cid_caplog.at_level(logging.DEBUG):
+        async with lifespan_test_client(settings) as client:
+            await _poll_ready(client, 200)
+            await asyncio.sleep(0.3)     # let several batches stream in
+    ingest_logs = [r for r in cid_caplog.records if "ingested batch" in r.getMessage()]
+    cids = {r.correlation_id for r in ingest_logs}
+    assert len(ingest_logs) >= 2
+    assert "-" not in cids               # every batch got a real ID
+    assert len(cids) >= 2                # and a DISTINCT one per batch
+
+
+async def test_get_data_logs_clickhouse_timing(
+    postgres_container, clickhouse_container, test_clickhouse_client,
+    redis_container, streaming_flight_server, cid_caplog,
+):
+    import logging
+    settings = _settings(
+        postgres_container, clickhouse_container,
+        f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
+        streaming_flight_server.port, ingest_max_disconnect_seconds=None,
+    )
+    with cid_caplog.at_level(logging.DEBUG, logger="core.correlation"):
+        async with lifespan_test_client(settings) as client:
+            resp = await client.get("/data?limit=5")
+            assert resp.status_code == 200
+    assert any("clickhouse.select" in r.getMessage() for r in cid_caplog.records)
