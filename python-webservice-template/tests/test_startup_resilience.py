@@ -1,6 +1,7 @@
 import time
 
 import pytest
+from testcontainers.redis import RedisContainer
 
 from settings import Settings
 from tests.app_client import lifespan_test_client
@@ -34,3 +35,21 @@ async def test_clickhouse_unreachable_aborts_startup_after_bounded_retries(
         async with lifespan_test_client(settings):
             pass
     assert time.monotonic() - start < 15.0  # retries ≤15ms total; 15s allows for container/ASGI startup overhead
+
+
+async def test_stock_redis_without_json_module_aborts_startup(postgres_container):
+    # Real Postgres + a real STOCK Redis (no RedisJSON). The real lifespan must
+    # fail fast at the Redis smoke-test with an actionable message — before it
+    # ever reaches ClickHouse/ingest.
+    with RedisContainer("redis:7") as stock:
+        pg_port = int(postgres_container.get_exposed_port(5432))
+        redis_port = int(stock.get_exposed_port(6379))
+        settings = Settings(
+            postgres_url=f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}",
+            redis_url=f"redis://localhost:{redis_port}/0",
+            connect_max_attempts=1,
+            ingest_max_disconnect_seconds=None,
+        )
+        with pytest.raises(Exception, match="RedisJSON"):
+            async with lifespan_test_client(settings):
+                pass
