@@ -65,7 +65,8 @@ class MetricsService:
         for state in ("connected", "reconnecting", "down"):
             self.ingest_state.labels(transport=ingest.transport, state=state).set(
                 1.0 if ingest.connection_state == state else 0.0)
-        self.ingest_secs.set(ingest.seconds_since_last_batch or 0.0)
+        secs = ingest.seconds_since_last_batch
+        self.ingest_secs.set(secs if secs is not None else float("nan"))
         self.ingest_rows.set(ingest.rows_ingested_total)
 
         proc = status.system.process

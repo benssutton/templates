@@ -10,6 +10,7 @@ from typing import Callable
 
 import pyarrow as pa
 
+from core.correlation import new_id, set_correlation_id, timed
 from ingestion.base import BatchConsumer, ConnectionState
 from persistence.stream_store.lsm_store import LSMStore
 from schemas.data import DataRowResponse, DataRowsResponse
@@ -69,9 +70,17 @@ class StreamIngestService:
             self._thread = None
 
     def _record_ingest(self, batch: pa.RecordBatch) -> None:
+        max_bytes = self._settings.max_ingest_batch_bytes
+        if batch.nbytes > max_bytes:
+            log.error(
+                "dropping ingest batch: %d bytes exceeds max_ingest_batch_bytes (%d)",
+                batch.nbytes, max_bytes,
+            )
+            return
         self._store.ingest(batch)
         self._last_batch_at = datetime.now(timezone.utc)
         self._rows_total += batch.num_rows
+        log.debug("ingested batch: rows=%d", batch.num_rows)
 
     def _ingest_loop(self) -> None:
         consecutive_failures = 0
@@ -84,6 +93,7 @@ class StreamIngestService:
                 for batch in self._consumer.batches():
                     consecutive_failures = 0
                     delay = _INGEST_BASE_DELAY
+                    set_correlation_id(new_id())     # per-batch ID for this thread's logs
                     try:
                         self._record_ingest(batch)
                     except Exception:
@@ -154,10 +164,12 @@ class StreamIngestService:
         )
 
     async def get_data(self, limit: int) -> DataRowsResponse:
-        rows, total = await asyncio.to_thread(self._store.query, limit)
+        async with timed("lsm.query"):
+            rows, total = await asyncio.to_thread(self._store.query, limit)
         return DataRowsResponse(
             rows=[DataRowResponse(**r) for r in rows], total=total, limit=limit
         )
 
     async def ingest_batch(self, batch: pa.RecordBatch) -> None:
-        await asyncio.to_thread(self._record_ingest, batch)
+        async with timed("ingest.lsm_write"):
+            await asyncio.to_thread(self._record_ingest, batch)

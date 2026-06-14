@@ -3,6 +3,7 @@ import time
 
 from clickhouse_connect.driver.asyncclient import AsyncClient
 
+from core.correlation import timed
 from schemas.data import DataRowResponse, DataRowsResponse
 from schemas.health import ProbeResult
 
@@ -14,13 +15,15 @@ class DataService:
         self._client = client
 
     async def get_data(self, limit: int) -> DataRowsResponse:
-        count_result = await self._client.query("SELECT count() FROM items")
+        async with timed("clickhouse.count"):
+            count_result = await self._client.query("SELECT count() FROM items")
         total = count_result.first_row[0]
 
-        result = await self._client.query(
-            "SELECT id, name, value FROM items LIMIT %(limit)s",
-            parameters={"limit": limit},
-        )
+        async with timed("clickhouse.select"):
+            result = await self._client.query(
+                "SELECT id, name, value FROM items LIMIT %(limit)s",
+                parameters={"limit": limit},
+            )
         rows = [
             DataRowResponse(id=row[0], name=row[1], value=row[2])
             for row in result.result_rows
@@ -45,9 +48,10 @@ class DataService:
             )
         except Exception as exc:
             latency_ms = (time.perf_counter() - start) * 1000
+            log.error("clickhouse health check failed: %s", exc)
             return ProbeResult(
                 name="clickhouse",
                 status="down",
                 latency_ms=round(latency_ms, 2),
-                error=str(exc),
+                error="unavailable",
             )

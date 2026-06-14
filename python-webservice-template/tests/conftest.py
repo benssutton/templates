@@ -126,3 +126,12 @@ async def test_client(
 
     async with lifespan_test_client(flight_settings) as client:
         yield client
+
+
+@pytest.fixture
+def cid_caplog(caplog):
+    """caplog with the production CorrelationIdFilter attached, so captured
+    records expose `record.correlation_id`. Real logging, no mocking."""
+    from core.correlation import CorrelationIdFilter
+    caplog.handler.addFilter(CorrelationIdFilter())
+    return caplog

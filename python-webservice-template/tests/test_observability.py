@@ -243,3 +243,121 @@ async def test_dependency_down_fails_readiness(
             dedicated_redis.stop()
         except Exception:
             pass
+
+
+async def test_health_probe_error_is_generic_not_leaky(
+    postgres_container, clickhouse_container, test_clickhouse_client, streaming_flight_server,
+):
+    dedicated_redis = RedisContainer(REDIS_IMAGE)
+    dedicated_redis.start()
+    try:
+        redis_url = f"redis://localhost:{int(dedicated_redis.get_exposed_port(6379))}/0"
+        settings = _settings(
+            postgres_container, clickhouse_container, redis_url, streaming_flight_server.port,
+        )
+        async with lifespan_test_client(settings) as client:
+            assert (await _poll_ready(client, 200)).status_code == 200
+            dedicated_redis.stop()
+            resp = await _poll_ready(client, 503, timeout=15.0)
+            assert resp.status_code == 503
+            redis_check = {c["name"]: c for c in resp.json()["checks"]}["redis"]
+            assert redis_check["status"] == "down"
+            # Two non-leaky paths can fire: CacheService catches the error and
+            # returns "unavailable"; or, when the dead connection hangs, the
+            # probe's wait_for trips first and returns "timeout". Both are
+            # intentional generic tokens — the point of the finding is that the
+            # raw exception string (host/port/errno) is never surfaced.
+            error = redis_check["error"]
+            assert error in {"unavailable", "timeout"}
+            assert "localhost" not in error and "Error" not in error
+    finally:
+        try:
+            dedicated_redis.stop()
+        except Exception:
+            pass
+
+
+async def test_streaming_assigns_distinct_per_batch_ids(
+    postgres_container, clickhouse_container, test_clickhouse_client,
+    redis_container, streaming_flight_server, cid_caplog,
+):
+    import asyncio
+    import logging
+    settings = _settings(
+        postgres_container, clickhouse_container,
+        f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
+        streaming_flight_server.port, ingest_max_disconnect_seconds=None,
+    )
+    with cid_caplog.at_level(logging.DEBUG):
+        async with lifespan_test_client(settings) as client:
+            await _poll_ready(client, 200)
+            await asyncio.sleep(0.3)     # let several batches stream in
+    ingest_logs = [r for r in cid_caplog.records if "ingested batch" in r.getMessage()]
+    cids = {r.correlation_id for r in ingest_logs}
+    assert len(ingest_logs) >= 2
+    assert "-" not in cids               # every batch got a real ID
+    assert len(cids) >= 2                # and a DISTINCT one per batch
+
+
+async def test_ingest_never_started_metric_is_nan():
+    """ingest_seconds_since_last_batch must be NaN (not 0.0) before the first
+    batch arrives so monitoring systems can distinguish 'never ingested' from
+    'just ingested'."""
+    import math
+    from schemas.health import (
+        AppInfo, DetailedStatusResponse, HostStats, IngestHealth,
+        ProcessStats, ProbeResult, RequestInfo, SystemSnapshot, UptimeInfo,
+    )
+    from services.metrics import MetricsService
+
+    class _FakeHealthService:
+        async def detailed_status(self):
+            return DetailedStatusResponse(
+                app=AppInfo(title="t", version="1", status="testing"),
+                uptime=UptimeInfo(process_seconds=1.0, system_boot_seconds=0.0),
+                dependencies=[],
+                ingest=IngestHealth(
+                    transport="flight",
+                    connection_state="connected",
+                    thread_alive=True,
+                    seconds_since_last_batch=None,
+                    rows_ingested_total=0,
+                ),
+                requests=RequestInfo(),
+                system=SystemSnapshot(
+                    process=ProcessStats(cpu_percent=0.0, memory_rss_bytes=0, num_threads=0, open_files=0),
+                    host=HostStats(cpu_percent=0.0, memory_total_bytes=0, memory_available_bytes=0, memory_percent=0.0),
+                ),
+            )
+
+    from settings import Settings
+    metrics = MetricsService(Settings())
+    await metrics.refresh(_FakeHealthService())
+
+    text = metrics.render()[0].decode()
+    secs_line = next(
+        (l for l in text.splitlines() if l.startswith("ingest_seconds_since_last_batch ")),
+        None,
+    )
+    assert secs_line is not None, "ingest_seconds_since_last_batch metric not found"
+    raw_value = secs_line.split(" ")[1]
+    assert math.isnan(float(raw_value)), (
+        f"expected NaN for never-ingested gauge, got {raw_value!r}"
+    )
+
+
+async def test_get_data_logs_clickhouse_timing(
+    postgres_container, clickhouse_container, test_clickhouse_client,
+    redis_container, streaming_flight_server, cid_caplog,
+):
+    import logging
+    settings = _settings(
+        postgres_container, clickhouse_container,
+        f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
+        streaming_flight_server.port, ingest_max_disconnect_seconds=None,
+    )
+    with cid_caplog.at_level(logging.DEBUG, logger="core.correlation"):
+        async with lifespan_test_client(settings) as client:
+            resp = await client.get("/data?limit=5")
+            assert resp.status_code == 200
+    assert any("clickhouse.select" in r.getMessage() for r in cid_caplog.records)

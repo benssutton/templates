@@ -4,9 +4,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from mcp.server.fastmcp import FastMCP
 
 from core.container import Container
+from core.correlation import CorrelationIdMiddleware
+from core.logging_config import configure_logging
+from core.boundary_timing import ServerTimingMiddleware
+from core.request_limits import MaxBodySizeMiddleware
 from settings import get_settings, Settings
 from persistence.analytics_store.clickhouse.clickhouse_client import ClickHouseClient
 from persistence.cache_store.redis.redis_client import RedisClient
@@ -48,9 +53,9 @@ def create_lifespan(settings: Settings, mcp: FastMCP):
             redis_client = await stack.enter_async_context(RedisClient(settings))
             container.register_singleton(CacheService, CacheService(redis_client))
 
+            # ClickHouseClient pings inside connect_with_backoff, so a live,
+            # smoke-tested client is guaranteed here (or startup has aborted).
             ch_client = await stack.enter_async_context(ClickHouseClient(settings))
-            if not await ch_client.ping():
-                raise RuntimeError("ClickHouse startup ping failed")
             container.register_singleton(DataService, DataService(ch_client))
 
             ConsumerClass = _CONSUMERS[settings.ingest_transport]
@@ -77,6 +82,7 @@ def create_app(settings: Settings) -> FastAPI:
     (e.g. test apps with different transports running in the same pytest
     session).
     """
+    configure_logging()
     container = Container(settings)
 
     mcp = FastMCP(
@@ -99,6 +105,22 @@ def create_app(settings: Settings) -> FastAPI:
     async def _track_last_request(request, call_next):
         request.app.state.container.last_request_at = datetime.now(timezone.utc)
         return await call_next(request)
+
+    # ServerTimingMiddleware is the first add_middleware call (innermost of this
+    # stack; the _track_last_request decorator above sits just inside it) — Starlette
+    # LIFO ordering — so `total` measures handler + downstream I/O time and all
+    # boundaries are captured.
+    app.add_middleware(ServerTimingMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_allow_origins,
+        allow_methods=settings.cors_allow_methods,
+        allow_headers=settings.cors_allow_headers,
+        allow_credentials=settings.cors_allow_credentials,
+    )
+    app.add_middleware(CorrelationIdMiddleware, header_name=settings.correlation_id_header)
+    # MaxBodySizeMiddleware must be LAST (outermost) — Starlette LIFO ordering.
+    app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_request_body_bytes)
 
     app.include_router(health.router, prefix="/health")
     app.include_router(data.router, prefix="/data")

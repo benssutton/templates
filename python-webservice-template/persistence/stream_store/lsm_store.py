@@ -1,3 +1,18 @@
+"""In-memory LSM (Log-Structured Merge) store for Arrow record batches.
+
+SINGLE-WRITER CONTRACT — LSMStore has no internal locking. It is designed
+to be written by exactly one thread (the ingest consumer thread started by
+StreamIngestService). Concurrent calls to `ingest()` produce undefined
+behaviour. Readers (`query()`) are safe to call from any thread or coroutine
+because `_publish()` swaps the snapshot reference atomically at the end of
+every write; readers always see a consistent, immutable snapshot.
+
+Lifecycle: memtable → run (flush) → compacted run.  When the number of runs
+reaches `compaction_runs`, all runs are merged into one. Compaction is the
+only point at which delete tombstones are reclaimed; a tombstone in the
+memtable or an un-compacted run continues to shadow older versions of the
+same key across all in-memory frames until a full merge has occurred.
+"""
 from dataclasses import dataclass
 
 import pyarrow as pa
@@ -84,7 +99,14 @@ class LSMStore:
 
     def _compact(self) -> None:
         merged = _merge_frame(tuple(self._runs), self._key_columns)
-        self._runs = [merged] if merged is not None else []
+        if merged is None:
+            self._runs = []
+            return
+        # Full compaction collapses every run into one, so a delete tombstone has
+        # finished shadowing older versions and can be reclaimed here. A later
+        # re-insert of the same key arrives with a higher seqno and wins anyway.
+        merged = merged.filter(pl.col("op") != "delete")
+        self._runs = [merged] if merged.height > 0 else []
 
     def _publish(self) -> None:
         self._snapshot = _Snapshot(runs=tuple(self._runs),

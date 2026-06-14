@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import threading
 import time
 
@@ -143,3 +144,82 @@ async def test_lsm_query_limit_zero_returns_all_rows():
     rows, total = store.query(limit=0)
     assert total == 2
     assert len(rows) == 2
+
+
+async def test_post_ingest_oversized_body_returns_413(test_client_http: AsyncClient):
+    payload = b"\x00" * (17 * 1024 * 1024)   # > default 16 MiB
+    res = await test_client_http.post(
+        "/data/ingest",
+        content=payload,
+        headers={"Content-Type": "application/vnd.apache.arrow.stream"},
+    )
+    assert res.status_code == 413
+
+
+async def test_reinsert_after_delete_wins_over_http(test_client_http: AsyncClient):
+    # upsert -> delete -> re-upsert through the real ingest endpoint; the latest
+    # write must win even after the delete has been compacted away.
+    for value, op in [("v1", "upsert"), ("v1", "delete"), ("v2", "upsert")]:
+        batch = make_batch([(500, "rk", value, op)])
+        res = await test_client_http.post(
+            "/data/ingest",
+            content=_serialize_batch(batch),
+            headers={"Content-Type": "application/vnd.apache.arrow.stream"},
+        )
+        assert res.status_code == 202
+    row = await _poll_for_value(test_client_http, 500, "v2")
+    assert row["value"] == "v2"
+
+
+async def test_http_ingest_propagates_request_id_to_store_write(
+    test_client_http: AsyncClient, cid_caplog,
+):
+    batch = make_batch([(201, "http", "v1", "upsert")])
+    with cid_caplog.at_level(logging.DEBUG):
+        res = await test_client_http.post(
+            "/data/ingest",
+            content=_serialize_batch(batch),
+            headers={
+                "Content-Type": "application/vnd.apache.arrow.stream",
+                "X-Request-ID": "req-xyz",
+            },
+        )
+    assert res.status_code == 202
+    ingest_logs = [r for r in cid_caplog.records if "ingested batch" in r.getMessage()]
+    assert ingest_logs and any(r.correlation_id == "req-xyz" for r in ingest_logs)
+
+
+async def test_oversized_decoded_batch_is_dropped(
+    postgres_container, clickhouse_container, test_clickhouse_client,
+    redis_container, empty_flight_server, caplog,
+):
+    pg_port = int(postgres_container.get_exposed_port(5432))
+    ch_port = int(clickhouse_container.get_exposed_port(8123))
+    redis_port = int(redis_container.get_exposed_port(6379))
+    settings = Settings(
+        status="testing",
+        postgres_url=f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}",
+        clickhouse_host="localhost", clickhouse_port=ch_port,
+        clickhouse_user=clickhouse_container.username or "default",
+        clickhouse_password=clickhouse_container.password or "",
+        clickhouse_database="default",
+        redis_url=f"redis://localhost:{redis_port}/0",
+        ingest_transport="flight", flight_host="localhost",
+        flight_port=empty_flight_server.port, flight_ticket="items",
+        lsm_flush_rows=2, lsm_compaction_runs=2,
+        max_request_body_bytes=16 * 1024 * 1024,   # large: let the body reach the handler
+        max_ingest_batch_bytes=1,                  # tiny: any decoded batch is "oversized"
+        ingest_max_disconnect_seconds=None,
+    )
+    batch = make_batch([(300, "big", "v1", "upsert")])
+    async with lifespan_test_client(settings) as client:
+        with caplog.at_level(logging.ERROR):
+            res = await client.post(
+                "/data/ingest",
+                content=_serialize_batch(batch),
+                headers={"Content-Type": "application/vnd.apache.arrow.stream"},
+            )
+        assert res.status_code == 202                       # endpoint accepts the request
+        body = (await client.get("/data/cache?limit=100")).json()
+        assert body["total"] == 0                           # but the batch was dropped
+    assert any("exceeds max_ingest_batch_bytes" in r.message for r in caplog.records)

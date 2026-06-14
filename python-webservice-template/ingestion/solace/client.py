@@ -87,7 +87,7 @@ class SolaceBatchConsumer:
             "solace.messaging.authentication.scheme.basic.username":
                 self._settings.solace_username,
             "solace.messaging.authentication.scheme.basic.password":
-                self._settings.solace_password,
+                self._settings.solace_password.get_secret_value(),
         }
         svc = MessagingService.builder().from_properties(props).build()
         svc.connect()
