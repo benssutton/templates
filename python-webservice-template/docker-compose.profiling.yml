@@ -1,0 +1,14 @@
+# Profiling override. Use alongside the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.profiling.yml up -d --build
+#
+# - SYS_PTRACE lets py-spy attach to the app process (Layer 2).
+# - FLIGHT_INTERVAL is raised so the stream source is effectively idle, making
+#   HTTP ingest the sole LSM writer during the ingest profile (single-writer
+#   contract) — see tests/performance/profile_ingest.js.
+services:
+  app:
+    cap_add:
+      - SYS_PTRACE
+  flight:
+    environment:
+      FLIGHT_INTERVAL: "3600"
