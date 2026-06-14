@@ -1,3 +1,5 @@
+import uuid
+
 import redis.asyncio as aioredis
 
 from core.retry import connect_with_backoff
@@ -32,16 +34,16 @@ class RedisClient:
         CacheService uses JSON.SET/JSON.GET; stock Redis returns 'unknown command'
         only at first write. Probing here surfaces the misconfiguration at startup.
         """
-        probe_key = "__startup_json_probe__"
+        probe_key = f"__startup_json_probe_{uuid.uuid4().hex}__"
         try:
             await client.json().set(probe_key, "$", {"ok": True})
-            await client.delete(probe_key)
         except aioredis.ResponseError as exc:
             raise RuntimeError(
                 "Redis is reachable but the RedisJSON module is missing. "
                 "This template's cache requires redis-stack (e.g. the "
                 "redis/redis-stack-server image). Original error: " + str(exc)
             ) from exc
+        await client.delete(probe_key)
 
     async def __aexit__(self, *_: object) -> None:
         if self._client is not None:
