@@ -15,13 +15,17 @@ for (const [endpoint, labels] of Object.entries(ENDPOINTS)) {
   }
 }
 
-// "clickhouse_select;dur=12.30, total;dur=15.00" -> { clickhouse_select: 12.3, total: 15.0 }
+// "clickhouse_select;dur=12.30, total;dur=15.00" -> { clickhouse_select: 12.3, total: 15 }
+// Finds the `dur` parameter anywhere in the entry, so an optional desc=… (the
+// fuller W3C Server-Timing grammar) does not drop the sample. Matches the
+// Python _render_header output and tolerates richer headers.
 export function parseServerTiming(header) {
   const out = {};
   if (!header) return out;
   for (const part of header.split(',')) {
-    const m = part.trim().match(/^([A-Za-z0-9_]+);dur=([0-9.]+)/);
-    if (m) out[m[1]] = parseFloat(m[2]);
+    const nameM = part.trim().match(/^([A-Za-z0-9_]+)/);
+    const durM = part.match(/(?:^|;)\s*dur=([0-9.]+)/);
+    if (nameM && durM) out[nameM[1]] = parseFloat(durM[1]);
   }
   return out;
 }
@@ -62,6 +66,7 @@ function attributionFor(data, endpoint) {
     });
   }
   const residual = Math.max(meanTotal - meanSum, 0);
+  // p95_ms is null: the p95 of a difference (total - sum of boundaries) is not a meaningful statistic.
   rows.push({ boundary: 'app_residual', mean_ms: round2(residual), p95_ms: null, share: round3(residual / meanTotal) });
   rows.sort((a, b) => b.mean_ms - a.mean_ms);
   return {

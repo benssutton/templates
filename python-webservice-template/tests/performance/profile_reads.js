@@ -1,4 +1,5 @@
 import http from 'k6/http';
+import { check } from 'k6';
 import { recordServerTiming, summarize } from './lib/serverTiming.js';
 import { NORMAL_SLO } from './lib/thresholds.js';
 
@@ -16,8 +17,13 @@ export const options = {
 };
 
 export default function () {
-  recordServerTiming(http.get(`${BASE}/data?limit=10`), 'data');
-  recordServerTiming(http.get(`${BASE}/data/cache?limit=10`), 'cache');
+  const dataRes = http.get(`${BASE}/data?limit=10`);
+  check(dataRes, { 'GET /data is 200': (r) => r.status === 200 });
+  recordServerTiming(dataRes, 'data');
+
+  const cacheRes = http.get(`${BASE}/data/cache?limit=10`);
+  check(cacheRes, { 'GET /data/cache is 200': (r) => r.status === 200 });
+  recordServerTiming(cacheRes, 'cache');
 }
 
 export function handleSummary(data) {

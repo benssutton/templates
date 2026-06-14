@@ -1,4 +1,5 @@
 import http from 'k6/http';
+import { check } from 'k6';
 import { recordServerTiming, summarize } from './lib/serverTiming.js';
 import { RELAXED_SLO } from './lib/thresholds.js';
 
@@ -25,6 +26,7 @@ export default function () {
   const res = http.post(`${BASE}/data/ingest`, PAYLOAD, {
     headers: { 'Content-Type': 'application/vnd.apache.arrow.stream' },
   });
+  check(res, { 'POST /data/ingest is 202': (r) => r.status === 202 });
   recordServerTiming(res, 'ingest');
 }
 
