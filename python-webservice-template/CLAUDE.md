@@ -76,6 +76,23 @@ settings.py                     Pydantic BaseSettings config; env vars override 
 **MCP**
 - MCP tools, resources and prompts implement minimal logic and call service methods.
 
+**Persistence -- LSM Stream Store**
+- `LSMStore` in `persistence/stream_store/lsm_store.py` is a **single-writer** data structure. The ingest consumer thread is the only writer; concurrent calls to `ingest()` produce undefined behaviour.
+- Readers (`query()`) are safe from any thread or coroutine: `_publish()` swaps the snapshot reference atomically, so readers always see a consistent, immutable snapshot.
+- Delete tombstones are reclaimed only during full compaction (when run count reaches `lsm_compaction_runs`). Until then, a tombstone in the memtable or an un-compacted run shadows older versions of the same key.
+
+**Inbound Size Policy**
+- Two independent limits guard against oversized payloads:
+  1. **HTTP body limit** (`max_request_body_bytes`, default 16 MiB): enforced by `core/request_limits.MaxBodySizeMiddleware` — the outermost middleware. Returns 413 before the route handler runs (or after body drain for chunked uploads without `Content-Length`).
+  2. **Decoded batch limit** (`max_ingest_batch_bytes`, default 16 MiB): enforced in `services/stream_ingest._record_ingest`. A batch that exceeds this after Arrow IPC decoding is dropped and logged at ERROR level; the request still returns 202 so the caller is not retried.
+- Both limits are `Settings` fields and can be tuned per deployment or per-test without code changes.
+
+**Security Posture**
+- All credential-bearing settings (`postgres_url`, `clickhouse_password`, `redis_url`, `solace_password`) use Pydantic `SecretStr`. Their values are never included in `repr()`, `str()`, or log output. Call `.get_secret_value()` only at the call site that actually needs the raw string.
+- Health-probe endpoints (`/health/ready`, `/health/status`) return `error: "unavailable"` for failed dependency checks — never raw exception strings. Full detail is logged server-side at ERROR level.
+- CORS defaults to `cors_allow_origins=["*"]` which is appropriate for local development. Tighten per deployment by setting specific origins; `cors_allow_credentials=True` is rejected by a `@model_validator` when `"*"` is in the origins list.
+- RedisJSON is a required capability of the Redis instance. The startup smoke-test (`RedisClient._assert_json_module`) probes `JSON.SET` and raises `RuntimeError` if the module is absent, preventing silent data-loss at runtime.
+
 **Testing**
 - Tests invoke REST endpoints via an async HTTPX test client.
 - Each client fixture builds its own isolated app with `tests/app_client.py::lifespan_test_client(settings)` — the helper calls `main.create_app(settings)`, runs the lifespan in a dedicated task (anyio cancel scopes must enter/exit in one task), and fails fast if startup raises rather than hanging on a readiness event.
