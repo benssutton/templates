@@ -5,6 +5,8 @@ import pytest
 from settings import Settings
 from tests.app_client import lifespan_test_client
 
+pytestmark = pytest.mark.resilience
+
 
 async def test_clickhouse_unreachable_aborts_startup_after_bounded_retries(
     postgres_container, redis_container,
@@ -25,7 +27,10 @@ async def test_clickhouse_unreachable_aborts_startup_after_bounded_retries(
         ingest_max_disconnect_seconds=None,
     )
     start = time.monotonic()
+    # Broad Exception: connect_with_backoff re-raises the last attempt's
+    # exception, which varies by library version (aiohttp, clickhouse_connect).
+    # The assertion below validates the test does not hang, which is the core invariant.
     with pytest.raises(Exception):
         async with lifespan_test_client(settings):
             pass
-    assert time.monotonic() - start < 30.0   # retried quickly, did not hang
+    assert time.monotonic() - start < 15.0  # retries ≤15ms total; 15s allows for container/ASGI startup overhead

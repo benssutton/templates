@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,9 +45,9 @@ class Settings(BaseSettings):
     ingest_transport: Literal["flight", "solace"] = "flight"
 
     # Connection retry/backoff (Postgres, Redis, ClickHouse startup)
-    connect_max_attempts: int = 5
-    connect_base_delay: float = 1.0
-    connect_max_delay: float = 30.0
+    connect_max_attempts: int = Field(5, ge=1)
+    connect_base_delay: float = Field(1.0, ge=0)
+    connect_max_delay: float = Field(30.0, ge=0)
 
     # Observability
     metrics_enabled: bool = True
