@@ -3,6 +3,8 @@ import logging
 import pyarrow as pa
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from core.correlation import timed
+
 from core.dependencies import DataServiceDep, StreamIngestServiceDep
 from schemas.data import DataRowsResponse
 
@@ -40,9 +42,11 @@ async def ingest_batch(
 ) -> dict:
     body = await request.body()
     try:
-        reader = pa.ipc.open_stream(pa.BufferReader(body))
-        for batch in reader:
-            await svc.ingest_batch(batch)
+        async with timed("ingest.decode"):
+            reader = pa.ipc.open_stream(pa.BufferReader(body))
+            batches = list(reader)        # force full decode inside the timed block
     except pa.ArrowInvalid as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    for batch in batches:
+        await svc.ingest_batch(batch)
     return {"accepted": True}

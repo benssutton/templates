@@ -10,7 +10,7 @@ from typing import Callable
 
 import pyarrow as pa
 
-from core.correlation import new_id, set_correlation_id
+from core.correlation import new_id, set_correlation_id, timed
 from ingestion.base import BatchConsumer, ConnectionState
 from persistence.stream_store.lsm_store import LSMStore
 from schemas.data import DataRowResponse, DataRowsResponse
@@ -164,10 +164,12 @@ class StreamIngestService:
         )
 
     async def get_data(self, limit: int) -> DataRowsResponse:
-        rows, total = await asyncio.to_thread(self._store.query, limit)
+        async with timed("lsm.query"):
+            rows, total = await asyncio.to_thread(self._store.query, limit)
         return DataRowsResponse(
             rows=[DataRowResponse(**r) for r in rows], total=total, limit=limit
         )
 
     async def ingest_batch(self, batch: pa.RecordBatch) -> None:
-        await asyncio.to_thread(self._record_ingest, batch)
+        async with timed("ingest.lsm_write"):
+            await asyncio.to_thread(self._record_ingest, batch)
