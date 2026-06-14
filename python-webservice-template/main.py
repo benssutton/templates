@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from mcp.server.fastmcp import FastMCP
 
 from core.container import Container
@@ -101,8 +102,14 @@ def create_app(settings: Settings) -> FastAPI:
         request.app.state.container.last_request_at = datetime.now(timezone.utc)
         return await call_next(request)
 
-    # Add last so it wraps all other middleware — Starlette applies add_middleware
-    # in LIFO order, making the last call the outermost layer at request time.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_allow_origins,
+        allow_methods=settings.cors_allow_methods,
+        allow_headers=settings.cors_allow_headers,
+        allow_credentials=settings.cors_allow_credentials,
+    )
+    # MaxBodySizeMiddleware must be LAST (outermost) — Starlette LIFO ordering.
     app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_request_body_bytes)
 
     app.include_router(health.router, prefix="/health")
