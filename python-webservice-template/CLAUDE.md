@@ -109,6 +109,12 @@ settings.py                     Pydantic BaseSettings config; env vars override 
 - k6 is run via a `tests/performance/Dockerfile` image built in CI -- avoids docker:dind volume-mount issues.
 - The docker-compose project is named `python-template` so the network is always `python-template_default`.
 
+**Performance Profiling**
+- Two-layer bottleneck triage; see `docs/superpowers/perf-profiling-runbook.md`.
+- Layer 1 (every run, report-only): `core/boundary_timing.py` emits a W3C `Server-Timing` response header built from `timed()` boundary samples held in a request-scoped `ContextVar`; `tests/performance/profile_reads.js` and `profile_ingest.js` parse it into a ranked per-endpoint attribution table + `attribution.json`.
+- Layer 2 (on demand): `tests/performance/profile/run_pyspy.sh` attaches py-spy to the app container (needs `docker-compose.profiling.yml` for the `SYS_PTRACE` cap) and emits flamegraphs that classify CPU/GIL- vs I/O-bound contention.
+- Boundary samples are request-scoped, so background work (the streaming ingest thread) never pollutes a request's header and multiple isolated test apps cannot collide.
+
 **SQL Management**
 - `scripts/postgres-init.sql` -- DDL only (CREATE TABLE IF NOT EXISTS). Run by the app lifespan at startup and by pytest via `postgres_pool` fixture.
 - `scripts/clickhouse-init.sql` -- DDL only (CREATE TABLE). Used by both docker-compose and pytest.
