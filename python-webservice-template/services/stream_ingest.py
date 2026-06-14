@@ -69,6 +69,13 @@ class StreamIngestService:
             self._thread = None
 
     def _record_ingest(self, batch: pa.RecordBatch) -> None:
+        max_bytes = self._settings.max_ingest_batch_bytes
+        if batch.nbytes > max_bytes:
+            log.error(
+                "dropping ingest batch: %d bytes exceeds max_ingest_batch_bytes (%d)",
+                batch.nbytes, max_bytes,
+            )
+            return
         self._store.ingest(batch)
         self._last_batch_at = datetime.now(timezone.utc)
         self._rows_total += batch.num_rows
