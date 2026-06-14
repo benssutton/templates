@@ -262,7 +262,14 @@ async def test_health_probe_error_is_generic_not_leaky(
             assert resp.status_code == 503
             redis_check = {c["name"]: c for c in resp.json()["checks"]}["redis"]
             assert redis_check["status"] == "down"
-            assert redis_check["error"] == "unavailable"
+            # Two non-leaky paths can fire: CacheService catches the error and
+            # returns "unavailable"; or, when the dead connection hangs, the
+            # probe's wait_for trips first and returns "timeout". Both are
+            # intentional generic tokens — the point of the finding is that the
+            # raw exception string (host/port/errno) is never surfaced.
+            error = redis_check["error"]
+            assert error in {"unavailable", "timeout"}
+            assert "localhost" not in error and "Error" not in error
     finally:
         try:
             dedicated_redis.stop()
