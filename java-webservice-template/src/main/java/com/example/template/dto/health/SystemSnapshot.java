@@ -1,0 +1,6 @@
+package com.example.template.dto.health;
+
+import io.micronaut.serde.annotation.Serdeable;
+
+@Serdeable
+public record SystemSnapshot(ProcessStats process, HostStats host) {}
