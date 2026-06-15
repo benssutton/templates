@@ -28,6 +28,10 @@ endpoints:
   prometheus:
     enabled: true
     sensitive: false
+  # Our /metrics controller serves the Prometheus scrape; disable the management
+  # JSON metrics endpoint so it does not collide on the /metrics path.
+  metrics:
+    enabled: false
 
 template:
   app-title: "Template Micronaut Service"
