@@ -19,6 +19,9 @@
     <release.version>25</release.version>
     <maven.compiler.release>25</maven.compiler.release>
     <micronaut.version>5.0.2</micronaut.version>
+    <!-- Override the platform BOM's testcontainers.version (2.0.5), which is not
+         published to Maven Central; only the 1.x line exists. -->
+    <testcontainers.version>1.21.3</testcontainers.version>
     <micronaut.runtime>netty</micronaut.runtime>
     <micronaut.aot.enabled>false</micronaut.aot.enabled>
     <micronaut.aot.packageName>com.example.template.aot.generated</micronaut.aot.packageName>
