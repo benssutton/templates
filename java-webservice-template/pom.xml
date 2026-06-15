@@ -22,6 +22,12 @@
     <!-- Override the platform BOM's testcontainers.version (2.0.5), which is not
          published to Maven Central; only the 1.x line exists. -->
     <testcontainers.version>1.21.3</testcontainers.version>
+    <!-- Pin gRPC to the version Arrow Flight 18.1.0 was built against. The Micronaut
+         5.0.2 platform BOM manages grpc.version to 1.80.0, which removed
+         io.grpc.internal.ReadableBuffer.readBytes(ByteBuffer) — a method flight-core
+         18.1.0's GetReadableBuffer still calls, so streams fail with
+         "CANCELLED: Failed to read message" (NoSuchMethodError). 1.69.0 restores it. -->
+    <grpc.version>1.69.0</grpc.version>
     <micronaut.runtime>netty</micronaut.runtime>
     <micronaut.aot.enabled>false</micronaut.aot.enabled>
     <micronaut.aot.packageName>com.example.template.aot.generated</micronaut.aot.packageName>
@@ -220,6 +226,26 @@
     </dependency>
 
   </dependencies>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- Force the whole gRPC stack (api/core/netty/stub/protobuf) to a single
+           version compatible with Arrow Flight 18.1.0. The Micronaut 5.0.2 platform
+           BOM manages gRPC to 1.80.0, which removed
+           io.grpc.internal.ReadableBuffer.readBytes(ByteBuffer) — still called by
+           flight-core 18.1.0's GetReadableBuffer, causing Flight reads to fail with
+           "CANCELLED: Failed to read message" (NoSuchMethodError). The grpc-bom keeps
+           every io.grpc artifact aligned (a mixed set is its own source of breakage). -->
+      <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-bom</artifactId>
+        <version>${grpc.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
   <build>
     <plugins>
       <plugin>
