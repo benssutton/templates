@@ -361,14 +361,50 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
-          <!-- Apache Arrow needs direct nio access on modern JDKs. -->
-          <argLine>--add-opens=java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow</argLine>
+          <!-- @{argLine} carries the JaCoCo agent (prepended by jacoco:prepare-agent);
+               the rest gives Apache Arrow direct nio access on modern JDKs. -->
+          <argLine>@{argLine} --add-opens=java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow</argLine>
           <systemPropertyVariables>
             <!-- Probe a Docker API version the engine accepts (Docker 29 dropped v1.32,
                  which Testcontainers 1.21.3 falls back to). Harmless on Linux/CI. -->
             <api.version>1.43</api.version>
           </systemPropertyVariables>
         </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>0.8.12</version>
+        <executions>
+          <execution>
+            <id>prepare</id>
+            <goals><goal>prepare-agent</goal></goals>
+          </execution>
+          <execution>
+            <id>check</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>LINE</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>0.70</minimum>
+                    </limit>
+                  </limits>
+                  <excludes>
+                    <exclude>com.example.template.Application</exclude>
+                    <exclude>com.example.template.flightserver.*</exclude>
+                  </excludes>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>

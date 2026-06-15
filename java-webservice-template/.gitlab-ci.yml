@@ -1,0 +1,49 @@
+stages: [test, perf]
+
+variables:
+  MAVEN_OPTS: "-Dmaven.repo.local=.m2/repository"
+
+cache:
+  paths: [.m2/repository]
+
+build-test:
+  stage: test
+  image: eclipse-temurin:25-jdk
+  services:
+    - docker:dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    TESTCONTAINERS_HOST_OVERRIDE: docker
+    TESTCONTAINERS_RYUK_DISABLED: "true"
+  script:
+    - cd java-webservice-template
+    - ./mvnw -B verify
+  artifacts:
+    when: always
+    reports:
+      junit: java-webservice-template/target/surefire-reports/TEST-*.xml
+
+.k6:
+  stage: perf
+  image: docker:latest
+  services: [docker:dind]
+  script:
+    - cd java-webservice-template
+    - docker compose up -d --build --wait
+    - docker build -t perf-scripts ./tests/performance
+    - docker run --rm --network java-template_default -e BASE_URL=https://app perf-scripts run "/scripts/$SCRIPT"
+  after_script:
+    - cd java-webservice-template && docker compose down -v
+
+k6-smoke:
+  extends: .k6
+  variables: { SCRIPT: smoke.js }
+
+k6-load:
+  extends: .k6
+  variables: { SCRIPT: load.js }
+
+k6-stress:
+  extends: .k6
+  allow_failure: true
+  variables: { SCRIPT: stress.js }

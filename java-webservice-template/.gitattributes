@@ -1,0 +1,5 @@
+# Shell scripts run inside Linux containers and via Git Bash; CRLF breaks the
+# shebang, so force LF regardless of the developer's core.autocrlf.
+*.sh text eol=lf
+*.sql text eol=lf
+mvnw text eol=lf

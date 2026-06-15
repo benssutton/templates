@@ -1,0 +1,45 @@
+name: java-template
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: appdb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    volumes:
+      - ./src/main/resources/db/clickhouse-init.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./scripts/clickhouse-seed.sh:/docker-entrypoint-initdb.d/02-seed.sh
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+  redis:
+    image: redis/redis-stack-server:latest
+  flight:
+    image: java-template-app
+    command: ["java", "-cp", "app.jar", "com.example.template.flightserver.ExampleFlightServer"]
+    environment:
+      FLIGHT_PORT: "8815"
+  app:
+    image: java-template-app
+    build: .
+    depends_on:
+      postgres: { condition: service_healthy }
+      clickhouse: { condition: service_started }
+      redis: { condition: service_started }
+      flight: { condition: service_started }
+    ports:
+      - "443:443"
+    environment:
+      MICRONAUT_ENVIRONMENTS: docker
+      INGEST_TRANSPORT: flight
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsk https://localhost/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15

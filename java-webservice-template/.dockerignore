@@ -1,0 +1,4 @@
+target/
+certs/*.p12
+.git/
+tests/performance/profile/artifacts/

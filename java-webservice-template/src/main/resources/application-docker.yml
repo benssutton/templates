@@ -1,0 +1,23 @@
+micronaut:
+  server:
+    ssl:
+      enabled: true
+      port: 443
+      key-store:
+        path: file:/app/certs/keystore.p12
+        type: PKCS12
+        password: ${KEYSTORE_PASSWORD:changeit}
+
+datasources:
+  default:
+    url: jdbc:postgresql://postgres:5432/appdb
+  clickhouse:
+    url: jdbc:ch://clickhouse:8123/default
+
+redis:
+  uri: redis://redis:6379/0
+
+template:
+  ingest:
+    flight:
+      host: flight
