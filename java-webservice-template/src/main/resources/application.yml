@@ -1,0 +1,16 @@
+micronaut:
+  application:
+    name: java-template
+  server:
+    port: ${SERVER_PORT:8080}
+
+datasources:
+  default:
+    url: ${POSTGRES_URL:`jdbc:postgresql://localhost:5432/appdb`}
+    username: ${POSTGRES_USER:appuser}
+    password: ${POSTGRES_PASSWORD:password}
+    driver-class-name: org.postgresql.Driver
+    dialect: POSTGRES
+    schema-generate: NONE
+    minimum-idle: 2
+    maximum-pool-size: 10
