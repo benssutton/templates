@@ -48,4 +48,7 @@ Observability
 
 The Python Webservice under python-webservice-template is ready for use.
 
+The Java Webservice under java-webservice-template is ready for use — a Micronaut
+(Java 25) mirror of the Python template with the same endpoints and feature set.
+
 Other templates that might show in this repo are still works-in-progress.

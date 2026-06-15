@@ -69,13 +69,15 @@ class SolaceBatchConsumerTest {
             consumeThread.setDaemon(true);
             consumeThread.start();
 
-            // Give the receiver a moment to establish its subscription before publishing.
-            await().atMost(10, SECONDS).until(() ->
+            // Wait for the service connection, then republish until the consumer
+            // receives a message. Direct messaging is fire-and-forget: a message
+            // published before the receiver's subscription is fully established is
+            // dropped, so a single shot is racy under load. Resending until received
+            // is the robust contract.
+            await().atMost(20, SECONDS).until(() ->
                 consumer.connectionState() == com.example.template.ingestion.ConnectionState.CONNECTED);
 
-            publishOneArrowMessage(smf);
-
-            await().atMost(20, SECONDS).until(() -> !collected.isEmpty());
+            publishUntilReceived(smf, collected);
         } finally {
             consumer.close();
         }
@@ -84,7 +86,7 @@ class SolaceBatchConsumerTest {
         assertThat(collected).anyMatch(r -> r.id() == 5L);
     }
 
-    private static void publishOneArrowMessage(URI smf) throws Exception {
+    private static void publishUntilReceived(URI smf, List<LsmRow> collected) throws Exception {
         Properties props = new Properties();
         props.setProperty("solace.messaging.transport.host", "tcp://" + smf.getHost() + ":" + smf.getPort());
         props.setProperty("solace.messaging.service.vpn-name", VPN);
@@ -100,12 +102,13 @@ class SolaceBatchConsumerTest {
                 .build()
                 .start();
             try {
-                publisher.publish(
-                    service.messageBuilder().build(arrowBytes()),
-                    Topic.of(TOPIC));
+                byte[] payload = arrowBytes();
+                long deadline = System.currentTimeMillis() + 60_000;
+                while (collected.isEmpty() && System.currentTimeMillis() < deadline) {
+                    publisher.publish(service.messageBuilder().build(payload), Topic.of(TOPIC));
+                    Thread.sleep(1_500);
+                }
             } finally {
-                // Grace period so the async send flushes to the broker before the
-                // producer is torn down (terminate(0) would close it immediately).
                 publisher.terminate(5_000);
             }
         } finally {
