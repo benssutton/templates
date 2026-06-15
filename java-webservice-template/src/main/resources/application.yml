@@ -3,6 +3,42 @@ micronaut:
     name: java-template
   server:
     port: ${SERVER_PORT:8080}
+    max-request-size: 16MB
+    cors:
+      enabled: true
+      configurations:
+        default:
+          allowed-origins:
+            - "*"
+  metrics:
+    enabled: true
+    binders:
+      jvm:
+        enabled: true
+      processor:
+        enabled: true
+      uptime:
+        enabled: true
+    export:
+      prometheus:
+        enabled: true
+        step: PT1M
+
+endpoints:
+  prometheus:
+    enabled: true
+    sensitive: false
+
+template:
+  app-title: "Template Micronaut Service"
+  app-version: "1.0.0"
+  app-description: "A Java Micronaut service mirroring the Python webservice template"
+  status: "running"
+  correlation-id-header: "X-Request-ID"
+  health-check-timeout-seconds: 2.0
+  max-request-body-bytes: 16777216
+  mcp-name: "java-template"
+  mcp-instructions: "Tools for this template application."
 
 datasources:
   default:

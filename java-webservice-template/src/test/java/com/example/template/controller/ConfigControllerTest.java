@@ -2,6 +2,7 @@ package com.example.template.controller;
 
 import com.example.template.dto.ConfigEntry;
 import com.example.template.dto.ConfigSetRequest;
+import com.example.template.support.PostgresTestSupport;
 import io.micronaut.core.type.Argument;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpResponse;
@@ -9,39 +10,15 @@ import io.micronaut.http.HttpStatus;
 import io.micronaut.http.client.HttpClient;
 import io.micronaut.http.client.annotation.Client;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
-import io.micronaut.test.support.TestPropertyProvider;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @MicronautTest
-@Testcontainers
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class ConfigControllerTest implements TestPropertyProvider {
-
-    @Container
-    static final PostgreSQLContainer<?> POSTGRES =
-        new PostgreSQLContainer<>("postgres:16-alpine");
-
-    @Override
-    public Map<String, String> getProperties() {
-        if (!POSTGRES.isRunning()) {
-            POSTGRES.start();
-        }
-        return Map.of(
-            "datasources.default.url", POSTGRES.getJdbcUrl(),
-            "datasources.default.username", POSTGRES.getUsername(),
-            "datasources.default.password", POSTGRES.getPassword()
-        );
-    }
+class ConfigControllerTest extends PostgresTestSupport {
 
     @Inject
     @Client("/")
@@ -66,13 +43,13 @@ class ConfigControllerTest implements TestPropertyProvider {
 
     @Test
     void postIsUpsert() {
-        client.toBlocking().exchange(HttpRequest.POST("/config", new ConfigSetRequest("k", "v1")));
-        client.toBlocking().exchange(HttpRequest.POST("/config", new ConfigSetRequest("k", "v2")));
+        client.toBlocking().exchange(HttpRequest.POST("/config", new ConfigSetRequest("upsertKey", "v1")));
+        client.toBlocking().exchange(HttpRequest.POST("/config", new ConfigSetRequest("upsertKey", "v2")));
 
         List<ConfigEntry> all = client.toBlocking().retrieve(
             HttpRequest.GET("/config"),
             Argument.listOf(ConfigEntry.class));
-        assertThat(all.stream().filter(e -> e.key().equals("k")).map(ConfigEntry::value).toList())
+        assertThat(all.stream().filter(e -> e.key().equals("upsertKey")).map(ConfigEntry::value).toList())
             .containsExactly("v2");
     }
 }
