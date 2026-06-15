@@ -127,6 +127,34 @@
     </dependency>
 
     <dependency>
+      <groupId>org.apache.arrow</groupId>
+      <artifactId>arrow-vector</artifactId>
+      <version>18.1.0</version>
+      <scope>compile</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.arrow</groupId>
+      <artifactId>arrow-memory-netty</artifactId>
+      <version>18.1.0</version>
+      <scope>runtime</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.arrow</groupId>
+      <artifactId>flight-core</artifactId>
+      <version>18.1.0</version>
+      <scope>compile</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>com.solace</groupId>
+      <artifactId>solace-messaging-client</artifactId>
+      <version>1.10.0</version>
+      <scope>compile</scope>
+    </dependency>
+
+    <dependency>
       <groupId>io.micronaut</groupId>
       <artifactId>micronaut-http-client</artifactId>
       <scope>test</scope>
@@ -168,6 +196,20 @@
       <groupId>org.testcontainers</groupId>
       <artifactId>clickhouse</artifactId>
       <version>${testcontainers.version}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>solace</artifactId>
+      <version>${testcontainers.version}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.awaitility</groupId>
+      <artifactId>awaitility</artifactId>
+      <version>4.2.2</version>
       <scope>test</scope>
     </dependency>
 
@@ -293,6 +335,8 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
+          <!-- Apache Arrow needs direct nio access on modern JDKs. -->
+          <argLine>--add-opens=java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow</argLine>
           <systemPropertyVariables>
             <!-- Probe a Docker API version the engine accepts (Docker 29 dropped v1.32,
                  which Testcontainers 1.21.3 falls back to). Harmless on Linux/CI. -->
