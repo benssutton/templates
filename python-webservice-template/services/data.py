@@ -40,11 +40,13 @@ class DataService:
                 return ProbeResult(
                     name="clickhouse", status="up", latency_ms=round(latency_ms, 2)
                 )
+            # Generic token, consistent with the exception path below and the
+            # documented health-probe contract (never a probe-specific string).
             return ProbeResult(
                 name="clickhouse",
                 status="down",
                 latency_ms=round(latency_ms, 2),
-                error="ping returned False",
+                error="unavailable",
             )
         except Exception as exc:
             latency_ms = (time.perf_counter() - start) * 1000

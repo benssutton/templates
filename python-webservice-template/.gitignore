@@ -15,6 +15,9 @@ __pycache__/
 htmlcov/
 test_run_output.txt
 
+# Performance profiling artifacts — generated locally by run_pyspy.sh, never committed
+tests/performance/profile/artifacts/
+
 # TLS material — generated locally by certs/generate_self_signed_cert.py, never committed
 *.pem
 

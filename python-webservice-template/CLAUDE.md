@@ -28,10 +28,10 @@ settings.py                     Pydantic BaseSettings config; env vars override 
   services/                     All business logic (health, data, config)
   tests/                        Pytest integration tests + k6 performance tests
     test_data/                  Binary test fixtures (clickhouse_seed_data.ipc) + fixture generator notebook
-    example_server.py           Reusable dummy Flight server used by tests and docker-compose
+    publishers/                 Reusable dummy publishers used by tests and docker-compose (flight_server.py, solace_publisher.py)
     performance/                k6 performance test scripts
       lib/                      Shared k6 check helpers and SLO threshold presets
-      data/                     k6 test data (rows_params.json, clickhouse-seed.sql)
+      data/                     k6 test data (rows_params.json, clickhouse-seed.sh)
 ```
 
 ## Stack
@@ -118,8 +118,8 @@ settings.py                     Pydantic BaseSettings config; env vars override 
 **SQL Management**
 - `scripts/postgres-init.sql` -- DDL only (CREATE TABLE IF NOT EXISTS). Run by the app lifespan at startup and by pytest via `postgres_pool` fixture.
 - `scripts/clickhouse-init.sql` -- DDL only (CREATE TABLE). Used by both docker-compose and pytest.
-- `tests/performance/data/clickhouse-seed.sql` -- DML only (INSERT). Used by docker-compose for performance test data.
-- docker-compose mounts the ClickHouse scripts as `01-schema.sql` and `02-seed.sql` so ClickHouse runs them in order.
+- `tests/performance/data/clickhouse-seed.sh` -- shell script that bulk-loads the Arrow IPC fixture (`clickhouse_seed_data.ipc`) via `clickhouse-client ... FORMAT Arrow`. Used by docker-compose for performance test data.
+- docker-compose mounts the ClickHouse scripts as `01-schema.sql` and `02-seed.sh` so ClickHouse runs them in order.
 
 ## Database Investigation
 
