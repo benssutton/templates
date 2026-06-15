@@ -1,6 +1,8 @@
 package com.example.template.persistence;
 
+import io.micronaut.context.annotation.Requires;
 import io.micronaut.context.event.StartupEvent;
+import io.micronaut.data.connection.jdbc.advice.DelegatingDataSource;
 import io.micronaut.runtime.event.annotation.EventListener;
 import jakarta.inject.Singleton;
 
@@ -15,6 +17,10 @@ import java.sql.Statement;
  * Mirrors the Python lifespan running the same DDL file, keeping the SQL as the
  * single source of truth shared with docker-compose.
  */
+// Only wire schema setup when a DataSource is actually present. Context-only tests
+// (and any deployment running without a configured datasource) disable the datasource,
+// in which case there is no schema to create and this listener must not be required.
+@Requires(beans = DataSource.class)
 @Singleton
 public class SchemaInitializer {
 
@@ -33,7 +39,13 @@ public class SchemaInitializer {
             }
             sql = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
-        try (Connection conn = dataSource.getConnection();
+        // When micronaut-data-jdbc is on the classpath the injected DataSource is a
+        // transaction-aware ContextualConnection proxy whose connections require an
+        // active @Connectable/@Transactional scope. Schema setup runs outside any such
+        // scope, so unwrap to the underlying pool DataSource to obtain a real JDBC
+        // connection for the one-off DDL execution.
+        DataSource rawDataSource = DelegatingDataSource.unwrapDataSource(dataSource);
+        try (Connection conn = rawDataSource.getConnection();
              Statement stmt = conn.createStatement()) {
             stmt.execute(sql);
         }

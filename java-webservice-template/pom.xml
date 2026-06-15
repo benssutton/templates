@@ -94,6 +94,12 @@
     </dependency>
 
     <dependency>
+      <groupId>io.micronaut</groupId>
+      <artifactId>micronaut-http-client</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
       <groupId>io.micronaut.test</groupId>
       <artifactId>micronaut-test-junit5</artifactId>
       <scope>test</scope>
@@ -219,6 +225,32 @@
             <arg>-Amicronaut.processing.group=com.example.template</arg>
             <arg>-Amicronaut.processing.module=java-webservice-template</arg>
           </compilerArgs>
+        </configuration>
+      </plugin>
+
+      <!--
+        Testcontainers + Docker Engine 29 / Docker Desktop API-version pin.
+
+        Docker Engine 29 (Docker Desktop 4.74) dropped legacy Docker API versions and
+        now reports MinAPIVersion 1.40. Testcontainers 1.21.3 probes the daemon with a
+        hard-coded fallback of API v1.32 whenever the resolved docker-java config has no
+        explicit api version, so its /v1.32/info ping is rejected with HTTP 400 and it
+        reports "Could not find a valid Docker environment" even though the daemon is
+        healthy. Setting the docker-java "api.version" system property to a supported
+        version (1.43) makes Testcontainers probe /v1.43/info, which the engine accepts.
+
+        DOCKER_HOST pins the named pipe to the engine pipe (//./pipe/docker_engine);
+        the active docker context's advertised "docker_cli" pipe answers /_ping but not
+        /info, so relying on context auto-detection is non-deterministic here.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <api.version>1.43</api.version>
+            <DOCKER_HOST>npipe:////./pipe/docker_engine</DOCKER_HOST>
+          </systemPropertyVariables>
         </configuration>
       </plugin>
     </plugins>
