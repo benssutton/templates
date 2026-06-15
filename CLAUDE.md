@@ -34,6 +34,7 @@ Resilience
 Observability
 1. The application should expose endpoints that support optimal monitoring and observability
 
+
 # Assumed Use Cases & Technologies
 
 ## Languages
@@ -42,3 +43,9 @@ Observability
 - Typescript: for UIs
 - Java: everything else.  The default language.
 
+
+# Current Progress
+
+The Python Webservice under python-webservice-template is ready for use.
+
+Other templates that might show in this repo are still works-in-progress.

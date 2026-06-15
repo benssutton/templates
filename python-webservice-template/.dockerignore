@@ -5,7 +5,9 @@ __pycache__/
 .venv/
 venv/
 /data/
-certs/
+# Ship the cert-generator script but not the dev key/cert — the image mints its
+# own via `RUN python certs/generate_self_signed_cert.py` (see Dockerfile).
+certs/*.pem
 .coverage
 .pytest_cache/
 .git/

@@ -24,7 +24,7 @@ export const options = {
 };
 
 export function setup() {
-  const baseUrl = __ENV.BASE_URL || 'http://localhost:8000';
+  const baseUrl = __ENV.BASE_URL || 'https://localhost';
   const res = http.get(`${baseUrl}/health/status`);
   check(res, { 'app is healthy before stress': (r) => r.status === 200 });
   if (res.status !== 200) {

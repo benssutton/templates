@@ -1,0 +1,39 @@
+# Root-level ignores for the templates repo.
+# Per-template ignores live in each template's own .gitignore.
+
+# Python byte-code / caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Coverage / test artifacts
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+test_run_output.txt
+*.log
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude specs and plans
+python-webservice-template/docs/
+
+# Secrets & local env
+.env
+.env.*
+!.env.example
+
+# TLS material — must be generated locally, never committed
+*.pem

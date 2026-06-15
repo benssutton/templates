@@ -3,7 +3,7 @@ import { sleep } from 'k6';
 import { checkStatus202 } from './lib/checks.js';
 import { NORMAL_SLO } from './lib/thresholds.js';
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8000';
+const BASE_URL = __ENV.BASE_URL || 'https://localhost';
 const BATCH = open('./data/ingest_batch.ipc', 'b');
 
 export const options = {

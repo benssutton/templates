@@ -13,7 +13,7 @@ cert = (
     .serial_number(x509.random_serial_number())
     .not_valid_before(datetime.datetime.utcnow())
     .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365))
-    .add_extension(x509.SubjectAlternativeName([x509.DNSName('localhost'), x509.IPAddress(ipaddress.IPv4Address('127.0.0.1'))]), critical=False)
+    .add_extension(x509.SubjectAlternativeName([x509.DNSName('localhost'), x509.DNSName('app'), x509.IPAddress(ipaddress.IPv4Address('127.0.0.1'))]), critical=False)
     .sign(key, hashes.SHA256())
 )
 open('./certs/key.pem','wb').write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()))

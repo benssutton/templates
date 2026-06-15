@@ -14,15 +14,28 @@ Boundaries: `clickhouse.count`, `clickhouse.select` (GET /data); `lsm.query`
 
 ### Run it
 
+k6 runs from the `perf-scripts` Docker image — no local k6 install is needed
+(same convention as CI and `GETTING_STARTED.md`). The app serves HTTPS with a
+self-signed cert, and the image sets `K6_INSECURE_SKIP_TLS_VERIFY`, so
+`BASE_URL=https://app` works in-network with no extra flags. Build it once:
+
+```bash
+docker build -t perf-scripts ./tests/performance
+```
+
 ```bash
 # Reads (ClickHouse + LSM cache):
 docker compose up -d --build
-k6 run -e VUS=10 -e DURATION=60s tests/performance/profile_reads.js
+docker run --rm --network python-template_default -e BASE_URL=https://app -e VUS=10 -e DURATION=60s perf-scripts run /scripts/profile_reads.js
 
 # Ingest (Arrow decode + LSM write) — idle stream so HTTP is the sole writer:
 docker compose -f docker-compose.yml -f docker-compose.profiling.yml up -d --build
-k6 run -e VUS=4 -e DURATION=60s tests/performance/profile_ingest.js
+docker run --rm --network python-template_default -e BASE_URL=https://app -e VUS=4 -e DURATION=60s perf-scripts run /scripts/profile_ingest.js
 ```
+
+The attribution table prints to the console. To also persist `attribution.json`
+to the host, mount the scripts dir into the run by adding
+`-v "$PWD/tests/performance:/scripts"` (use `%cd%` instead of `$PWD` on Windows `cmd`).
 
 ### Read the output
 
@@ -34,14 +47,30 @@ residual) with the largest share is the area to inspect with Layer 2.
 
 ## Layer 2 — What kind (py-spy)
 
-Requires the profiling stack (adds `SYS_PTRACE`). Run a k6 profile in one shell
-and the profiler in another so samples land under load:
+Requires the profiling stack (adds `SYS_PTRACE`). Bring it up, then run a k6
+profile under load in one shell and the profiler in another so samples land
+while the app is busy. `run_pyspy.sh` runs two sequential py-spy passes
+(~2 × duration), so keep the load running at least that long:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.profiling.yml up -d --build
-k6 run -e VUS=10 -e DURATION=70s tests/performance/profile_reads.js &
+```
+
+Shell 1 — drive load (140s covers both 60s py-spy passes):
+
+```bash
+docker run --rm --network python-template_default -e BASE_URL=https://app -e VUS=10 -e DURATION=140s perf-scripts run /scripts/profile_reads.js
+```
+
+Shell 2 — sample the app while the load above runs:
+
+```bash
 tests/performance/profile/run_pyspy.sh 60
 ```
+
+`run_pyspy.sh` is a bash script: on Windows run it from Git Bash (or WSL), not
+`cmd`. In a single bash shell you can instead background the load with a
+trailing `&` before launching the profiler.
 
 Artifacts land in `tests/performance/profile/artifacts/`:
 `flame_all.svg` (overall wall-time), `flame_gil.svg` (GIL-held only), and

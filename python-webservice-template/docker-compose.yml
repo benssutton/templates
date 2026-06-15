@@ -106,7 +106,8 @@ services:
   app:
     build: .
     ports:
-      - "8000:8000"
+      # HTTPS on the default port, matching `python main.py` (Settings.server_port=443).
+      - "443:443"
     environment:
       POSTGRES_URL: postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-appdb}
       CLICKHOUSE_HOST: clickhouse
@@ -133,7 +134,8 @@ services:
       # Default (Flight):  docker compose up
       # Solace mode:       docker compose --profile solace up
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')\""]
+      # HTTPS with an unverified context — the cert is self-signed (dev only).
+      test: ["CMD-SHELL", "python -c \"import ssl, urllib.request; urllib.request.urlopen('https://localhost/health/live', context=ssl._create_unverified_context())\""]
       interval: 5s
       timeout: 10s
       retries: 12

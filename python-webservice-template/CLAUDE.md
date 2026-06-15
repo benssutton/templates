@@ -110,7 +110,7 @@ settings.py                     Pydantic BaseSettings config; env vars override 
 - The docker-compose project is named `python-template` so the network is always `python-template_default`.
 
 **Performance Profiling**
-- Two-layer bottleneck triage; see `docs/superpowers/perf-profiling-runbook.md`.
+- Two-layer bottleneck triage; see `PERF_PROFILING_RUNBOOK.md`.
 - Layer 1 (every run, report-only): `core/boundary_timing.py` emits a W3C `Server-Timing` response header built from `timed()` boundary samples held in a request-scoped `ContextVar`; `tests/performance/profile_reads.js` and `profile_ingest.js` parse it into a ranked per-endpoint attribution table + `attribution.json`.
 - Layer 2 (on demand): `tests/performance/profile/run_pyspy.sh` attaches py-spy to the app container (needs `docker-compose.profiling.yml` for the `SYS_PTRACE` cap) and emits flamegraphs that classify CPU/GIL- vs I/O-bound contention.
 - Boundary samples are request-scoped, so background work (the streaming ingest thread) never pollutes a request's header and multiple isolated test apps cannot collide.

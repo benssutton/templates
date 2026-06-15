@@ -36,6 +36,11 @@ python main.py
 
 Once running, swagger documentation will be available at https://localhost/docs#/
 
+Both run modes serve HTTPS on the default port 443 with the self-signed dev cert:
+`python main.py` and the `app` container started by `docker compose up` both expose
+`https://localhost/`. Your browser will warn about the self-signed certificate —
+accept it to proceed (dev only).
+
 ## Running the Tests
 
 To run the functional pytests with a coverage report at htmlcov/index.html:
@@ -51,28 +56,31 @@ docker build -t perf-scripts ./tests/performance
 ```
 
 ```bash
-docker run --rm --network python-template_default -e BASE_URL=http://app:8000 perf-scripts run /scripts/smoke.js
+docker run --rm --network python-template_default -e BASE_URL=https://app perf-scripts run /scripts/smoke.js
 ```
 
 To run the performance tests:
 ```bash
-docker run --rm --network python-template_default -e BASE_URL=http://app:8000 perf-scripts run /scripts/load.js
+docker run --rm --network python-template_default -e BASE_URL=https://app perf-scripts run /scripts/load.js
 ```
 
 To run the stress tests:
 ```bash
-docker run --rm --network python-template_default -e BASE_URL=http://app:8000 -e TARGET_RPS=50 perf-scripts run /scripts/stress.js
+docker run --rm --network python-template_default -e BASE_URL=https://app -e TARGET_RPS=50 perf-scripts run /scripts/stress.js
 ```
 
 ## Integrating with Claude Desktop
 
-Start the FastAPI app — /mcp is mounted at http://localhost:8000/mcp.
-Add to Claude Desktop's claude_desktop_config.json:
+Start the FastAPI app — /mcp is mounted at https://localhost/mcp.
+Add to Claude Desktop's claude_desktop_config.json. Because the dev cert is
+self-signed, mcp-remote must be told to accept it via NODE_TLS_REJECT_UNAUTHORIZED=0
+(dev only — do not use against production endpoints):
 
   "mcpServers": {
     "python-template": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://localhost:8000/mcp"]
+      "args": ["-y", "mcp-remote", "https://localhost/mcp"],
+      "env": { "NODE_TLS_REJECT_UNAUTHORIZED": "0" }
     }
   },
 

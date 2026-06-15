@@ -3,7 +3,7 @@ import { check } from 'k6';
 import { recordServerTiming, summarize } from './lib/serverTiming.js';
 import { NORMAL_SLO } from './lib/thresholds.js';
 
-const BASE = __ENV.BASE_URL || 'http://localhost:8000';
+const BASE = __ENV.BASE_URL || 'https://localhost';
 
 export const options = {
   scenarios: {

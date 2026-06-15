@@ -3,7 +3,7 @@ import { sleep } from 'k6';
 import { checkDataRows } from './lib/checks.js';
 import { NORMAL_SLO } from './lib/thresholds.js';
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8000';
+const BASE_URL = __ENV.BASE_URL || 'https://localhost';
 
 export const options = {
   vus: 5,

@@ -1,8 +1,18 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from core.correlation import correlation_id_var, get_correlation_id, set_correlation_id
 from main import create_app
 from settings import Settings
+
+
+@pytest.mark.asyncio
+async def test_get_correlation_id_returns_current_value():
+    token = set_correlation_id("abc123")
+    try:
+        assert get_correlation_id() == "abc123"
+    finally:
+        correlation_id_var.reset(token)
 
 
 @pytest.mark.asyncio

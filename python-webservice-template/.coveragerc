@@ -1,3 +1,8 @@
 [run]
-omit = 
+omit =
     tests/*
+
+[report]
+# Enforce the >90% coverage guarantee the README and CLAUDE.md advertise:
+# `pytest --cov` (locally and in CI) exits non-zero if total coverage drops below this.
+fail_under = 94

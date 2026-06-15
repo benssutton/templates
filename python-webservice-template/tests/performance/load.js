@@ -4,7 +4,7 @@ import { SharedArray } from 'k6/data';
 import { checkStatus200, checkDataRows } from './lib/checks.js';
 import { NORMAL_SLO, STRICT_SLO } from './lib/thresholds.js';
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8000';
+const BASE_URL = __ENV.BASE_URL || 'https://localhost';
 
 const rowParams = new SharedArray('rowParams', function () {
   return JSON.parse(open('./data/rows_params.json'));

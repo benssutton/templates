@@ -1,0 +1,8 @@
+# Shell scripts run inside Linux containers (e.g. tests/performance/data/
+# clickhouse-seed.sh is mounted into the ClickHouse init dir) and via Git Bash.
+# CRLF line endings break the shebang ("/bin/bash^M: bad interpreter: No such
+# file or directory"), so force LF regardless of the developer's core.autocrlf.
+*.sh text eol=lf
+
+# SQL/init files are also consumed by Linux services — keep them LF too.
+*.sql text eol=lf

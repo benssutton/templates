@@ -11,9 +11,18 @@ __pycache__/
 .coverage
 .coverage.*
 .cache
+.pytest_cache/
+htmlcov/
+test_run_output.txt
+
+# TLS material — generated locally by certs/generate_self_signed_cert.py, never committed
+*.pem
 
 # Jupyter Notebook Checkpoints
 .ipynb_checkpoints
+
+# Claude specs
+docs/
 
 # Environments
 .env

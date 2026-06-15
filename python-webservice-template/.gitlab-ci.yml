@@ -44,7 +44,7 @@ k6-smoke:
     - >
       docker run --rm
       --network python-template_default
-      -e BASE_URL=http://app:8000
+      -e BASE_URL=https://app
       perf-scripts run /scripts/smoke.js
 
 k6-load:
@@ -55,7 +55,7 @@ k6-load:
     - >
       docker run --rm
       --network python-template_default
-      -e BASE_URL=http://app:8000
+      -e BASE_URL=https://app
       perf-scripts run /scripts/load.js
 
 k6-stress:
@@ -69,6 +69,6 @@ k6-stress:
     - >
       docker run --rm
       --network python-template_default
-      -e BASE_URL=http://app:8000
+      -e BASE_URL=https://app
       -e TARGET_RPS=$TARGET_RPS
       perf-scripts run /scripts/stress.js

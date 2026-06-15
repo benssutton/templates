@@ -10,7 +10,7 @@ from typing import Callable
 
 import pyarrow as pa
 
-from core.correlation import new_id, set_correlation_id, timed
+from core.correlation import correlation_id_var, new_id, set_correlation_id, timed
 from ingestion.base import BatchConsumer, ConnectionState
 from persistence.stream_store.lsm_store import LSMStore
 from schemas.data import DataRowResponse, DataRowsResponse
@@ -93,11 +93,15 @@ class StreamIngestService:
                 for batch in self._consumer.batches():
                     consecutive_failures = 0
                     delay = _INGEST_BASE_DELAY
-                    set_correlation_id(new_id())     # per-batch ID for this thread's logs
+                    token = set_correlation_id(new_id())   # per-batch ID for this thread's logs
                     try:
                         self._record_ingest(batch)
                     except Exception:
                         log.exception("ingest failed; skipping batch")
+                    finally:
+                        # Reset so backoff/disconnect logs on the error path below
+                        # are not mis-attributed to the last successful batch's ID.
+                        correlation_id_var.reset(token)
                 return  # batches() returned cleanly — consumer was closed
             except Exception:
                 consecutive_failures += 1
@@ -126,7 +130,7 @@ class StreamIngestService:
                 if self._consumer.connection_state() == ConnectionState.CONNECTED:
                     disconnected_since = None
                     continue
-                now = asyncio.get_event_loop().time()
+                now = asyncio.get_running_loop().time()
                 if disconnected_since is None:
                     disconnected_since = now
                 elif now - disconnected_since >= threshold:

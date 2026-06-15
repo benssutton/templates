@@ -3,7 +3,7 @@ import { check } from 'k6';
 import { recordServerTiming, summarize } from './lib/serverTiming.js';
 import { RELAXED_SLO } from './lib/thresholds.js';
 
-const BASE = __ENV.BASE_URL || 'http://localhost:8000';
+const BASE = __ENV.BASE_URL || 'https://localhost';
 // Pre-generated Arrow IPC batch fixture (see tests/performance/data/).
 const PAYLOAD = open('./data/ingest_batch.ipc', 'b');
 

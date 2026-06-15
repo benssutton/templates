@@ -2,12 +2,12 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from settings import Settings
 from core.container import Container
-from services.health import HealthService
-from services.data import DataService
-from services.config import ConfigService
 from services.cache import CacheService
+from services.config import ConfigService
+from services.data import DataService
+from services.health import HealthService
+from services.metrics import MetricsService
 from services.stream_ingest import StreamIngestService
 
 
@@ -18,10 +18,6 @@ def get_container(request: Request) -> Container:
 
 
 ContainerDep = Annotated[Container, Depends(get_container)]
-
-
-def get_settings_dep(container: ContainerDep) -> Settings:
-    return container.settings
 
 
 def get_health_service(container: ContainerDep) -> HealthService:
@@ -44,19 +40,13 @@ def get_stream_ingest_service(container: ContainerDep) -> StreamIngestService:
     return container.get(StreamIngestService)
 
 
-SettingDep = Annotated[Settings, Depends(get_settings_dep)]
+def get_metrics_service(container: ContainerDep) -> MetricsService:
+    return container.get(MetricsService)
+
+
 HealthServiceDep = Annotated[HealthService, Depends(get_health_service)]
 DataServiceDep = Annotated[DataService, Depends(get_data_service)]
 ConfigServiceDep = Annotated[ConfigService, Depends(get_config_service)]
 CacheServiceDep = Annotated[CacheService, Depends(get_cache_service)]
 StreamIngestServiceDep = Annotated[StreamIngestService, Depends(get_stream_ingest_service)]
-
-
-from services.metrics import MetricsService
-
-
-def get_metrics_service(container: ContainerDep) -> MetricsService:
-    return container.get(MetricsService)
-
-
 MetricsServiceDep = Annotated[MetricsService, Depends(get_metrics_service)]

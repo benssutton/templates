@@ -277,6 +277,61 @@ async def test_health_probe_error_is_generic_not_leaky(
             pass
 
 
+async def test_clickhouse_health_check_exception_returns_generic_error(
+    postgres_container, redis_container, streaming_flight_server,
+):
+    # clickhouse_connect.ping() raises OperationalError on a real network refusal
+    # (rather than returning False), so the except branch in DataService.health_check
+    # requires a genuine connection failure.  Pattern mirrors the Redis test above:
+    # dedicated container, start app, kill container, confirm generic error in probe.
+    from testcontainers.clickhouse import ClickHouseContainer
+    dedicated_ch = ClickHouseContainer("clickhouse/clickhouse-server:latest", port=8123)
+    dedicated_ch.start()
+    try:
+        settings = _settings(
+            postgres_container,
+            dedicated_ch,
+            f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
+            streaming_flight_server.port,
+        )
+        async with lifespan_test_client(settings) as client:
+            assert (await _poll_ready(client, 200)).status_code == 200
+            dedicated_ch.stop()
+            resp = await _poll_ready(client, 503, timeout=30.0)
+        assert resp.status_code == 503
+        ch_check = {c["name"]: c for c in resp.json()["checks"]}["clickhouse"]
+        assert ch_check["status"] == "down"
+        error = ch_check.get("error", "")
+        assert error in {"unavailable", "timeout"}
+        assert "localhost" not in error and "Error" not in error
+    finally:
+        try:
+            dedicated_ch.stop()
+        except Exception:
+            pass
+
+
+async def test_postgres_health_check_exception_logs_and_returns_generic_error(postgres_container, caplog):
+    import asyncpg
+    import logging
+    from services.config import ConfigService
+
+    pg = postgres_container
+    pool = await asyncpg.create_pool(
+        f"postgresql://{pg.username}:{pg.password}@localhost:{int(pg.get_exposed_port(5432))}/{pg.dbname}",
+        min_size=0,
+        max_size=1,
+    )
+    await pool.close()   # closed pool → acquire() raises InterfaceError
+    svc = ConfigService(pool)
+    with caplog.at_level(logging.ERROR, logger="services.config"):
+        result = await svc.health_check()
+
+    assert result.status == "down"
+    assert result.error == "unavailable"
+    assert "postgres health check failed" in caplog.text
+
+
 async def test_streaming_assigns_distinct_per_batch_ids(
     postgres_container, clickhouse_container, test_clickhouse_client,
     redis_container, streaming_flight_server, cid_caplog,
