@@ -1,6 +1,6 @@
 package com.example.template.observability;
 
-import com.example.template.support.PostgresTestSupport;
+import com.example.template.support.IntegrationSupport;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.client.HttpClient;
 import io.micronaut.http.client.annotation.Client;
@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @MicronautTest
-class MetricsControllerTest extends PostgresTestSupport {
+class MetricsControllerTest extends IntegrationSupport {
 
     @Inject
     @Client("/")

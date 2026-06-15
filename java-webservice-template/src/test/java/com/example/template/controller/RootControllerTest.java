@@ -1,7 +1,7 @@
 package com.example.template.controller;
 
 import com.example.template.dto.RootInfo;
-import com.example.template.support.PostgresTestSupport;
+import com.example.template.support.IntegrationSupport;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.client.HttpClient;
 import io.micronaut.http.client.annotation.Client;
@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @MicronautTest
-class RootControllerTest extends PostgresTestSupport {
+class RootControllerTest extends IntegrationSupport {
 
     @Inject
     @Client("/")

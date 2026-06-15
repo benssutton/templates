@@ -1,6 +1,6 @@
 package com.example.template.core;
 
-import com.example.template.support.PostgresTestSupport;
+import com.example.template.support.IntegrationSupport;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpResponse;
 import io.micronaut.http.annotation.Controller;
@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @MicronautTest
-class ServerTimingFilterTest extends PostgresTestSupport {
+class ServerTimingFilterTest extends IntegrationSupport {
 
     @Controller("/__sttest")
     @ExecuteOn(TaskExecutors.BLOCKING)

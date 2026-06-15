@@ -2,7 +2,7 @@ package com.example.template.controller;
 
 import com.example.template.dto.ConfigEntry;
 import com.example.template.dto.ConfigSetRequest;
-import com.example.template.support.PostgresTestSupport;
+import com.example.template.support.IntegrationSupport;
 import io.micronaut.core.type.Argument;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpResponse;
@@ -18,7 +18,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @MicronautTest
-class ConfigControllerTest extends PostgresTestSupport {
+class ConfigControllerTest extends IntegrationSupport {
 
     @Inject
     @Client("/")

@@ -1,6 +1,6 @@
 package com.example.template.core;
 
-import com.example.template.support.PostgresTestSupport;
+import com.example.template.support.IntegrationSupport;
 import io.micronaut.context.annotation.Property;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpStatus;
@@ -20,7 +20,7 @@ import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 @MicronautTest
 @Property(name = "micronaut.server.max-request-size", value = "100")
-class BodySizeTest extends PostgresTestSupport {
+class BodySizeTest extends IntegrationSupport {
 
     @Controller("/__bodytest")
     static class Sink {

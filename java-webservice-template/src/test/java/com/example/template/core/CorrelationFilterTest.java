@@ -1,6 +1,6 @@
 package com.example.template.core;
 
-import com.example.template.support.PostgresTestSupport;
+import com.example.template.support.IntegrationSupport;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpResponse;
 import io.micronaut.http.annotation.Controller;
@@ -17,7 +17,7 @@ import org.slf4j.MDC;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @MicronautTest
-class CorrelationFilterTest extends PostgresTestSupport {
+class CorrelationFilterTest extends IntegrationSupport {
 
     @Controller("/__corrtest")
     @ExecuteOn(TaskExecutors.BLOCKING)

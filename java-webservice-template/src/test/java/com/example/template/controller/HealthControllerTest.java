@@ -3,7 +3,7 @@ package com.example.template.controller;
 import com.example.template.dto.health.DetailedStatusResponse;
 import com.example.template.dto.health.LivenessResponse;
 import com.example.template.dto.health.ReadinessResponse;
-import com.example.template.support.PostgresTestSupport;
+import com.example.template.support.IntegrationSupport;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.client.HttpClient;
 import io.micronaut.http.client.annotation.Client;
@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @MicronautTest
-class HealthControllerTest extends PostgresTestSupport {
+class HealthControllerTest extends IntegrationSupport {
 
     @Inject
     @Client("/")

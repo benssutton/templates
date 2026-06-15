@@ -62,3 +62,13 @@ datasources:
     schema-generate: NONE
     minimum-idle: 2
     maximum-pool-size: 10
+  clickhouse:
+    url: ${CLICKHOUSE_URL:`jdbc:ch://localhost:8123/default`}
+    username: ${CLICKHOUSE_USER:default}
+    password: ${CLICKHOUSE_PASSWORD:}
+    driver-class-name: com.clickhouse.jdbc.ClickHouseDriver
+    dialect: ANSI
+    schema-generate: NONE
+
+redis:
+  uri: ${REDIS_URL:`redis://localhost:6379/0`}
