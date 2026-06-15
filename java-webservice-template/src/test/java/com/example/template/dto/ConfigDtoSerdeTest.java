@@ -8,9 +8,11 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-// This context-only test needs no database; disable the eager datasource so the
-// Hikari pool isn't created (DB-backed tests provide a real datasource instead).
+// This context-only test needs no database; disable both datasources so neither
+// Hikari pool nor its startup schema-init runs (DB-backed tests provide real
+// datasources via Testcontainers instead).
 @Property(name = "datasources.default.enabled", value = "false")
+@Property(name = "datasources.clickhouse.enabled", value = "false")
 @MicronautTest(startApplication = false)
 class ConfigDtoSerdeTest {
 
