@@ -1,51 +1,27 @@
-## Micronaut 5.0.2 Documentation
+# java-webservice-template
 
-- [User Guide](https://docs.micronaut.io/5.0.2/guide/index.html)
-- [API Reference](https://docs.micronaut.io/5.0.2/api/index.html)
-- [Configuration Reference](https://docs.micronaut.io/5.0.2/guide/configurationreference.html)
-- [Micronaut Guides](https://guides.micronaut.io/index.html)
----
+A Micronaut (Java 25) mirror of `python-webservice-template`, built so the two
+codebases map onto each other. See
+`../docs/superpowers/specs/2026-06-15-java-webservice-template-design.md` for the
+design and the Python↔Java mapping, and `../docs/superpowers/plans/` for the
+phased implementation plans.
 
-- [Micronaut Maven Plugin documentation](https://micronaut-projects.github.io/micronaut-maven-plugin/latest/)
-## Feature jdbc-hikari documentation
+**Status:** Phase 1 complete — foundation + `/config` vertical slice (Postgres
+via Micronaut Data, schema-on-startup, virtual-thread controller, end-to-end
+Testcontainers test). Phases 2–5 (observability, ClickHouse/Redis stores, stream
+ingestion + LSM, MCP/Docker/CI) follow.
 
+## Stack
+- Micronaut 5 on Java 25 (Temurin), Maven
+- Micronaut Data JDBC + HikariCP (Postgres), Micronaut Serialization, Jakarta Validation
+- JUnit 5 + Micronaut Test + Testcontainers (real dependencies, no mocks)
 
-- [Micronaut Hikari JDBC Connection Pool documentation](https://micronaut-projects.github.io/micronaut-sql/latest/guide/index.html#jdbc)
+## Build & test
+```bash
+cd java-webservice-template
+# JAVA_HOME must point at a JDK 25; Docker must be running (Testcontainers).
+./mvnw test
+```
 
-
-## Feature micronaut-aot documentation
-
-
-- [Micronaut AOT documentation](https://micronaut-projects.github.io/micronaut-aot/latest/guide/)
-
-
-## Feature data-jdbc documentation
-
-
-- [Micronaut Data JDBC documentation](https://micronaut-projects.github.io/micronaut-data/latest/guide/index.html#jdbc)
-
-
-## Feature serialization-jackson documentation
-
-
-- [Micronaut Serialization Jackson Core documentation](https://micronaut-projects.github.io/micronaut-serialization/latest/guide/)
-
-
-## Feature maven-enforcer-plugin documentation
-
-
-- [https://maven.apache.org/enforcer/maven-enforcer-plugin/](https://maven.apache.org/enforcer/maven-enforcer-plugin/)
-
-
-## Feature test-resources documentation
-
-
-- [Micronaut Test Resources documentation](https://micronaut-projects.github.io/micronaut-test-resources/latest/guide/)
-
-
-## Feature validation documentation
-
-
-- [Micronaut Validation documentation](https://micronaut-projects.github.io/micronaut-validation/latest/guide/)
-
-
+On Windows + Docker Desktop, the `windows-docker` Maven profile auto-activates to
+pin `DOCKER_HOST` to the engine named pipe; on Linux/CI it stays inactive.
