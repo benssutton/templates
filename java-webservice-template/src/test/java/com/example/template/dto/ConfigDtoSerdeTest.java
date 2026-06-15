@@ -13,6 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 // datasources via Testcontainers instead).
 @Property(name = "datasources.default.enabled", value = "false")
 @Property(name = "datasources.clickhouse.enabled", value = "false")
+@Property(name = "template.ingest.transport", value = "noop")
 @MicronautTest(startApplication = false)
 class ConfigDtoSerdeTest {
 

@@ -17,6 +17,9 @@ public class AppSettings {
     private long maxRequestBodyBytes = 16L * 1024 * 1024;
     private String mcpName = "java-template";
     private String mcpInstructions = "Tools for this template application.";
+    private int connectMaxAttempts = 5;
+    private double connectBaseDelaySeconds = 1.0;
+    private double connectMaxDelaySeconds = 30.0;
 
     public String getAppTitle() { return appTitle; }
     public void setAppTitle(String v) { this.appTitle = v; }
@@ -36,4 +39,10 @@ public class AppSettings {
     public void setMcpName(String v) { this.mcpName = v; }
     public String getMcpInstructions() { return mcpInstructions; }
     public void setMcpInstructions(String v) { this.mcpInstructions = v; }
+    public int getConnectMaxAttempts() { return connectMaxAttempts; }
+    public void setConnectMaxAttempts(int v) { this.connectMaxAttempts = v; }
+    public double getConnectBaseDelaySeconds() { return connectBaseDelaySeconds; }
+    public void setConnectBaseDelaySeconds(double v) { this.connectBaseDelaySeconds = v; }
+    public double getConnectMaxDelaySeconds() { return connectMaxDelaySeconds; }
+    public void setConnectMaxDelaySeconds(double v) { this.connectMaxDelaySeconds = v; }
 }

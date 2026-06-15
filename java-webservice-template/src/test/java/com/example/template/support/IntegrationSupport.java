@@ -46,6 +46,10 @@ public abstract class IntegrationSupport implements TestPropertyProvider {
         props.put("datasources.clickhouse.username", CLICKHOUSE.getUsername());
         props.put("datasources.clickhouse.password", CLICKHOUSE.getPassword());
         props.put("redis.uri", "redis://" + REDIS.getHost() + ":" + REDIS.getMappedPort(6379) + "/0");
+        // No real stream transport in integration tests: the ingest service runs with
+        // an idle no-op consumer, and the disconnect/failure shutdown triggers are off.
+        props.put("template.ingest.transport", "noop");
+        props.put("template.ingest.max-disconnect-seconds", "0");
         return props;
     }
 }
