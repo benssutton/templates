@@ -247,6 +247,10 @@
   </dependencyManagement>
 
   <build>
+    <!-- Deterministic runnable-jar name: the Micronaut shade produces target/app.jar
+         (the fat jar) and target/original-app.jar (the thin jar). The Dockerfile copies
+         target/app.jar, avoiding the ambiguous *.jar glob. -->
+    <finalName>app</finalName>
     <plugins>
       <plugin>
         <groupId>io.micronaut.maven</groupId>

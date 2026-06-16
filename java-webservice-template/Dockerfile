@@ -9,7 +9,10 @@ RUN ./mvnw -q -B -DskipTests package
 
 FROM eclipse-temurin:25-jre
 WORKDIR /app
-COPY --from=build /build/target/*.jar app.jar
+# curl is required by docker-compose's healthcheck; not present in the base JRE image.
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+# target/app.jar is the runnable fat jar (finalName=app); original-app.jar is the thin jar.
+COPY --from=build /build/target/app.jar app.jar
 COPY certs/generate-keystore.sh certs/generate-keystore.sh
 # Self-signed dev keystore for HTTPS on 443 (keytool ships with the JRE image).
 RUN bash certs/generate-keystore.sh certs/keystore.p12

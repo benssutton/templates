@@ -13,6 +13,9 @@ services:
       retries: 10
   clickhouse:
     image: clickhouse/clickhouse-server:24.3
+    environment:
+      CLICKHOUSE_PASSWORD: clickhouse   # clickhouse-jdbc rejects an empty password; set an explicit one
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
       - ./src/main/resources/db/clickhouse-init.sql:/docker-entrypoint-initdb.d/01-schema.sql
       - ./scripts/clickhouse-seed.sh:/docker-entrypoint-initdb.d/02-seed.sh
@@ -38,6 +41,7 @@ services:
     environment:
       MICRONAUT_ENVIRONMENTS: docker
       INGEST_TRANSPORT: flight
+      CLICKHOUSE_PASSWORD: clickhouse
     healthcheck:
       test: ["CMD-SHELL", "curl -fsk https://localhost/health/live || exit 1"]
       interval: 10s
