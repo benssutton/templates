@@ -1,5 +1,5 @@
+use crate::{schemas::data::DataShapeResponse, state::AppState};
 use axum::{extract::State, Json};
-use crate::{state::AppState, schemas::data::DataShapeResponse};
 
 #[utoipa::path(
     get,

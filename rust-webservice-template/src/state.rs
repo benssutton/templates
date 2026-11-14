@@ -1,23 +1,23 @@
-use std::sync::Arc;
 use crate::{
     config::Settings,
     services::{
-        health::{HealthServiceTrait, HealthService},
-        data::{DataServiceTrait, DataService},
+        data::{DataService, DataServiceTrait},
+        health::{HealthService, HealthServiceTrait},
     },
 };
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AppState {
     pub health_service: Arc<dyn HealthServiceTrait>,
-    pub data_service:   Arc<dyn DataServiceTrait>,
+    pub data_service: Arc<dyn DataServiceTrait>,
 }
 
 impl AppState {
     pub fn new(settings: &Settings) -> Self {
         Self {
             health_service: Arc::new(HealthService::new(settings.clone())),
-            data_service:   Arc::new(DataService::new(settings.clone())),
+            data_service: Arc::new(DataService::new(settings.clone())),
         }
     }
 }

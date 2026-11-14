@@ -13,8 +13,8 @@ async fn main() {
         "starting rust-template"
     );
 
-    let state    = AppState::new(&settings);
-    let app      = build_app(state);
+    let state = AppState::new(&settings);
+    let app = build_app(state);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await.unwrap();
     tracing::info!(addr = %listener.local_addr().unwrap(), "listening");
     axum::serve(listener, app).await.unwrap();

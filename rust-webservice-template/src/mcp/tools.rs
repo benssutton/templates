@@ -1,6 +1,6 @@
-use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::model::ServerInfo;
+use rmcp::{tool, tool_handler, tool_router, ServerHandler};
 
 use crate::state::AppState;
 

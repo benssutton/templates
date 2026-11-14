@@ -1,5 +1,5 @@
-use axum::{extract::State, Json};
 use crate::state::AppState;
+use axum::{extract::State, Json};
 
 #[utoipa::path(
     get,

@@ -1,7 +1,7 @@
-use std::fs::File;
-use polars::prelude::*;
 use crate::config::Settings;
 use crate::schemas::data::DataShapeResponse;
+use polars::prelude::*;
+use std::fs::File;
 
 pub trait DataServiceTrait: Send + Sync {
     fn get_shape(&self) -> DataShapeResponse;
@@ -20,14 +20,13 @@ impl DataService {
 impl DataServiceTrait for DataService {
     fn get_shape(&self) -> DataShapeResponse {
         let path = format!("{}/data.ipc_stream", self.settings.data_dir);
-        let file = File::open(&path)
-            .unwrap_or_else(|_| panic!("data file not found: {path}"));
+        let file = File::open(&path).unwrap_or_else(|_| panic!("data file not found: {path}"));
         let df = IpcStreamReader::new(file)
             .finish()
             .expect("failed to read IPC stream");
         DataShapeResponse {
             height: df.height() as u64,
-            width:  df.width()  as u64,
+            width: df.width() as u64,
         }
     }
 }
@@ -45,6 +44,6 @@ mod tests {
         let svc = DataService::new(settings);
         let shape = svc.get_shape();
         assert_eq!(shape.height, 3);
-        assert_eq!(shape.width,  2);
+        assert_eq!(shape.width, 2);
     }
 }

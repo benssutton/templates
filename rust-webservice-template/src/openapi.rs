@@ -1,8 +1,8 @@
-use utoipa::OpenApi;
 use crate::{
-    routers::{health, data},
+    routers::{data, health},
     schemas::data::DataShapeResponse,
 };
+use utoipa::OpenApi;
 
 #[derive(OpenApi)]
 #[openapi(

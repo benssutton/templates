@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use rmcp::transport::streamable_http_server::{
-    StreamableHttpServerConfig, StreamableHttpService,
-    session::local::LocalSessionManager,
+    session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
 };
 
 use crate::state::AppState;
@@ -23,5 +22,5 @@ pub fn build_router(state: AppState) -> Router<AppState> {
             StreamableHttpServerConfig::default().disable_allowed_hosts(),
         );
 
-    Router::new().nest_service("/", service)
+    Router::new().fallback_service(service)
 }
