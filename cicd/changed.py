@@ -37,12 +37,19 @@ def affected(files: list[str]) -> list[str]:
 
 
 def changed_files(base: str, root: Path = ROOT) -> list[str]:
-    """Files changed vs `base` (committed + uncommitted + untracked)."""
+    """Files changed vs `base` (committed + uncommitted + untracked).
+
+    Renames list both old and new paths, so a moved file marks both services.
+    `base` must exist locally: in CI, check out with `fetch-depth: 0`.
+    Raises RuntimeError (with git's stderr) if git fails, e.g. an unknown `base`.
+    """
 
     def git(*args: str) -> list[str]:
-        out = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
+        out = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True)
+        if out.returncode:
+            raise RuntimeError(f"git {' '.join(args)} failed: {out.stderr.strip()}")
         return [line for line in out.stdout.splitlines() if line]
 
-    files = set(git("diff", "--name-only", base))  # base..working tree
+    files = set(git("diff", "--name-only", "--no-renames", base))  # base..working tree
     files |= set(git("ls-files", "--others", "--exclude-standard"))
     return sorted(files)
