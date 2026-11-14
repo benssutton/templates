@@ -10,7 +10,7 @@
   <parent>
     <groupId>io.micronaut.platform</groupId>
     <artifactId>micronaut-parent</artifactId>
-    <version>5.0.2</version>
+    <version>5.2.5</version>
   </parent>
 
   <properties>
@@ -21,13 +21,13 @@
     <micronaut.version>5.0.2</micronaut.version>
     <!-- Override the platform BOM's testcontainers.version (2.0.5), which is not
          published to Maven Central; only the 1.x line exists. -->
-    <testcontainers.version>1.21.3</testcontainers.version>
+    <testcontainers.version>1.21.4</testcontainers.version>
     <!-- Pin gRPC to the version Arrow Flight 18.1.0 was built against. The Micronaut
          5.0.2 platform BOM manages grpc.version to 1.80.0, which removed
          io.grpc.internal.ReadableBuffer.readBytes(ByteBuffer) — a method flight-core
          18.1.0's GetReadableBuffer still calls, so streams fail with
          "CANCELLED: Failed to read message" (NoSuchMethodError). 1.69.0 restores it. -->
-    <grpc.version>1.69.0</grpc.version>
+    <grpc.version>1.85.1</grpc.version>
     <!-- Security bumps over the 5.0.2 platform BOM's pins (drop once the BOM catches up):
          micrometer 1.16.5 -> 1.16.6 fixes CVE-2026-40983 / CVE-2026-40984;
          postgres driver 42.7.11 -> 42.7.12 fixes CVE-2026-54291. -->
@@ -125,7 +125,7 @@
     <dependency>
       <groupId>com.clickhouse</groupId>
       <artifactId>clickhouse-jdbc</artifactId>
-      <version>0.7.1</version>
+      <version>0.11.0</version>
       <classifier>all</classifier>
       <scope>runtime</scope>
     </dependency>
@@ -161,7 +161,7 @@
     <dependency>
       <groupId>com.solace</groupId>
       <artifactId>solace-messaging-client</artifactId>
-      <version>1.10.0</version>
+      <version>1.10.1</version>
       <scope>compile</scope>
     </dependency>
 
@@ -220,7 +220,7 @@
     <dependency>
       <groupId>org.awaitility</groupId>
       <artifactId>awaitility</artifactId>
-      <version>4.2.2</version>
+      <version>4.3.0</version>
       <scope>test</scope>
     </dependency>
 
@@ -384,7 +384,7 @@
       <plugin>
         <groupId>org.jacoco</groupId>
         <artifactId>jacoco-maven-plugin</artifactId>
-        <version>0.8.13</version>
+        <version>0.8.16</version>
         <executions>
           <execution>
             <id>prepare</id>
