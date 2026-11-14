@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**', '.claude/**', 'sonar/**']
+  pull_request:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**', '.claude/**', 'sonar/**']
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "'changed' or 'all'"
+        default: changed
+
+# No cron trigger anywhere: Dependabot (monthly) is the only recurring automation.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.detect.outputs.services }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - id: detect
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          WANT: ${{ inputs.services }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then BASE="$PR_BASE";
+          elif [ "$EVENT" = "push" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ]; then BASE="$PUSH_BEFORE";
+          else BASE="HEAD~1"; fi
+          if [ "$WANT" = "all" ]; then
+            SERVICES='["java","python","rust"]'
+          else
+            SERVICES=$(python run_CICD.py changed --base "$BASE" --format json)
+          fi
+          echo "services=$SERVICES" >> "$GITHUB_OUTPUT"
+          echo "Changed services: $SERVICES"
+
+  python:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.services), 'python')
+    uses: ./.github/workflows/service-python.yml
+
+  java:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.services), 'java')
+    uses: ./.github/workflows/service-java.yml
+
+  rust:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.services), 'rust')
+    uses: ./.github/workflows/service-rust.yml
+
+  security:
+    needs: changes
+    if: needs.changes.outputs.services != '[]'
+    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+      security-events: write
+
+  # The only check required by branch protection. Skipped jobs count as success; Rust (wip) never blocks.
+  status:
+    name: Pipeline Status
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [changes, python, java, security]
+    steps:
+      - name: Fail if any required job failed or was cancelled
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          case "$RESULTS" in *failure*|*cancelled*) echo "::error::a required job failed"; exit 1;; esac

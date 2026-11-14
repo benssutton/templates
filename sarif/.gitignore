@@ -1,0 +1,3 @@
+# Scanner SARIF output (CICD_SARIF_DIR=sarif); keep the dir, ignore its contents.
+*
+!.gitignore
