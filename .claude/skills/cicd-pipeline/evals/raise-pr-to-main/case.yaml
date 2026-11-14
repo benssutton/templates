@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: raise-pr-to-main
+expected_outcome: |
+  Runs steps 1-7: tool-version check with a permission prompt (also raising the pre-existing uncommitted changes), Dependabot updates applied locally, full local loop, then commits, opens a PR to main that supersedes the Dependabot PRs, monitors remote CI (handling the absence of workflows), triages remote findings, and caps remote cycles at three.

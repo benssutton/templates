@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: run-pipeline-local-only
+expected_outcome: |
+  Runs steps 1-5 only: checks tool versions and asks permission for upgrades, applies safe Dependabot updates without asking, runs the full local pipeline, triages and fixes findings via subagents with the specified models, loops, and ends with a report offering to push or PR. Does not commit or push.

@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: dependabot-and-alerts
+expected_outcome: |
+  Treats this as a pipeline run: assesses each Dependabot PR and alert on its merits (including the rmcp major bump and the critical zip alert), applies the safe ones locally rather than merging the PRs, defers anything risky with reasons, and verifies with the local pipeline.
