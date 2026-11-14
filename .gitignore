@@ -28,7 +28,7 @@ ENV/
 Thumbs.db
 
 # Claude specs and plans
-python-webservice-template/docs/
+superpowers/
 
 # Secrets & local env
 .env
