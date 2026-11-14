@@ -33,3 +33,10 @@ def test_unknown_step_fails():
     out = cli("python", "no-such-step")
     assert out.returncode != 0
     assert "no-such-step" in out.stderr
+
+
+def test_sonar_unknown_service_fails_cleanly():
+    out = cli("sonar", "nosuchservice")
+    assert out.returncode == 1
+    assert out.stderr.startswith("error:")
+    assert "Traceback" not in out.stderr

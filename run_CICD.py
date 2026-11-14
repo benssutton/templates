@@ -16,6 +16,7 @@ import sys
 
 from cicd import changed as changed_mod
 from cicd import runner, services
+from cicd.common import StepFailed
 from cicd.steps import security, sonar
 
 
@@ -39,7 +40,11 @@ def main(argv: list[str]) -> int:
     if a.target == "sonar":
         if len(a.steps) != 1:
             p.error("usage: run_CICD.py sonar <service>")
-        sonar.run(services.get(a.steps[0]))
+        try:
+            sonar.run(services.get(a.steps[0]))
+        except (StepFailed, KeyError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
         return 0
 
     if a.target == "changed":
