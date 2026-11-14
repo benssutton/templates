@@ -10,7 +10,7 @@ Design + Python↔Java mapping: `../docs/superpowers/specs/2026-06-15-java-webse
 ## Stack
 - **Micronaut 5** on **Java 25** (Temurin), **Maven**
 - **Virtual threads** — controllers run blocking handlers via `@ExecuteOn(TaskExecutors.BLOCKING)`
-- **Micronaut Data JDBC** + HikariCP (Postgres), **clickhouse-jdbc** (ClickHouse), **Jedis** + RedisJSON
+- **Micronaut Data JDBC** + HikariCP (Postgres; pgvector/pgvector image; `vector` extension enabled by the init script), **clickhouse-jdbc** (ClickHouse), **Jedis** + RedisJSON
 - **Apache Arrow** + **Arrow Flight** / **Solace** stream ingestion
 - **Micronaut Serialization**, Jakarta Validation, **Micrometer/Prometheus**, OpenAPI/Swagger-UI
 - **JUnit 5 + Micronaut Test + Testcontainers** (real dependencies, no mocks)

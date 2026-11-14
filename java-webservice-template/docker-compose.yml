@@ -1,7 +1,7 @@
 name: java-template
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:0.8.4-pg18
     environment:
       POSTGRES_USER: appuser
       POSTGRES_PASSWORD: password

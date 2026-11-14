@@ -67,7 +67,7 @@ always closes them.
 
 | Technology | Role | Client (entry point) | Service |
 | --- | --- | --- | --- |
-| **Postgres** (asyncpg, no ORM) | Transactional config store | [postgres_client.py](persistence/transaction_store/postgres/postgres_client.py) | [services/config.py](services/config.py) |
+| **Postgres** (asyncpg, no ORM; pgvector/pgvector image; `vector` extension enabled by the init script) | Transactional config store | [postgres_client.py](persistence/transaction_store/postgres/postgres_client.py) | [services/config.py](services/config.py) |
 | **ClickHouse** (clickhouse-connect async) | Analytics / columnar reads | [clickhouse_client.py](persistence/analytics_store/clickhouse/clickhouse_client.py) | [services/data.py](services/data.py) |
 | **Redis** (redis-py async, RedisJSON) | Cache store | [redis_client.py](persistence/cache_store/redis/redis_client.py) | [services/cache.py](services/cache.py) |
 | **In-memory LSM store** | Hot cache of the streamed record batches, queryable over REST | [lsm_store.py](persistence/stream_store/lsm_store.py) | [services/stream_ingest.py](services/stream_ingest.py) |

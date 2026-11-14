@@ -36,7 +36,7 @@ settings.py                     Pydantic BaseSettings config; env vars override 
 
 ## Stack
 - FastAPI + Pydantic
-- asyncpg — Postgres transaction store (direct, no ORM)
+- asyncpg — Postgres (pgvector image) transaction store (direct, no ORM)
 - clickhouse-connect[async] — ClickHouse analytics store
 - polars / pyarrow — data shaping and Arrow IPC fixtures
 - pytest + testcontainers — integration tests against real DB containers

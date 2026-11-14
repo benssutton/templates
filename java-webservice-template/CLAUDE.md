@@ -29,7 +29,7 @@ tests/performance/                k6 scripts (reused from the Python template)
 
 ## Stack
 - Micronaut 5 + Netty, Java 25, Maven, virtual threads (`@ExecuteOn(TaskExecutors.BLOCKING)`)
-- Micronaut Data JDBC (Postgres), clickhouse-jdbc, Jedis + RedisJSON
+- Micronaut Data JDBC (Postgres, pgvector image), clickhouse-jdbc, Jedis + RedisJSON
 - Apache Arrow + Arrow Flight / Solace ingestion
 - Micronaut Serialization, Jakarta Validation, Micrometer/Prometheus, OpenAPI
 - JUnit 5 + Micronaut Test + Testcontainers; k6; GitLab CI; JaCoCo gate

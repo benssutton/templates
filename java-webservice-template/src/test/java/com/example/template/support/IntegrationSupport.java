@@ -23,7 +23,8 @@ import java.util.Map;
 public abstract class IntegrationSupport implements TestPropertyProvider {
 
     protected static final PostgreSQLContainer<?> POSTGRES =
-        new PostgreSQLContainer<>("postgres:16-alpine");
+        new PostgreSQLContainer<>(DockerImageName.parse("pgvector/pgvector:0.8.4-pg18")
+            .asCompatibleSubstituteFor("postgres"));
     protected static final ClickHouseContainer CLICKHOUSE =
         new ClickHouseContainer(DockerImageName.parse("clickhouse/clickhouse-server:24.3"));
     protected static final GenericContainer<?> REDIS =

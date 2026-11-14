@@ -15,7 +15,7 @@ from persistence.analytics_store.clickhouse.clickhouse_client import ClickHouseC
 from tests.app_client import lifespan_test_client
 from tests.publishers.flight_server import ExampleFlightServer, make_batch
 
-PG_IMAGE = "postgres:18"
+PG_IMAGE = "pgvector/pgvector:0.8.4-pg18"
 CH_IMAGE = "clickhouse/clickhouse-server:latest"
 REDIS_IMAGE = "redis/redis-stack-server:latest"
 
