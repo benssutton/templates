@@ -386,6 +386,12 @@
             <goals><goal>prepare-agent</goal></goals>
           </execution>
           <execution>
+            <!-- XML report consumed by SonarQube (sonar.coverage.jacoco.xmlReportPaths). -->
+            <id>report</id>
+            <phase>verify</phase>
+            <goals><goal>report</goal></goals>
+          </execution>
+          <execution>
             <id>check</id>
             <phase>verify</phase>
             <goals><goal>check</goal></goals>
