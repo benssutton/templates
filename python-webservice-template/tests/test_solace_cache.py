@@ -7,6 +7,8 @@ import pytest
 from httpx import AsyncClient
 from testcontainers.core.container import DockerContainer
 
+from pydantic import SecretStr
+
 from settings import Settings
 from tests.app_client import lifespan_test_client
 from tests.publishers.flight_server import make_batch
@@ -95,19 +97,21 @@ async def test_client_solace(
 
     solace_settings = Settings(
         status="testing",
-        postgres_url=f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}",
+        postgres_url=SecretStr(
+            f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}"
+        ),
         clickhouse_host="localhost",
         clickhouse_port=ch_port,
         clickhouse_user=clickhouse_container.username or "default",
-        clickhouse_password=clickhouse_container.password or "",
+        clickhouse_password=SecretStr(clickhouse_container.password or ""),
         clickhouse_database="default",
-        redis_url=f"redis://localhost:{redis_port}/0",
+        redis_url=SecretStr(f"redis://localhost:{redis_port}/0"),
         ingest_transport="solace",
         solace_host="localhost",
         solace_port=solace_smf_port,
         solace_vpn="default",
         solace_username="admin",
-        solace_password="admin",
+        solace_password=SecretStr("admin"),
         solace_topic="ingest/batches",
         lsm_flush_rows=2,
         lsm_compaction_runs=2,

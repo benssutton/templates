@@ -128,6 +128,8 @@ class StreamIngestService:
 
     async def _disconnect_watchdog(self) -> None:
         threshold = self._settings.ingest_max_disconnect_seconds
+        if threshold is None:  # watchdog is only started when a threshold is set
+            return
         poll = min(threshold / 2, 5.0)
         disconnected_since: float | None = None
         try:

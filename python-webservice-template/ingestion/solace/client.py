@@ -14,7 +14,8 @@ from solace.messaging.messaging_service import (
     ServiceInterruptionListener,
 )
 from solace.messaging.receiver.direct_message_receiver import DirectMessageReceiver
-from solace.messaging.receiver.message_receiver import MessageHandler, InboundMessage
+from solace.messaging.receiver.inbound_message import InboundMessage
+from solace.messaging.receiver.message_receiver import MessageHandler
 from solace.messaging.resources.topic_subscription import TopicSubscription
 
 from ingestion.base import ConnectionState
@@ -99,13 +100,15 @@ class SolaceBatchConsumer:
         await asyncio.to_thread(self.close)
 
     def batches(self) -> Iterator[pa.RecordBatch]:
-        self._receiver = (
-            self._service.create_direct_message_receiver_builder()
-            .with_subscriptions([TopicSubscription.of(self._settings.solace_topic)])
-            .build()
-        )
-        self._receiver.start()
-        self._receiver.receive_async(_BatchHandler(self._queue))
+        assert self._service is not None, "batches() called before __aenter__"
+        # Not chained: the SDK annotates with_subscriptions() as returning the base
+        # MessageReceiverBuilder (no build()); it mutates and returns the same builder.
+        builder = self._service.create_direct_message_receiver_builder()
+        builder.with_subscriptions([TopicSubscription.of(self._settings.solace_topic)])
+        receiver = builder.build()
+        self._receiver = receiver
+        receiver.start()
+        receiver.receive_async(_BatchHandler(self._queue))
         while True:
             item = self._queue.get()  # blocks until message or None sentinel
             if item is None:

@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import random
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 log = logging.getLogger(__name__)
@@ -10,7 +10,7 @@ T = TypeVar("T")
 
 
 async def connect_with_backoff(
-    connect: Callable[[], Coroutine[None, None, T]],
+    connect: Callable[[], Awaitable[T]],
     *,
     label: str,
     max_attempts: int = 5,
@@ -41,3 +41,6 @@ async def connect_with_backoff(
                 exc,
             )
             await asyncio.sleep(delay + jitter)
+    # Only reachable when max_attempts < 1 (Settings enforces ge=1); makes the
+    # 'always returns or raises' contract explicit to the type checker.
+    raise ValueError(f"{label}: max_attempts must be >= 1, got {max_attempts}")

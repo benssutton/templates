@@ -10,7 +10,7 @@ class PostgresClient:
         self._pool: asyncpg.Pool | None = None
 
     async def __aenter__(self) -> asyncpg.Pool:
-        self._pool = await connect_with_backoff(
+        pool = await connect_with_backoff(
             lambda: asyncpg.create_pool(
                 self._settings.postgres_url.get_secret_value(),
                 min_size=self._settings.postgres_pool_min_size,
@@ -21,7 +21,8 @@ class PostgresClient:
             base_delay=self._settings.connect_base_delay,
             max_delay=self._settings.connect_max_delay,
         )
-        return self._pool
+        self._pool = pool
+        return pool
 
     async def __aexit__(self, *_: object) -> None:
         if self._pool is not None:

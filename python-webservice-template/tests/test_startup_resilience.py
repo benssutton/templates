@@ -3,6 +3,8 @@ import time
 import pytest
 from testcontainers.redis import RedisContainer
 
+from pydantic import SecretStr
+
 from settings import Settings
 from tests.app_client import lifespan_test_client
 
@@ -19,8 +21,10 @@ async def test_clickhouse_unreachable_aborts_startup_after_bounded_retries(
     pg_port = int(postgres_container.get_exposed_port(5432))
     redis_port = int(redis_container.get_exposed_port(6379))
     settings = Settings(
-        postgres_url=f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}",
-        redis_url=f"redis://localhost:{redis_port}/0",
+        postgres_url=SecretStr(
+            f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}"
+        ),
+        redis_url=SecretStr(f"redis://localhost:{redis_port}/0"),
         clickhouse_host="127.0.0.1",
         clickhouse_port=1,  # nothing is listening here
         connect_max_attempts=3,
@@ -48,8 +52,10 @@ async def test_stock_redis_without_json_module_aborts_startup(postgres_container
         pg_port = int(postgres_container.get_exposed_port(5432))
         redis_port = int(stock.get_exposed_port(6379))
         settings = Settings(
-            postgres_url=f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}",
-            redis_url=f"redis://localhost:{redis_port}/0",
+            postgres_url=SecretStr(
+                f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}"
+            ),
+            redis_url=SecretStr(f"redis://localhost:{redis_port}/0"),
             connect_max_attempts=1,
             ingest_max_disconnect_seconds=None,
         )

@@ -8,6 +8,8 @@ from testcontainers.clickhouse import ClickHouseContainer
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
 
+from pydantic import SecretStr
+
 from settings import Settings
 from persistence.analytics_store.clickhouse.clickhouse_client import ClickHouseClient
 from tests.app_client import lifespan_test_client
@@ -34,7 +36,7 @@ async def test_clickhouse_client(clickhouse_container):
         clickhouse_host="localhost",
         clickhouse_port=http_port,
         clickhouse_user=clickhouse_container.username or "default",
-        clickhouse_password=clickhouse_container.password or "",
+        clickhouse_password=SecretStr(clickhouse_container.password or ""),
         clickhouse_database="default",
     )
     schema_sql = (
@@ -117,13 +119,15 @@ async def test_client(
 
     flight_settings = Settings(
         status="testing",
-        postgres_url=f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}",
+        postgres_url=SecretStr(
+            f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}"
+        ),
         clickhouse_host="localhost",
         clickhouse_port=ch_port,
         clickhouse_user=clickhouse_container.username or "default",
-        clickhouse_password=clickhouse_container.password or "",
+        clickhouse_password=SecretStr(clickhouse_container.password or ""),
         clickhouse_database="default",
-        redis_url=f"redis://localhost:{redis_port}/0",
+        redis_url=SecretStr(f"redis://localhost:{redis_port}/0"),
         ingest_transport="flight",
         flight_host="localhost",
         flight_port=example_flight_server.port,

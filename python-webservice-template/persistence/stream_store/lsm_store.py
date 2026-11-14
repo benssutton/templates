@@ -82,6 +82,8 @@ class LSMStore:
 
     def ingest(self, batch: pa.RecordBatch) -> None:
         frame = pl.from_arrow(batch)
+        # from_arrow() is typed DataFrame | Series; a RecordBatch always yields a DataFrame.
+        assert isinstance(frame, pl.DataFrame)
         n = frame.height
         frame = frame.with_columns(
             pl.Series(ORDER_COLUMN, range(self._seqno, self._seqno + n))

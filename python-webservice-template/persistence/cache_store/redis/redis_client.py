@@ -38,7 +38,10 @@ class RedisClient:
         """
         probe_key = f"__startup_json_probe_{uuid.uuid4().hex}__"
         try:
-            await client.json().set(probe_key, "$", {"ok": True})
+            # redis-py types JSON commands as a sync|async union; on the async
+            # client they always return an awaitable.
+            probe = client.json().set(probe_key, "$", {"ok": True})
+            await probe  # pyright: ignore[reportGeneralTypeIssues]
         except aioredis.ResponseError as exc:
             raise RuntimeError(
                 "Redis is reachable but the RedisJSON module is missing. "

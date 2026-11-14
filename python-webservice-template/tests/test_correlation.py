@@ -41,6 +41,7 @@ async def test_timed_records_boundary_sample_when_active():
         async with timed("clickhouse.select"):
             pass
         samples = boundary_samples_var.get()
+        assert samples is not None
         assert len(samples) == 1
         assert samples[0][0] == "clickhouse.select"
         assert samples[0][1] >= 0.0

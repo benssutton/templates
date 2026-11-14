@@ -17,7 +17,9 @@ class DataService:
     async def get_data(self, limit: int) -> DataRowsResponse:
         async with timed("clickhouse.count"):
             count_result = await self._client.query("SELECT count() FROM items")
-        total = count_result.first_row[0]
+        first_row = count_result.first_row
+        assert first_row is not None, "SELECT count() always returns one row"
+        total = first_row[0]
 
         async with timed("clickhouse.select"):
             result = await self._client.query(

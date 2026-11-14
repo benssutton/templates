@@ -1,9 +1,10 @@
 import json
+from typing import Any
 
 import httpx
 
 
-def parse_mcp_response(response: httpx.Response):
+def parse_mcp_response(response: httpx.Response) -> dict[str, Any]:
     ct = response.headers.get("content-type", "")
     if "text/event-stream" in ct:
         r = None
@@ -12,6 +13,7 @@ def parse_mcp_response(response: httpx.Response):
                 r = json.loads(line[5:].strip())
     else:
         r = response.json()
+    assert r is not None, f"no JSON-RPC payload in SSE response: {response.text!r}"
     return r
 
 

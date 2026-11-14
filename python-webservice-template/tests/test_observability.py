@@ -2,8 +2,10 @@ import threading
 
 import pyarrow.flight as pa_flight
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 from testcontainers.redis import RedisContainer
+
+from pydantic import SecretStr
 
 from settings import Settings
 from tests.app_client import lifespan_test_client
@@ -19,13 +21,15 @@ _STREAM_SCRIPT = [make_batch([(1, "a", "v1", "upsert"), (2, "b", "v1", "upsert")
 def _settings(pg, ch, redis_url, flight_port, **overrides) -> Settings:
     return Settings(
         status="testing",
-        postgres_url=f"postgresql://{pg.username}:{pg.password}@localhost:{int(pg.get_exposed_port(5432))}/{pg.dbname}",
+        postgres_url=SecretStr(
+            f"postgresql://{pg.username}:{pg.password}@localhost:{int(pg.get_exposed_port(5432))}/{pg.dbname}"
+        ),
         clickhouse_host="localhost",
         clickhouse_port=int(ch.get_exposed_port(8123)),
         clickhouse_user=ch.username or "default",
-        clickhouse_password=ch.password or "",
+        clickhouse_password=SecretStr(ch.password or ""),
         clickhouse_database="default",
-        redis_url=redis_url,
+        redis_url=SecretStr(redis_url),
         ingest_transport="flight",
         flight_host="localhost",
         flight_port=flight_port,
@@ -45,7 +49,9 @@ def streaming_flight_server():
     server.shutdown()
 
 
-async def _poll_ready(client: AsyncClient, expected_code: int, timeout: float = 10.0):
+async def _poll_ready(
+    client: AsyncClient, expected_code: int, timeout: float = 10.0
+) -> Response:
     import asyncio
     import time
 
@@ -56,6 +62,7 @@ async def _poll_ready(client: AsyncClient, expected_code: int, timeout: float = 
         if last.status_code == expected_code:
             return last
         await asyncio.sleep(0.1)
+    assert last is not None, f"no /health/ready response within {timeout}s"
     return last
 
 

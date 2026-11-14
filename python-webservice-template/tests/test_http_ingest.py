@@ -9,6 +9,8 @@ import pyarrow.ipc as pa_ipc
 import pytest
 from httpx import AsyncClient
 
+from pydantic import SecretStr
+
 from settings import Settings
 from tests.app_client import lifespan_test_client
 from tests.publishers.flight_server import ExampleFlightServer, make_batch
@@ -47,13 +49,15 @@ async def test_client_http(
 
     http_settings = Settings(
         status="testing",
-        postgres_url=f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}",
+        postgres_url=SecretStr(
+            f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}"
+        ),
         clickhouse_host="localhost",
         clickhouse_port=ch_port,
         clickhouse_user=clickhouse_container.username or "default",
-        clickhouse_password=clickhouse_container.password or "",
+        clickhouse_password=SecretStr(clickhouse_container.password or ""),
         clickhouse_database="default",
-        redis_url=f"redis://localhost:{redis_port}/0",
+        redis_url=SecretStr(f"redis://localhost:{redis_port}/0"),
         ingest_transport="flight",
         flight_host="localhost",
         flight_port=empty_flight_server.port,
@@ -207,13 +211,15 @@ async def test_oversized_decoded_batch_is_dropped(
     redis_port = int(redis_container.get_exposed_port(6379))
     settings = Settings(
         status="testing",
-        postgres_url=f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}",
+        postgres_url=SecretStr(
+            f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}"
+        ),
         clickhouse_host="localhost",
         clickhouse_port=ch_port,
         clickhouse_user=clickhouse_container.username or "default",
-        clickhouse_password=clickhouse_container.password or "",
+        clickhouse_password=SecretStr(clickhouse_container.password or ""),
         clickhouse_database="default",
-        redis_url=f"redis://localhost:{redis_port}/0",
+        redis_url=SecretStr(f"redis://localhost:{redis_port}/0"),
         ingest_transport="flight",
         flight_host="localhost",
         flight_port=empty_flight_server.port,

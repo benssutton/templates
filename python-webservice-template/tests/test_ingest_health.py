@@ -1,8 +1,10 @@
 import asyncio
 import threading
+from typing import cast
 
 import pyarrow.flight as flight
 import pytest
+from solace.messaging.messaging_service import ServiceEvent
 
 from ingestion.base import ConnectionState
 from ingestion.flight.client import FlightBatchConsumer
@@ -47,11 +49,13 @@ def test_solace_consumer_state_transitions_via_listeners():
     assert consumer.connection_state() == ConnectionState.DOWN
 
     listener = _StateListener(consumer)
-    listener.on_reconnecting(None)
+    # The listeners ignore the event payload; a real ServiceEvent needs a live broker.
+    no_event = cast(ServiceEvent, None)
+    listener.on_reconnecting(no_event)
     assert consumer.connection_state() == ConnectionState.RECONNECTING
-    listener.on_reconnected(None)
+    listener.on_reconnected(no_event)
     assert consumer.connection_state() == ConnectionState.CONNECTED
-    listener.on_service_interrupted(None)
+    listener.on_service_interrupted(no_event)
     assert consumer.connection_state() == ConnectionState.DOWN
 
 

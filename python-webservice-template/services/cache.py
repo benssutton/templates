@@ -23,7 +23,10 @@ class CacheService:
         return CacheEntry(key=key, value=value, ttl_seconds=ttl_seconds)
 
     async def get(self, key: str) -> CacheEntry | None:
-        result = await self._client.json().get(key)
+        # redis-py types JSON commands as a sync|async union; on the async
+        # client they always return an awaitable.
+        pending = self._client.json().get(key)
+        result = await pending  # pyright: ignore[reportGeneralTypeIssues]
         if result is None:
             return None
         ttl = await self._client.ttl(key)
