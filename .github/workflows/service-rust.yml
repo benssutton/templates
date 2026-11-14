@@ -14,7 +14,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
-      - run: rustup toolchain install stable --component rustfmt clippy llvm-tools-preview
+      - run: rustup toolchain install stable --component rustfmt,clippy,llvm-tools-preview
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: rust-webservice-template

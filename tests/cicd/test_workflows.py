@@ -66,3 +66,12 @@ def test_ci_triggers_exact() -> None:
 @pytest.mark.parametrize("path", [f for f in FILES if f.name != "ci.yml"], ids=lambda p: p.name)
 def test_reusable_workflows_have_workflow_call(path: Path) -> None:
     assert "workflow_call" in triggers(load(path))
+
+
+def test_rustup_components_are_comma_separated() -> None:
+    # `--component a b` makes rustup read b as a toolchain name.
+    steps = load(WORKFLOWS / "service-rust.yml")["jobs"]["rust"]["steps"]
+    for cmd in (s["run"] for s in steps if "rustup" in s.get("run", "")):
+        parts = cmd.split()
+        if "--component" in parts:
+            assert parts[-1] == parts[parts.index("--component") + 1], cmd

@@ -73,3 +73,13 @@ def test_osv_fails_on_a_vulnerable_sbom_component():
                              capture_output=True, text=True)
         assert out.returncode == 1, out.stdout + out.stderr
         assert "GHSA-jfh8-c2jp-5v3q" in out.stdout
+
+
+def test_trivy_fs_never_resolves_poms_against_maven_central(monkeypatch):
+    # Maven Central 429s shared CI IPs; Java deps are covered by OSV's SBOM + the image scan.
+    calls = []
+    monkeypatch.setattr(security, "docker_run", lambda image, args, mounts=None: calls.append((image, args, mounts)))
+    security.trivy()
+    [(image, args, mounts)] = calls
+    assert image == tools.TRIVY and args[0] == "fs" and "--offline-scan" in args
+    assert "/root/.m2" not in (mounts or {}).values()  # same result with a cold or warm cache

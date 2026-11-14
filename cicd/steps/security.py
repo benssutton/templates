@@ -24,15 +24,21 @@ def _sarif(name: str) -> list[str]:
     return ["--format", "sarif", "--output", f"/src/{d}/{name}.sarif"] if d else []
 
 
+def trivy_args() -> list[str]:
+    # --offline-scan: Trivy never fetches pom.xml parents/BOMs from Maven Central (shared
+    # runner IPs get 429-blocked, failing the whole scan). Nothing is lost: Java deps are
+    # covered by OSV on Maven's fully resolved SBOM (osv()) and by the Java image scan
+    # (images.py); secret/misconfig and other ecosystems' lockfiles need no remote calls.
+    # No ~/.m2 mount either, so results don't depend on a warm local cache (local == CI).
+    return ["fs", "--scanners", "vuln,secret,misconfig", "--offline-scan",
+            "--severity", "HIGH,CRITICAL", "--exit-code", "1",
+            "--skip-dirs", TRIVY_SKIP, "--timeout", "15m",
+            "--ignorefile", "/src/.trivyignore",
+            *_sarif("trivy"), "/src"]
+
+
 def trivy() -> None:
-    docker_run(tools.TRIVY, ["fs", "--scanners", "vuln,secret,misconfig",
-                             "--severity", "HIGH,CRITICAL", "--exit-code", "1",
-                             "--skip-dirs", TRIVY_SKIP, "--timeout", "15m",
-                             "--ignorefile", "/src/.trivyignore",
-                             *_sarif("trivy"), "/src"],
-               # The shared Maven cache lets Trivy resolve pom.xml parents/BOMs locally
-               # instead of hammering Maven Central (which 429-blocks the IP).
-               mounts={"cicd-trivy-cache": "/root/.cache", "cicd-maven-cache": "/root/.m2"})
+    docker_run(tools.TRIVY, trivy_args(), mounts={"cicd-trivy-cache": "/root/.cache"})
 
 
 def maven_sbom_args(service: Service) -> list[str]:
