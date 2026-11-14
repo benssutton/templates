@@ -4,13 +4,15 @@
 # suppressed until 2026-12-14 so the pipeline can gate NEW findings. Fix them in a
 # follow-up dependency-bump PR and delete the entries; do not extend without review.
 #
-# KNOWN LIMITATION: osv-scanner v2.0.0 intermittently fails to fetch the Micronaut parent
-# POM (io.micronaut.platform:micronaut-parent@5.0.2) and, when it does, logs
-# "Error during extraction" but SKIPS java-webservice-template/pom.xml and still exits
-# according to the remaining files. A green OSV run can therefore mean the Maven
-# dependencies were not scanned. Check the run log for that error line.
+# MAVEN: osv-scanner does not read pom.xml. Its own resolver intermittently failed to
+# fetch the Micronaut parent POM and, when it worked, resolved BOM-managed versions that
+# differ from what Maven ships. Instead the OSV step (cicd/steps/security.py) has Maven
+# (pinned Docker image) write the resolved compile/runtime tree as a CycloneDX SBOM to
+# java-webservice-template/target/bom.json and scans that with --sbom. The step fails if
+# the SBOM is not produced. Some older Maven reasons below name the versions osv's pom
+# resolution guessed (e.g. 2.18.0); the IDs are still matched by the resolved versions.
 
-# ---- Maven (java-webservice-template/pom.xml) ----
+# ---- Maven (java-webservice-template, resolved CycloneDX SBOM) ----
 [[IgnoredVulns]]
 id = "GHSA-jhq6-gfmj-v8fx"
 ignoreUntil = 2026-12-14
@@ -211,6 +213,21 @@ id = "GHSA-j92g-9f8w-j867"
 ignoreUntil = 2026-12-14
 reason = "org.postgresql:postgresql 42.7.11 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
 
+# First surfaced by the SBOM scan of resolved versions (osv's own pom resolution missed them).
+[[IgnoredVulns]]
+id = "GHSA-5hh8-q8hv-fr38"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.21.2 in java-webservice-template (resolved SBOM); baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-9fxm-vc8v-hj55"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.21.2 in java-webservice-template (resolved SBOM); baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-rcqc-6cw3-h962"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.21.2 in java-webservice-template (resolved SBOM); baselined 2026-11-14; fix in follow-up dependency-bump PR"
 
 # ---- PyPI (requirements-dev.txt files) ----
 [[IgnoredVulns]]

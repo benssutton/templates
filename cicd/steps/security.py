@@ -6,9 +6,12 @@ Set CICD_SARIF_DIR to also write SARIF files there (the GitHub workflow uploads 
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
+from pathlib import Path
 
-from cicd.common import StepFailed, docker_run
+from cicd.common import ROOT, StepFailed, docker_run
+from cicd.services import SERVICES, Service
 from cicd.steps import tools
 
 SKIP_DIRS = "target,node_modules,.venv,__pycache__,.git,.claude"
@@ -27,8 +30,41 @@ def trivy() -> None:
                mounts={"cicd-trivy-cache": "/root/.cache"})
 
 
+def maven_sbom_args(service: Service) -> list[str]:
+    """`mvn` (run in tools.MAVEN) writing <service>/target/bom.json: the resolved
+    compile/runtime dependency tree, so OSV sees the versions Maven actually ships."""
+    return ["mvn", "-B", "-q", "-f", f"/src/{service.path}/pom.xml",
+            f"{tools.CYCLONEDX_MAVEN_PLUGIN}:makeBom", "-DoutputFormat=json", "-DoutputName=bom"]
+
+
+def osv_args(sboms: list[str], targets: list[str]) -> list[str]:
+    return ["scan", "source", "--recursive", "--config=/src/osv-scanner.toml",
+            *(f"--sbom={s}" for s in sboms), *targets]
+
+
+def osv_targets(root: Path = ROOT) -> list[str]:
+    """Top-level repo entries, minus Maven services: osv-scanner v2.0.0 resolves pom.xml
+    itself (parent fetch is flaky, BOM versions differ), so those are scanned by SBOM.
+    Gitignored entries are dropped too: osv exits 127 when given one explicitly."""
+    skip = {*SKIP_DIRS.split(","), *(s.path for s in SERVICES if s.language == "java")}
+    names = [p.name for p in sorted(root.iterdir()) if p.name not in skip]
+    done = subprocess.run(["git", "check-ignore", "--no-index", "--stdin", "-z"], cwd=root,
+                          input="\0".join(names).encode(), capture_output=True)
+    if done.returncode not in (0, 1):  # 1 = nothing ignored
+        raise StepFailed(f"git check-ignore failed: {done.stderr.decode().strip()}")
+    ignored = set(done.stdout.decode().split("\0"))
+    return [f"/src/{n}" for n in names if n not in ignored]
+
+
 def osv() -> None:
-    docker_run(tools.OSV, ["scan", "source", "--recursive", "--config=/src/osv-scanner.toml", "/src"])
+    sboms = []
+    for service in (s for s in SERVICES if s.language == "java"):
+        docker_run(tools.MAVEN, maven_sbom_args(service), mounts={"cicd-maven-cache": "/root/.m2"})
+        sbom = Path(service.path, "target", "bom.json")
+        if not (ROOT / sbom).is_file():
+            raise StepFailed(f"SBOM not generated: {sbom}")
+        sboms.append(f"/src/{sbom.as_posix()}")
+    docker_run(tools.OSV, osv_args(sboms, osv_targets()))
 
 
 def gitleaks() -> None:
