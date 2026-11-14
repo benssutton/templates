@@ -1,0 +1,3 @@
+# One CVE/misconfig ID per line, each with a justification and review date.
+# Example format (delete when the first real entry is added):
+# CVE-2025-0000   # not reachable: only used in test scope; review 2026-12

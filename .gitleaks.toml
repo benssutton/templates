@@ -1,0 +1,10 @@
+title = "templates gitleaks config"
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Dev-only self-signed certs and example env files committed on purpose"
+paths = [
+  '''(^|/)certs/''',
+  '''\.env\.example$''',
+]

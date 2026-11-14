@@ -1,0 +1,5 @@
+# Reviewed vulnerability suppressions. Each entry needs a reason and an expiry.
+# [[IgnoredVulns]]
+# id = "GHSA-xxxx-xxxx-xxxx"
+# ignoreUntil = 2026-12-31
+# reason = "Not reachable: ..."
