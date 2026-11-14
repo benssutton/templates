@@ -28,6 +28,11 @@
          18.1.0's GetReadableBuffer still calls, so streams fail with
          "CANCELLED: Failed to read message" (NoSuchMethodError). 1.69.0 restores it. -->
     <grpc.version>1.69.0</grpc.version>
+    <!-- Security bumps over the 5.0.2 platform BOM's pins (drop once the BOM catches up):
+         micrometer 1.16.5 -> 1.16.6 fixes CVE-2026-40983 / CVE-2026-40984;
+         postgres driver 42.7.11 -> 42.7.12 fixes CVE-2026-54291. -->
+    <micrometer.version>1.16.6</micrometer.version>
+    <postgres.driver.version>42.7.12</postgres.driver.version>
     <micronaut.runtime>netty</micronaut.runtime>
     <micronaut.aot.enabled>false</micronaut.aot.enabled>
     <micronaut.aot.packageName>com.example.template.aot.generated</micronaut.aot.packageName>
