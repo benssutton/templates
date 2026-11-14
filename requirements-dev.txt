@@ -1,0 +1,4 @@
+# Pinned developer / CI tooling for the repo root (the pipeline itself is stdlib-only).
+# Service dependencies live in each service. Dependabot proposes updates monthly.
+pytest>=8.4
+pre-commit>=4.0
