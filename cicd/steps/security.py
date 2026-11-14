@@ -14,7 +14,9 @@ from cicd.common import ROOT, StepFailed, docker_run
 from cicd.services import SERVICES, Service
 from cicd.steps import tools
 
-SKIP_DIRS = "target,node_modules,.venv,__pycache__,.git,.claude"
+SKIP_DIRS = "target,node_modules,.venv,__pycache__,.git,.claude"  # top-level names (osv_targets)
+# Trivy matches --skip-dirs against full paths, so nested dirs (e.g. <service>/target) need **.
+TRIVY_SKIP = "**/target,**/node_modules,**/.venv,**/__pycache__,**/.git,**/.claude"
 
 
 def _sarif(name: str) -> list[str]:
@@ -25,9 +27,12 @@ def _sarif(name: str) -> list[str]:
 def trivy() -> None:
     docker_run(tools.TRIVY, ["fs", "--scanners", "vuln,secret,misconfig",
                              "--severity", "HIGH,CRITICAL", "--exit-code", "1",
-                             "--skip-dirs", SKIP_DIRS, "--ignorefile", "/src/.trivyignore",
+                             "--skip-dirs", TRIVY_SKIP, "--timeout", "15m",
+                             "--ignorefile", "/src/.trivyignore",
                              *_sarif("trivy"), "/src"],
-               mounts={"cicd-trivy-cache": "/root/.cache"})
+               # The shared Maven cache lets Trivy resolve pom.xml parents/BOMs locally
+               # instead of hammering Maven Central (which 429-blocks the IP).
+               mounts={"cicd-trivy-cache": "/root/.cache", "cicd-maven-cache": "/root/.m2"})
 
 
 def maven_sbom_args(service: Service) -> list[str]:
@@ -39,11 +44,11 @@ def maven_sbom_args(service: Service) -> list[str]:
 
 def osv_args(sboms: list[str], targets: list[str]) -> list[str]:
     return ["scan", "source", "--recursive", "--config=/src/osv-scanner.toml",
-            *(f"--sbom={s}" for s in sboms), *targets]
+            *(f"-L={s}" for s in sboms), *targets]
 
 
 def osv_targets(root: Path = ROOT) -> list[str]:
-    """Top-level repo entries, minus Maven services: osv-scanner v2.0.0 resolves pom.xml
+    """Top-level repo entries, minus Maven services: osv-scanner v2.7.0 resolves pom.xml
     itself (parent fetch is flaky, BOM versions differ), so those are scanned by SBOM.
     Gitignored entries are dropped too: osv exits 127 when given one explicitly."""
     skip = {*SKIP_DIRS.split(","), *(s.path for s in SERVICES if s.language == "java")}

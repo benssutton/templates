@@ -17,7 +17,7 @@ def build(s: Service) -> None:
 
 def scan(s: Service) -> None:
     docker_run(tools.TRIVY, ["image", "--severity", "HIGH,CRITICAL", "--exit-code", "1",
-                             "--ignorefile", "/src/.trivyignore", tag(s)],
+                             "--timeout", "15m", "--ignorefile", "/src/.trivyignore", tag(s)],
                mounts={"/var/run/docker.sock": "/var/run/docker.sock"})
 
 
