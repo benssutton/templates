@@ -11,7 +11,7 @@ import sys
 from cicd.common import StepFailed, docker_run
 from cicd.steps import tools
 
-SKIP_DIRS = "target,node_modules,.venv,__pycache__,.git"
+SKIP_DIRS = "target,node_modules,.venv,__pycache__,.git,.claude"
 
 
 def _sarif(name: str) -> list[str]:
@@ -38,7 +38,7 @@ def gitleaks() -> None:
 
 def semgrep() -> None:
     args = ["semgrep", "scan", "--config", "p/default", "--error", "--metrics=off",
-            "--exclude", "target", "--exclude", "node_modules"]
+            "--exclude", "target", "--exclude", "node_modules", "--exclude", ".claude"]
     d = os.environ.get("CICD_SARIF_DIR")
     if d:
         args += ["--sarif", f"--sarif-output=/src/{d}/semgrep.sarif"]

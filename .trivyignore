@@ -1,3 +1,13 @@
-# One CVE/misconfig ID per line, each with a justification and review date.
-# Example format (delete when the first real entry is added):
-# CVE-2025-0000   # not reachable: only used in test scope; review 2026-12
+# One CVE/misconfig ID per line, each with a justification and expiry (exp:YYYY-MM-DD).
+# BASELINE 2026-11-14: first-scan findings, suppressed until 2026-12-14; fix in follow-up PR.
+
+# rust-webservice-template/Cargo.lock: rust template is work-in-progress; bump in follow-up dependency PR
+GHSA-36hh-v3qg-5jq4 exp:2026-12-14   # pyo3 0.21.2 (fixed 0.29.0)
+GHSA-4w2j-m93h-cj5j exp:2026-12-14   # quinn-proto 0.11.14 (fixed 0.11.15)
+CVE-2026-63127 exp:2026-12-14        # rmcp 1.7.0 (fixed 2.0.0)
+CVE-2026-63128 exp:2026-12-14        # rmcp 1.7.0 (fixed 2.0.0)
+CVE-2026-115905 exp:2026-12-14       # zip 1.1.4 (fixed 9.0.5)
+
+# java-webservice-template/Dockerfile and python-webservice-template/Dockerfile run as root;
+# add a non-root USER in follow-up PR (baselined 2026-11-14; review 2026-12)
+AVD-DS-0002 exp:2026-12-14

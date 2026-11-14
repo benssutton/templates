@@ -20,4 +20,6 @@ ENV MICRONAUT_ENVIRONMENTS=docker
 # Apache Arrow needs direct nio access on modern JDKs.
 ENV JAVA_TOOL_OPTIONS="--add-opens=java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow"
 EXPOSE 443
+# Baselined 2026-11-14: add a non-root USER in follow-up PR; review 2026-12.
+# nosemgrep: dockerfile.security.missing-user.missing-user
 CMD ["java", "-jar", "app.jar"]

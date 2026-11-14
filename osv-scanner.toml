@@ -1,5 +1,561 @@
 # Reviewed vulnerability suppressions. Each entry needs a reason and an expiry.
-# [[IgnoredVulns]]
-# id = "GHSA-xxxx-xxxx-xxxx"
-# ignoreUntil = 2026-12-31
-# reason = "Not reachable: ..."
+#
+# BASELINE 2026-11-14: every advisory below was found by the first full scan and is
+# suppressed until 2026-12-14 so the pipeline can gate NEW findings. Fix them in a
+# follow-up dependency-bump PR and delete the entries; do not extend without review.
+#
+# KNOWN LIMITATION: osv-scanner v2.0.0 intermittently fails to fetch the Micronaut parent
+# POM (io.micronaut.platform:micronaut-parent@5.0.2) and, when it does, logs
+# "Error during extraction" but SKIPS java-webservice-template/pom.xml and still exits
+# according to the remaining files. A green OSV run can therefore mean the Maven
+# dependencies were not scanned. Check the run log for that error line.
+
+# ---- Maven (java-webservice-template/pom.xml) ----
+[[IgnoredVulns]]
+id = "GHSA-jhq6-gfmj-v8fx"
+ignoreUntil = 2026-12-14
+reason = "ch.qos.logback:logback-core 1.5.32 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-p47f-322f-whfh"
+ignoreUntil = 2026-12-14
+reason = "ch.qos.logback:logback-core 1.5.32 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-72hv-8253-57qq"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-core 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-7hhh-6rmp-j9qf"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-core 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-p6pp-m3f8-5c89"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-core 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-r7wm-3cxj-wff9"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-core 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-3pjw-73gf-8qr5"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-5gvw-p9qm-jgwh"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-5jmj-h7xm-6q6v"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-cxp5-3px4-pw24"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-gx83-3vf8-gh7j"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-hgj6-7826-r7m5"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-j3rv-43j4-c7qm"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-mhm7-754m-9p8w"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-q4xh-88c3-wmh7"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-rmj7-2vxq-3g9f"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-vvgp-rfg2-7rr6"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-wjgm-6hv5-3cvf"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-wv8q-qhhj-9h54"
+ignoreUntil = 2026-12-14
+reason = "com.fasterxml.jackson.core:jackson-databind 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-xxph-c9ww-hj94"
+ignoreUntil = 2026-12-14
+reason = "com.google.guava:guava 33.6.0-jre in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-g3pr-3p32-fp23"
+ignoreUntil = 2026-12-14
+reason = "io.micrometer:micrometer-core 1.16.5 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-w737-wx49-qj23"
+ignoreUntil = 2026-12-14
+reason = "io.micrometer:micrometer-core 1.16.5 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-558v-64gr-wgg4"
+ignoreUntil = 2026-12-14
+reason = "io.netty:netty-codec-compression 4.2.15.Final in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-4mp9-239f-g9hg"
+ignoreUntil = 2026-12-14
+reason = "io.netty:netty-codec-http 4.2.15.Final in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-6cqp-g7gg-8hr5"
+ignoreUntil = 2026-12-14
+reason = "io.netty:netty-codec-http 4.2.15.Final in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-6jqx-86gh-f27w"
+ignoreUntil = 2026-12-14
+reason = "io.netty:netty-codec-http 4.2.15.Final in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-8c42-7qj2-3j46"
+ignoreUntil = 2026-12-14
+reason = "io.netty:netty-codec-http 4.2.15.Final in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-gcjf-9mgh-3p7g"
+ignoreUntil = 2026-12-14
+reason = "io.netty:netty-codec-http 4.2.15.Final in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-jppx-w49h-x2qq"
+ignoreUntil = 2026-12-14
+reason = "io.netty:netty-codec-http 4.2.15.Final in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-mvh2-crg5-v77c"
+ignoreUntil = 2026-12-14
+reason = "io.netty:netty-codec-http 4.2.15.Final in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-q4f6-jm68-57ww"
+ignoreUntil = 2026-12-14
+reason = "io.netty:netty-codec-http 4.2.15.Final in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-93wv-jw9v-4972"
+ignoreUntil = 2026-12-14
+reason = "io.netty:netty-codec-http2 4.2.15.Final in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-c69g-56f8-xwqj"
+ignoreUntil = 2026-12-14
+reason = "io.netty:netty-codec-http2 4.2.15.Final in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-c4c3-7fpv-j4q5"
+ignoreUntil = 2026-12-14
+reason = "io.netty:netty-handler 4.2.15.Final in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-fccg-mwvh-qqg4"
+ignoreUntil = 2026-12-14
+reason = "io.netty:netty-handler 4.2.15.Final in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-hjcp-jmpx-g3qm"
+ignoreUntil = 2026-12-14
+reason = "org.apache.httpcomponents.client5:httpclient5 5.6.1 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-hf6x-8p5f-cgmf"
+ignoreUntil = 2026-12-14
+reason = "org.apache.httpcomponents.core5:httpcore5 5.2.1 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-v3jc-474w-2wm6"
+ignoreUntil = 2026-12-14
+reason = "org.apache.httpcomponents.core5:httpcore5-h2 5.2 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-ghc9-756g-vrcv"
+ignoreUntil = 2026-12-14
+reason = "org.json:json 20240303 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-j92g-9f8w-j867"
+ignoreUntil = 2026-12-14
+reason = "org.postgresql:postgresql 42.7.11 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+
+# ---- PyPI (requirements-dev.txt files) ----
+[[IgnoredVulns]]
+id = "PYSEC-2026-2120"
+ignoreUntil = 2026-12-14
+reason = "black 26.1 in python-webservice-template/requirements-dev.txt; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-2121"
+ignoreUntil = 2026-12-14
+reason = "black 26.1 in python-webservice-template/requirements-dev.txt; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-3936-cmfr-pm3m"
+ignoreUntil = 2026-12-14
+reason = "black 26.1 in python-webservice-template/requirements-dev.txt; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-cg8m-r9f2-5wm2"
+ignoreUntil = 2026-12-14
+reason = "black 26.1 in python-webservice-template/requirements-dev.txt; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-1845"
+ignoreUntil = 2026-12-14
+reason = "pytest 8.4 in requirements-dev.txt; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+[[IgnoredVulns]]
+id = "GHSA-6w46-j5rx-g56g"
+ignoreUntil = 2026-12-14
+reason = "pytest 8.4 in requirements-dev.txt; baselined 2026-11-14; fix in follow-up dependency-bump PR"
+
+
+# ---- crates.io (rust-webservice-template/Cargo.lock) ----
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0190"
+ignoreUntil = 2026-12-14
+reason = "anyhow 1.0.102 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0204"
+ignoreUntil = 2026-12-14
+reason = "crossbeam-epoch 0.9.18 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0379"
+ignoreUntil = 2026-12-14
+reason = "fast-float 0.2.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-x8jh-xj3x-gx3c"
+ignoreUntil = 2026-12-14
+reason = "fast-float 0.2.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0003"
+ignoreUntil = 2026-12-14
+reason = "fast-float 0.2.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-8655-xgh5-5vvq"
+ignoreUntil = 2026-12-14
+reason = "fast-float 0.2.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0258"
+ignoreUntil = 2026-12-14
+reason = "h2 0.4.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0186"
+ignoreUntil = 2026-12-14
+reason = "memmap2 0.7.1 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0370"
+ignoreUntil = 2026-12-14
+reason = "proc-macro-error 1.0.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0020"
+ignoreUntil = 2026-12-14
+reason = "pyo3 0.21.2 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-pph8-gcv7-4qj5"
+ignoreUntil = 2026-12-14
+reason = "pyo3 0.21.2 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0177"
+ignoreUntil = 2026-12-14
+reason = "pyo3 0.21.2 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-chgr-c6px-7xpp"
+ignoreUntil = 2026-12-14
+reason = "pyo3 0.21.2 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-36hh-v3qg-5jq4"
+ignoreUntil = 2026-12-14
+reason = "pyo3 0.21.2 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0194"
+ignoreUntil = 2026-12-14
+reason = "quick-xml 0.36.2 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0195"
+ignoreUntil = 2026-12-14
+reason = "quick-xml 0.36.2 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0185"
+ignoreUntil = 2026-12-14
+reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-4w2j-m93h-cj5j"
+ignoreUntil = 2026-12-14
+reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0338"
+ignoreUntil = 2026-12-14
+reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0339"
+ignoreUntil = 2026-12-14
+reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0340"
+ignoreUntil = 2026-12-14
+reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0342"
+ignoreUntil = 2026-12-14
+reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0523"
+ignoreUntil = 2026-12-14
+reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0524"
+ignoreUntil = 2026-12-14
+reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0538"
+ignoreUntil = 2026-12-14
+reason = "quinn-udp 0.5.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0462"
+ignoreUntil = 2026-12-14
+reason = "rmcp 1.7.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-33f5-2c5q-wgwj"
+ignoreUntil = 2026-12-14
+reason = "rmcp 1.7.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-9g45-5xwm-f3wc"
+ignoreUntil = 2026-12-14
+reason = "rmcp 1.7.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-9pj6-vhgr-3mwh"
+ignoreUntil = 2026-12-14
+reason = "rmcp 1.7.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-c9xm-49cp-xcr9"
+ignoreUntil = 2026-12-14
+reason = "rmcp 1.7.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0486"
+ignoreUntil = 2026-12-14
+reason = "rustix 1.1.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0285"
+ignoreUntil = 2026-12-14
+reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-2mjx-qc3c-rqvc"
+ignoreUntil = 2026-12-14
+reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0346"
+ignoreUntil = 2026-12-14
+reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-c8m5-c952-6cm4"
+ignoreUntil = 2026-12-14
+reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0348"
+ignoreUntil = 2026-12-14
+reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-h2v8-394m-p7vv"
+ignoreUntil = 2026-12-14
+reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0349"
+ignoreUntil = 2026-12-14
+reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-w44r-93j7-qv28"
+ignoreUntil = 2026-12-14
+reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0382"
+ignoreUntil = 2026-12-14
+reason = "rustls-webpki 0.103.13 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0386"
+ignoreUntil = 2026-12-14
+reason = "tokio 1.52.3 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0381"
+ignoreUntil = 2026-12-14
+reason = "webpki-roots 1.0.7 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-6g2r-675j-hx59"
+ignoreUntil = 2026-12-14
+reason = "xxhash-rust 0.8.15 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0367"
+ignoreUntil = 2026-12-14
+reason = "zip 1.1.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0368"
+ignoreUntil = 2026-12-14
+reason = "zip 1.1.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0369"
+ignoreUntil = 2026-12-14
+reason = "zip 1.1.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0429"
+ignoreUntil = 2026-12-14
+reason = "zip 1.1.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-8hxf-qr8p-62x4"
+ignoreUntil = 2026-12-14
+reason = "zip 1.1.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "GHSA-m665-v7pm-7grj"
+ignoreUntil = 2026-12-14
+reason = "zip 1.1.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0391"
+ignoreUntil = 2026-12-14
+reason = "zstd 0.13.3 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0395"
+ignoreUntil = 2026-12-14
+reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0396"
+ignoreUntil = 2026-12-14
+reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0397"
+ignoreUntil = 2026-12-14
+reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0398"
+ignoreUntil = 2026-12-14
+reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0399"
+ignoreUntil = 2026-12-14
+reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0400"
+ignoreUntil = 2026-12-14
+reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0401"
+ignoreUntil = 2026-12-14
+reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0402"
+ignoreUntil = 2026-12-14
+reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0403"
+ignoreUntil = 2026-12-14
+reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0404"
+ignoreUntil = 2026-12-14
+reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0405"
+ignoreUntil = 2026-12-14
+reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0406"
+ignoreUntil = 2026-12-14
+reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0410"
+ignoreUntil = 2026-12-14
+reason = "zstd-sys 2.0.16+zstd.1.5.7 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
