@@ -1,4 +1,6 @@
+import secrets
 import shutil
+import string
 import subprocess
 import tempfile
 from pathlib import Path
@@ -12,9 +14,11 @@ pytestmark = pytest.mark.skipif(shutil.which("docker") is None, reason="docker r
 
 def test_gitleaks_flags_a_planted_secret():
     with tempfile.TemporaryDirectory() as d:
-        # Split literal so this test file itself is not flagged.
-        key = "AKIA" + "IOSFODNN7EXAMPLE"
-        (Path(d) / "x.env").write_text(f'aws_access_key_id = "{key}"\naws_secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"\n')
+        # Random GitHub PAT built at runtime: AWS "...EXAMPLE" keys are on gitleaks'
+        # built-in allowlist, and a literal token would get this file flagged.
+        alphabet = string.ascii_letters + string.digits
+        token = "ghp_" + "".join(secrets.choice(alphabet) for _ in range(36))
+        (Path(d) / "x.env").write_text(f'GITHUB_TOKEN = "{token}"\n')
         out = subprocess.run(
             ["docker", "run", "--rm", "-v", f"{d}:/s", tools.GITLEAKS,
              "detect", "--no-git", "--source", "/s", "--no-banner"],

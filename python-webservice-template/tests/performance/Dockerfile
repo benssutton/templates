@@ -7,3 +7,5 @@ WORKDIR /scripts
 # The app under test serves HTTPS with a self-signed dev cert, so skip TLS
 # verification for every k6 run launched from this image (CI and local docs).
 ENV K6_INSECURE_SKIP_TLS_VERIFY=true
+# Restate the base image's non-root user explicitly (Trivy AVD-DS-0002).
+USER 12345
