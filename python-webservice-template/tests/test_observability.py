@@ -66,6 +66,20 @@ async def _poll_ready(
     return last
 
 
+async def _poll_status_ingested(client: AsyncClient, timeout: float = 15.0) -> dict:
+    import asyncio
+    import time
+
+    deadline = time.monotonic() + timeout
+    body: dict = {}
+    while time.monotonic() < deadline:
+        body = (await client.get("/health/status")).json()
+        if body["ingest"]["rows_ingested_total"] > 0:
+            return body
+        await asyncio.sleep(0.1)
+    return body  # caller's assertion reports the stale value
+
+
 async def test_liveness_always_200(
     postgres_container,
     clickhouse_container,
@@ -126,7 +140,9 @@ async def test_status_structure_and_ingest_freshness(
     )
     async with lifespan_test_client(settings) as client:
         await _poll_ready(client, 200)
-        body = (await client.get("/health/status")).json()
+        # Readiness only means the ingest stream is connected; the first batch
+        # may not have been consumed yet on a slow runner. Wait (bounded) for it.
+        body = await _poll_status_ingested(client)
         assert body["app"]["status"] == "testing"
         assert body["uptime"]["process_seconds"] >= 0.0
         assert body["system"]["process"]["memory_rss_bytes"] > 0

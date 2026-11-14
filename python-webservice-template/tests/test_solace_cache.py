@@ -8,6 +8,8 @@ from httpx import AsyncClient
 from testcontainers.core.container import DockerContainer
 
 from pydantic import SecretStr
+from solace.messaging.errors.pubsubplus_client_error import PubSubPlusClientError
+from solace.messaging.messaging_service import MessagingService
 
 from settings import Settings
 from tests.app_client import lifespan_test_client
@@ -58,6 +60,11 @@ def solace_container():
         # stdout), so wait_for_logs can never match. Poll the guaranteed-messaging
         # health-check port instead — it returns 200 once the broker is active.
         _wait_for_solace_ready(container, timeout=180)
+        # guaranteed-active only proves the router is up; the message VPN can
+        # still refuse SMF clients with 'Not ready' (SERVICE_UNAVAILABLE) for a
+        # while afterwards, especially on a loaded Docker host. Wait until a real
+        # client connect succeeds so every test starts against a serving broker.
+        _wait_for_solace_messaging(container, timeout=120)
         yield container
 
 
@@ -80,6 +87,32 @@ def _wait_for_solace_ready(container: DockerContainer, timeout: float) -> None:
             last_err = exc  # broker not accepting connections yet
         time.sleep(2)
     raise TimeoutError(f"Solace health-check not ready within {timeout}s: {last_err}")
+
+
+def _wait_for_solace_messaging(container: DockerContainer, timeout: float) -> None:
+    host = container.get_container_host_ip()
+    port = int(container.get_exposed_port(55555))
+    props = {
+        "solace.messaging.transport.host": f"tcp://{host}:{port}",
+        "solace.messaging.service.vpn-name": "default",
+        "solace.messaging.authentication.scheme.basic.username": "admin",
+        "solace.messaging.authentication.scheme.basic.password": "admin",
+    }
+    deadline = time.monotonic() + timeout
+    delay = 0.5
+    last_err: Exception | None = None
+    while time.monotonic() < deadline:
+        svc = MessagingService.builder().from_properties(props).build()
+        try:
+            svc.connect()
+        except PubSubPlusClientError as exc:
+            last_err = exc  # VPN not yet serving clients
+        else:
+            svc.disconnect()
+            return
+        time.sleep(delay)
+        delay = min(delay * 2, 5.0)
+    raise TimeoutError(f"Solace messaging not ready within {timeout}s: {last_err}")
 
 
 @pytest.fixture(scope="module")

@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     # Ingestion transport selector
     ingest_transport: Literal["flight", "solace"] = "flight"
 
-    # Connection retry/backoff (Postgres, Redis, ClickHouse startup)
+    # Connection retry/backoff (Postgres, Redis, ClickHouse, Solace startup)
     connect_max_attempts: int = Field(default=5, ge=1)
     connect_base_delay: float = Field(default=1.0, ge=0)
     connect_max_delay: float = Field(default=30.0, ge=0)

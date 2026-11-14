@@ -18,6 +18,7 @@ from solace.messaging.receiver.inbound_message import InboundMessage
 from solace.messaging.receiver.message_receiver import MessageHandler
 from solace.messaging.resources.topic_subscription import TopicSubscription
 
+from core.retry import connect_with_backoff
 from ingestion.base import ConnectionState
 from settings import Settings
 
@@ -77,7 +78,20 @@ class SolaceBatchConsumer:
             return self._state
 
     async def __aenter__(self) -> "SolaceBatchConsumer":
-        self._service = await asyncio.to_thread(self._connect)
+        # The broker's SMF listener accepts TCP (and its health-check endpoint
+        # can report active) before the message VPN is serving clients; connect()
+        # then fails with 'Not ready' / SERVICE_UNAVAILABLE. Retry with the same
+        # bounded exponential backoff as the other startup dependencies.
+        async def _attempt() -> MessagingService:
+            return await asyncio.to_thread(self._connect)
+
+        self._service = await connect_with_backoff(
+            _attempt,
+            label="Solace",
+            max_attempts=self._settings.connect_max_attempts,
+            base_delay=self._settings.connect_base_delay,
+            max_delay=self._settings.connect_max_delay,
+        )
         return self
 
     def _connect(self) -> MessagingService:
@@ -88,7 +102,7 @@ class SolaceBatchConsumer:
             "solace.messaging.authentication.scheme.basic.password": self._settings.solace_password.get_secret_value(),
         }
         svc = MessagingService.builder().from_properties(props).build()
-        svc.connect()
+        svc.connect()  # raises on failure; a fresh service is built per attempt
         listener = _StateListener(self)
         svc.add_reconnection_listener(listener)
         svc.add_reconnection_attempt_listener(listener)
