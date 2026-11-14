@@ -52,6 +52,56 @@ The Java Webservice under java-webservice-template is ready for use — a Micron
 (Java 25) mirror of the Python template with the same endpoints and feature set.
 
 Other templates that might show in this repo are still works-in-progress.
+
 # Pipeline
 
-See `docs/` and `run_CICD.py --help`. Full description is added when the pipeline lands.
+One entry point, identical locally and in GitHub Actions: `python run_CICD.py` (use the p315 conda env).
+
+| Command | What it does |
+|---|---|
+| `run_CICD.py list` | services and whether they are ready or wip |
+| `run_CICD.py changed [--base origin/main]` | services affected by your changes |
+| `run_CICD.py changed fast` / `check` / `ci` | run a step set on changed services only |
+| `run_CICD.py python\|java\|rust <step...>` | one service (`fmt`, `fmt-check`, `lint`, `typecheck`, `test`, `build-image`, `scan-image`, `k6-smoke`, `k6-load`, ...) |
+| `run_CICD.py security [trivy\|osv\|gitleaks\|semgrep]` | repo-wide scanners (Docker) |
+| `run_CICD.py sonar <service>` | local SonarQube analysis (see sonar/README.md) |
+
+Step sets: **fast** (format + lint, seconds) < **check** (+ tests/coverage) < **ci** (+ image build/scan, k6 smoke).
+
+**Change detection** has one source of truth: `cicd/services.py` + `cicd/changed.py`. Changes under a service directory run that service; changes to `run_CICD.py`, `cicd/`, `.github/`, scanner configs or `requirements-dev.txt` run all; markdown/docs-only changes run nothing.
+
+**GitHub**: `ci.yml` runs on push to main, pull requests and manual dispatch (input `services`: `changed`|`all`). There are no scheduled workflows; Dependabot (monthly, all ecosystems) is the only recurring automation. The `Pipeline Status` job is the single required check for branch protection (Settings > Branches > require status check `Pipeline Status`). Rust is wip: it runs but never blocks; set `ready=True` in `cicd/services.py` and add `rust` to `status.needs` when it is ready.
+
+**Local hooks**: `.pre-commit-config.yaml` runs gitleaks on commit and `changed fast` on push (`pre-commit install --install-hooks && pre-commit install --hook-type pre-push`).
+
+**Suppressions** (`.trivyignore`, `osv-scanner.toml`, `.gitleaks.toml`, `sonar/false-positives.md`) must carry a justification for every entry.
+
+## Former GitLab CI jobs
+
+The per-service `.gitlab-ci.yml` files were retired; their jobs map as follows.
+
+| GitLab job | Now |
+|---|---|
+| Python `pytest` | `run_CICD.py python test` |
+| Java `build-test` | `run_CICD.py java check` / `ci` |
+| `k6-smoke` | `k6-smoke` step (part of `ci`) |
+| `k6-load` | local only: `run_CICD.py <svc> k6-load` |
+| `k6-stress` | no pipeline step; run locally with the service's `docker compose up -d --wait`, then `tests/performance/stress.js` via the k6 image (`-e BASE_URL=... -e TARGET_RPS=50`) |
+
+## Known limitations
+
+**Baselined findings.** The first scan's findings are suppressed with time-boxed entries: `.trivyignore` (`exp:`), `osv-scanner.toml` (`ignoreUntil`) and two `# nosemgrep` comments in the service Dockerfiles. All expire on **2026-12-14**, after which the pipeline fails until the follow-up dependency/base-image bump PR lands: jackson, netty, guava, postgresql, micrometer, httpcore5, black, cryptography, Debian base-image CVEs, and a non-root `USER` in both service Dockerfiles. The Rust template crates are WIP.
+
+**Scanner coverage.**
+
+| Scanner | Limit |
+|---|---|
+| OSV | Maven is scanned via a CycloneDX SBOM generated in Docker |
+| OSV / Trivy | the Python service's runtime `requirements.txt` uses ranges and is not scanned (follow-up: lock file) |
+| Trivy | cannot see BOM-managed Maven versions |
+
+**Local SonarQube** shares its Docker Compose project name (`sonar`) and volumes with turbo-parakeet's `sonar/compose.yml`: one local SonarQube serves both repos. See sonar/README.md for token setup.
+
+**Rust** is `ready=False` (wip): it runs but never blocks. It currently fails `fmt-check` (32 rustfmt diffs); fix when promoting.
+
+**Not verifiable until the first GitHub run:** CodeQL for Rust, `upload-sarif` (needs code scanning enabled on the repo), and the Docker steps on ubuntu runners. Manual step: require `Pipeline Status` in branch protection.
