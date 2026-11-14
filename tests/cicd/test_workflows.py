@@ -51,7 +51,7 @@ def test_status_job_gates_on_required_jobs() -> None:
     status = load(WORKFLOWS / "ci.yml")["jobs"]["status"]
     assert status["name"] == "Pipeline Status"
     assert "rust" not in status["needs"]
-    assert {"changes", "python", "java", "security"} <= set(status["needs"])
+    assert {"changes", "pipeline-tests", "python", "java", "security"} <= set(status["needs"])
 
 
 def test_ci_triggers_exact() -> None:
@@ -59,6 +59,8 @@ def test_ci_triggers_exact() -> None:
     assert set(t) == {"push", "pull_request", "workflow_dispatch"}
     assert t["push"]["branches"] == ["main"]
     assert t["pull_request"]["branches"] == ["main"]
+    # The required check must report on every PR, docs-only included.
+    assert "paths-ignore" not in t["push"] and "paths-ignore" not in t["pull_request"]
 
 
 @pytest.mark.parametrize("path", [f for f in FILES if f.name != "ci.yml"], ids=lambda p: p.name)

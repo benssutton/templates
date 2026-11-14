@@ -20,6 +20,12 @@ def test_every_entry_is_monthly():
     assert intervals == {"monthly"}
 
 
+def test_every_entry_has_a_cooldown():
+    """Fresh releases wait 7 days before Dependabot proposes them (semgrep enforces this too)."""
+    for u in _updates():
+        assert u.get("cooldown", {}).get("default-days", 0) >= 7, u["directory"]
+
+
 def test_every_directory_exists():
     for u in _updates():
         assert (ROOT / u["directory"].lstrip("/")).is_dir(), u["directory"]

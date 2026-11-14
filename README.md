@@ -68,9 +68,9 @@ One entry point, identical locally and in GitHub Actions: `python run_CICD.py` (
 
 Step sets: **fast** (format + lint, seconds) < **check** (+ tests/coverage) < **ci** (+ image build/scan, k6 smoke).
 
-**Change detection** has one source of truth: `cicd/services.py` + `cicd/changed.py`. Changes under a service directory run that service; changes to `run_CICD.py`, `cicd/`, `.github/`, scanner configs or `requirements-dev.txt` run all; markdown/docs-only changes run nothing.
+**Change detection** has one source of truth: `cicd/services.py` + `cicd/changed.py`. Changes under a service directory run that service; changes to `run_CICD.py`, `cicd/`, `.github/`, scanner configs or `requirements-dev.txt` run all; markdown/docs-only changes run no service jobs (CI still starts, so `Pipeline Status` reports and passes).
 
-**GitHub**: `ci.yml` runs on push to main, pull requests and manual dispatch (input `services`: `changed`|`all`). There are no scheduled workflows; Dependabot (monthly, all ecosystems) is the only recurring automation. The `Pipeline Status` job is the single required check for branch protection (Settings > Branches > require status check `Pipeline Status`). Rust is wip: it runs but never blocks; set `ready=True` in `cicd/services.py` and add `rust` to `status.needs` when it is ready.
+**GitHub**: `ci.yml` runs on every push to main, every pull request (no `paths-ignore`) and manual dispatch (input `services`: `changed`|`all`); the `pipeline-tests` job always runs `tests/cicd`. If the push base is unknown (force-push) it diffs against `HEAD~1`, and with no usable base it runs all services. There are no scheduled workflows; Dependabot (monthly, all ecosystems) is the only recurring automation. The `Pipeline Status` job is the single required check for branch protection (Settings > Branches > require status check `Pipeline Status`). Rust is wip: it runs but never blocks; set `ready=True` in `cicd/services.py` and add `rust` to `status.needs` when it is ready.
 
 **Local hooks**: `.pre-commit-config.yaml` runs gitleaks on commit and `changed fast` on push (`pre-commit install --install-hooks && pre-commit install --hook-type pre-push`).
 

@@ -1,12 +1,13 @@
 name: CI
 
+# No paths-ignore: `Pipeline Status` is the required check and must report on every PR, or a
+# docs-only PR could never merge. The `changes` job maps docs-only diffs to [] instead, so
+# every service job is skipped and `status` passes in seconds.
 on:
   push:
     branches: [main]
-    paths-ignore: ['**.md', 'docs/**', '.claude/**', 'sonar/**']
   pull_request:
     branches: [main]
-    paths-ignore: ['**.md', 'docs/**', '.claude/**', 'sonar/**']
   workflow_dispatch:
     inputs:
       services:
@@ -20,7 +21,8 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseded PR/branch runs are cancelled; main runs always finish (one per merge).
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   changes:
@@ -45,6 +47,13 @@ jobs:
           if [ "$EVENT" = "pull_request" ]; then BASE="$PR_BASE";
           elif [ "$EVENT" = "push" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ]; then BASE="$PUSH_BEFORE";
           else BASE="HEAD~1"; fi
+          # A force-push can leave `before` absent from the clone: fall back to the previous
+          # commit, and with no usable base at all (single-commit history) run everything.
+          if ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "base $BASE not found; falling back to HEAD~1"
+            BASE="HEAD~1"
+            git cat-file -e "$BASE^{commit}" 2>/dev/null || WANT=all
+          fi
           if [ "$WANT" = "all" ]; then
             SERVICES='["java","python","rust"]'
           else
@@ -76,12 +85,25 @@ jobs:
       contents: read
       security-events: write
 
+  # Guards the pipeline itself (workflow/dependabot/change-detection tests); always runs.
+  pipeline-tests:
+    name: Pipeline tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest tests/cicd -q
+
   # The only check required by branch protection. Skipped jobs count as success; Rust (wip) never blocks.
   status:
     name: Pipeline Status
     runs-on: ubuntu-latest
     if: always()
-    needs: [changes, python, java, security]
+    needs: [changes, pipeline-tests, python, java, security]
     steps:
       - name: Fail if any required job failed or was cancelled
         env:
