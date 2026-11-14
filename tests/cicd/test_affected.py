@@ -31,7 +31,7 @@ def test_unrelated_root_file_changes_nothing():
 
 
 def test_windows_separators_are_normalised():
-    assert affected(["rust-webservice-template\src\main.rs"]) == ["rust"]
+    assert affected(["rust-webservice-template\\src\\main.rs"]) == ["rust"]
 
 
 def test_prefix_lookalike_directory_is_not_a_match():
