@@ -29,7 +29,7 @@ You (the main session) are the orchestrator. Subagents can't spawn their own sub
 | 6 Push / PR / monitor | `general-purpose` | `sonnet` | `medium` |
 | 7 Remote triage + fixers | `general-purpose` | `opus` | `medium` |
 
-The reason for delegating is cost, and for keeping your context clean: pipeline logs and scanner output are long, so the runner agents keep them in log files and return only summaries. Give every agent the repo path, the interpreter path, the run-ledger path, and exactly what to return.
+The reason for delegating is cost, and for keeping your context clean: pipeline logs and scanner output are long, so the runner agents keep them in log files and return only summaries. Give every agent the repo path, the interpreter path, the run-ledger path, and exactly what to return. Agents often run in parallel in the same working tree, so tell every agent not to use `git stash`, `git checkout`, `git reset` or `git clean`. Those commands silently undo the other agents' uncommitted work.
 
 ### Run ledger
 
@@ -50,6 +50,7 @@ Before dispatching anything, check the things that would otherwise fail late or 
 - `gh auth status` is logged in. Steps 2, 4, 6 and 7 depend on it.
 - `.github/workflows/` exists, on this branch or on `origin/main`. If a push or PR is in scope and there are no workflows, a pushed commit or PR runs no real CI, and a "green" result would mean nothing was checked. Say so in the step-1 question round, so the user can decide to go ahead, knowing the local run is the only gate, or to add workflows first. Don't discover this after pushing.
 - `python run_CICD.py list` shows which services are `ready` (blocking) and which are `wip` (non-blocking).
+- Read the `needs:` list of the `Pipeline Status` job in `.github/workflows/ci.yml` and record which jobs block remotely. In particular, if `security` is in it, the repo-wide scanners block the remote run, including on findings inside `wip` services (see step 3).
 
 ## Step 1: Tool versions (ask permission)
 
@@ -83,7 +84,7 @@ The agent returns, per item: applied / deferred (with reason) / not applicable, 
 
 Use the strategy **full → targeted → full**:
 
-- **First iteration: full.** Run three things: `python run_CICD.py all ci`, `python run_CICD.py security`, and `python -m pytest tests/cicd`. The last is the pipeline's own test suite, which no `run_CICD.py` target runs. They are independent, so run them concurrently. If Docker contention makes things flaky, run them one after the other instead.
+- **First iteration: full.** Run three things: `python run_CICD.py all ci`, `python run_CICD.py security`, and `python -m pytest tests/cicd`. The last is the pipeline's own test suite, which no `run_CICD.py` target runs. Run the Docker-heavy parts **one after the other**, never concurrently. On this machine, concurrent service runs fail in ways that look like real bugs: Solace and Testcontainers readiness timeouts, and the Trivy DB download timing out. Chasing those failures costs more than the time concurrency saves. `pytest tests/cicd` uses no Docker, so it can run alongside the others.
 - **Fix iterations: targeted.** After fixers change something, re-run only what failed and what the fix could affect, for example `python run_CICD.py java test` or `python run_CICD.py security semgrep`. If the change touched `cicd/`, `run_CICD.py` or root tool pins, that affects every service, so go back to a full run. Also re-run `pytest tests/cicd` whenever `cicd/` or `tests/cicd/` changed.
 - **Final iteration: full.** Before declaring the local stage green, run the full set once more. Targeted runs can miss a fix that broke something elsewhere.
 
@@ -92,7 +93,7 @@ Tell the runner agent:
 - The full `ci` set includes Java Testcontainers, Docker image builds and k6. It can run longer than a foreground shell's timeout, so run commands in the background, redirect output to a log file next to the ledger, and wait for completion. Don't poll.
 - Return the per-service summary table that `run_CICD.py` prints (step, PASS/FAIL, seconds) and the security PASS/FAIL lines. For each failure, return the relevant excerpt: the error lines, the failing test names, and each scanner finding's id, file, line and severity. Return excerpts, not the whole log.
 - Get service status from `python run_CICD.py list`. A `wip` service (Rust, currently) is non-blocking: still report and triage its failures, but they don't stop the push.
-- Attribute each security finding to a path. The scanners are repo-wide, so a `wip` service's lockfile can turn `security` red even though the service itself doesn't block. Report security as two results: findings in `ready` services and the repo root (blocking), and findings only inside `wip` service paths (non-blocking, triaged like any other). Don't add suppressions just to make `security` green. A suppression is only for a genuine false positive, and a real CVE in a `wip` service is still real. If the remote `Pipeline Status` treats security as blocking for the whole repo, say in the final report that the `wip` findings will block remotely, so the user can choose between fixing them now, accepting a red check, or scoping the scan.
+- Attribute each security finding to a path. The scanners are repo-wide, so a `wip` service's lockfile can turn `security` red even though the service itself doesn't block. Report security as two results: findings in `ready` services and the repo root (blocking), and findings only inside `wip` service paths (non-blocking, triaged like any other). Don't add suppressions just to make `security` green. A suppression is only for a genuine false positive, and a real CVE in a `wip` service is still real. **When a push or PR is in scope and preflight found `security` among the required jobs, treat `wip` security findings as blocking.** They will turn `Pipeline Status` red, so fix or genuinely triage them in the local loop rather than finding out after the push. On a local-only run, report them as non-blocking but note that they will block remotely.
 
 ## Step 4: Triage and fix (no permission needed)
 
@@ -145,6 +146,8 @@ If no workflow run appears within about two minutes of the push, the repo may ha
 ## Step 7: Remote findings (no permission needed)
 
 Run `github_findings.py --ref <branch>` (add `--pr N` for a PR) and combine it with the step-6 job failures. If nothing is open and every blocking job is green, you're done.
+
+A job that passed locally but fails remotely usually points to an environment difference, not a flaky test. Typical causes are a slower runner exposing a readiness race, a shared runner IP being rate-limited by a registry, or a workflow-only command the local pipeline never runs. Fix the cause, for example with retry and backoff, an offline mode, or a workflow test in `tests/cicd`. Don't re-run the job until it happens to pass.
 
 Dependabot alerts only close once the fix reaches the default branch. On a PR, an alert whose fix is already in the PR is not a remaining finding; record it as "fixed in PR #N".
 

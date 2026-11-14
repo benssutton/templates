@@ -49,6 +49,8 @@ Suppress at the **source** (so local runs and the next CI upload stop reporting 
 
 Use 3 months as the default review horizon, so suppressions get revisited instead of rotting.
 
+Inline Semgrep suppressions (`nosemgrep`) don't reach GitHub. CI's SARIF upload still contains the suppressed results, so code scanning keeps opening alerts for findings already baselined locally. Dismiss those alerts on GitHub, with the same justification, whenever a push or PR is in scope. A suppressed-but-open alert isn't a new finding, so don't re-triage it.
+
 ### GitHub dismissal (`gh api`, repo = `owner/name`)
 
 ```bash
