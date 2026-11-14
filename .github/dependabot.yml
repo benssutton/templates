@@ -1,0 +1,39 @@
+# The only scheduled automation in this repo. Monthly, grouped, 7-day cooldown on fresh releases.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /python-webservice-template
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    cooldown: { default-days: 7 }
+    groups: { python: { patterns: ["*"], update-types: [minor, patch] } }
+
+  - package-ecosystem: maven
+    directory: /java-webservice-template
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    cooldown: { default-days: 7 }
+    groups: { java: { patterns: ["*"], update-types: [minor, patch] } }
+
+  - package-ecosystem: cargo
+    directory: /rust-webservice-template
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    cooldown: { default-days: 7 }
+    groups: { rust: { patterns: ["*"], update-types: [minor, patch] } }
+
+  - package-ecosystem: docker
+    directory: /python-webservice-template
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+  - package-ecosystem: docker
+    directory: /java-webservice-template
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    cooldown: { default-days: 7 }
+    groups: { actions: { patterns: ["*"] } }
