@@ -1,5 +1,9 @@
 # Pinned developer / CI tooling for the repo root (the pipeline itself is stdlib-only).
 # Service dependencies live in each service. Dependabot proposes updates monthly.
-pytest>=8.4
+pytest>=9.0.3
 pre-commit>=4.0
 pyyaml>=6.0
+# transitive via pre-commit; floor keeps OSV's resolver off vulnerable virtualenv versions.
+# No filelock floor: OSV v2.7 ignores environment markers, so any floor conflicts with
+# virtualenv's `filelock==3.19.1; python_version<"3.10"` pin (see osv-scanner.toml).
+virtualenv>=21.14.13

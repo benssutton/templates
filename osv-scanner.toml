@@ -8,8 +8,8 @@
 # fetch the Micronaut parent POM and, when it worked, resolved BOM-managed versions that
 # differ from what Maven ships. Instead the OSV step (cicd/steps/security.py) has Maven
 # (pinned Docker image) write the resolved compile/runtime tree as a CycloneDX SBOM to
-# java-webservice-template/target/bom.json and scans that with --sbom. The step fails if
-# the SBOM is not produced. Some older Maven reasons below name the versions osv's pom
+# java-webservice-template/target/bom.json and scans that with -L (CycloneDX is detected from the bom.json name).
+# The step fails if the SBOM is not produced. Some older Maven reasons below name the versions osv's pom
 # resolution guessed (e.g. 2.18.0); the IDs are still matched by the resolved versions.
 
 # ---- Maven (java-webservice-template, resolved CycloneDX SBOM) ----
@@ -22,11 +22,6 @@ reason = "ch.qos.logback:logback-core 1.5.32 in java-webservice-template/pom.xml
 id = "GHSA-p47f-322f-whfh"
 ignoreUntil = 2026-12-14
 reason = "ch.qos.logback:logback-core 1.5.32 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
-
-[[IgnoredVulns]]
-id = "GHSA-72hv-8253-57qq"
-ignoreUntil = 2026-12-14
-reason = "com.fasterxml.jackson.core:jackson-core 2.18.0 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
 
 [[IgnoredVulns]]
 id = "GHSA-7hhh-6rmp-j9qf"
@@ -114,16 +109,6 @@ ignoreUntil = 2026-12-14
 reason = "com.google.guava:guava 33.6.0-jre in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
 
 [[IgnoredVulns]]
-id = "GHSA-g3pr-3p32-fp23"
-ignoreUntil = 2026-12-14
-reason = "io.micrometer:micrometer-core 1.16.5 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
-
-[[IgnoredVulns]]
-id = "GHSA-w737-wx49-qj23"
-ignoreUntil = 2026-12-14
-reason = "io.micrometer:micrometer-core 1.16.5 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
-
-[[IgnoredVulns]]
 id = "GHSA-558v-64gr-wgg4"
 ignoreUntil = 2026-12-14
 reason = "io.netty:netty-codec-compression 4.2.15.Final in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
@@ -208,11 +193,6 @@ id = "GHSA-ghc9-756g-vrcv"
 ignoreUntil = 2026-12-14
 reason = "org.json:json 20240303 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
 
-[[IgnoredVulns]]
-id = "GHSA-j92g-9f8w-j867"
-ignoreUntil = 2026-12-14
-reason = "org.postgresql:postgresql 42.7.11 in java-webservice-template/pom.xml; baselined 2026-11-14; fix in follow-up dependency-bump PR"
-
 # First surfaced by the SBOM scan of resolved versions (osv's own pom resolution missed them).
 [[IgnoredVulns]]
 id = "GHSA-5hh8-q8hv-fr38"
@@ -231,34 +211,9 @@ reason = "com.fasterxml.jackson.core:jackson-databind 2.21.2 in java-webservice-
 
 # ---- PyPI (requirements-dev.txt files) ----
 [[IgnoredVulns]]
-id = "PYSEC-2026-2120"
-ignoreUntil = 2026-12-14
-reason = "black 26.1 in python-webservice-template/requirements-dev.txt; baselined 2026-11-14; fix in follow-up dependency-bump PR"
-
-[[IgnoredVulns]]
-id = "PYSEC-2026-2121"
-ignoreUntil = 2026-12-14
-reason = "black 26.1 in python-webservice-template/requirements-dev.txt; baselined 2026-11-14; fix in follow-up dependency-bump PR"
-
-[[IgnoredVulns]]
-id = "GHSA-3936-cmfr-pm3m"
-ignoreUntil = 2026-12-14
-reason = "black 26.1 in python-webservice-template/requirements-dev.txt; baselined 2026-11-14; fix in follow-up dependency-bump PR"
-
-[[IgnoredVulns]]
 id = "GHSA-cg8m-r9f2-5wm2"
 ignoreUntil = 2026-12-14
 reason = "black 26.1 in python-webservice-template/requirements-dev.txt; baselined 2026-11-14; fix in follow-up dependency-bump PR"
-
-[[IgnoredVulns]]
-id = "PYSEC-2026-1845"
-ignoreUntil = 2026-12-14
-reason = "pytest 8.4 in requirements-dev.txt; baselined 2026-11-14; fix in follow-up dependency-bump PR"
-
-[[IgnoredVulns]]
-id = "GHSA-6w46-j5rx-g56g"
-ignoreUntil = 2026-12-14
-reason = "pytest 8.4 in requirements-dev.txt; baselined 2026-11-14; fix in follow-up dependency-bump PR"
 
 
 # ---- crates.io (rust-webservice-template/Cargo.lock) ----
@@ -273,114 +228,9 @@ ignoreUntil = 2026-12-14
 reason = "crossbeam-epoch 0.9.18 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
 
 [[IgnoredVulns]]
-id = "RUSTSEC-2024-0379"
-ignoreUntil = 2026-12-14
-reason = "fast-float 0.2.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-x8jh-xj3x-gx3c"
-ignoreUntil = 2026-12-14
-reason = "fast-float 0.2.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2025-0003"
-ignoreUntil = 2026-12-14
-reason = "fast-float 0.2.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-8655-xgh5-5vvq"
-ignoreUntil = 2026-12-14
-reason = "fast-float 0.2.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
 id = "RUSTSEC-2026-0258"
 ignoreUntil = 2026-12-14
 reason = "h2 0.4.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0186"
-ignoreUntil = 2026-12-14
-reason = "memmap2 0.7.1 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2024-0370"
-ignoreUntil = 2026-12-14
-reason = "proc-macro-error 1.0.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2025-0020"
-ignoreUntil = 2026-12-14
-reason = "pyo3 0.21.2 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-pph8-gcv7-4qj5"
-ignoreUntil = 2026-12-14
-reason = "pyo3 0.21.2 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0177"
-ignoreUntil = 2026-12-14
-reason = "pyo3 0.21.2 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-chgr-c6px-7xpp"
-ignoreUntil = 2026-12-14
-reason = "pyo3 0.21.2 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-36hh-v3qg-5jq4"
-ignoreUntil = 2026-12-14
-reason = "pyo3 0.21.2 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0194"
-ignoreUntil = 2026-12-14
-reason = "quick-xml 0.36.2 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0195"
-ignoreUntil = 2026-12-14
-reason = "quick-xml 0.36.2 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0185"
-ignoreUntil = 2026-12-14
-reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-4w2j-m93h-cj5j"
-ignoreUntil = 2026-12-14
-reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0338"
-ignoreUntil = 2026-12-14
-reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0339"
-ignoreUntil = 2026-12-14
-reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0340"
-ignoreUntil = 2026-12-14
-reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0342"
-ignoreUntil = 2026-12-14
-reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0523"
-ignoreUntil = 2026-12-14
-reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0524"
-ignoreUntil = 2026-12-14
-reason = "quinn-proto 0.11.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
 
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0538"
@@ -388,124 +238,14 @@ ignoreUntil = 2026-12-14
 reason = "quinn-udp 0.5.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
 
 [[IgnoredVulns]]
-id = "RUSTSEC-2026-0462"
-ignoreUntil = 2026-12-14
-reason = "rmcp 1.7.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-33f5-2c5q-wgwj"
-ignoreUntil = 2026-12-14
-reason = "rmcp 1.7.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-9g45-5xwm-f3wc"
-ignoreUntil = 2026-12-14
-reason = "rmcp 1.7.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-9pj6-vhgr-3mwh"
-ignoreUntil = 2026-12-14
-reason = "rmcp 1.7.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-c9xm-49cp-xcr9"
-ignoreUntil = 2026-12-14
-reason = "rmcp 1.7.0 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
 id = "RUSTSEC-2026-0486"
 ignoreUntil = 2026-12-14
 reason = "rustix 1.1.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
 
 [[IgnoredVulns]]
-id = "RUSTSEC-2026-0285"
-ignoreUntil = 2026-12-14
-reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-2mjx-qc3c-rqvc"
-ignoreUntil = 2026-12-14
-reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0346"
-ignoreUntil = 2026-12-14
-reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-c8m5-c952-6cm4"
-ignoreUntil = 2026-12-14
-reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0348"
-ignoreUntil = 2026-12-14
-reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-h2v8-394m-p7vv"
-ignoreUntil = 2026-12-14
-reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0349"
-ignoreUntil = 2026-12-14
-reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-w44r-93j7-qv28"
-ignoreUntil = 2026-12-14
-reason = "rustls 0.23.40 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0382"
-ignoreUntil = 2026-12-14
-reason = "rustls-webpki 0.103.13 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
 id = "RUSTSEC-2026-0386"
 ignoreUntil = 2026-12-14
 reason = "tokio 1.52.3 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0381"
-ignoreUntil = 2026-12-14
-reason = "webpki-roots 1.0.7 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-6g2r-675j-hx59"
-ignoreUntil = 2026-12-14
-reason = "xxhash-rust 0.8.15 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0367"
-ignoreUntil = 2026-12-14
-reason = "zip 1.1.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0368"
-ignoreUntil = 2026-12-14
-reason = "zip 1.1.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0369"
-ignoreUntil = 2026-12-14
-reason = "zip 1.1.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0429"
-ignoreUntil = 2026-12-14
-reason = "zip 1.1.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-8hxf-qr8p-62x4"
-ignoreUntil = 2026-12-14
-reason = "zip 1.1.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "GHSA-m665-v7pm-7grj"
-ignoreUntil = 2026-12-14
-reason = "zip 1.1.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
 
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0391"
@@ -576,3 +316,49 @@ reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026
 id = "RUSTSEC-2026-0410"
 ignoreUntil = 2026-12-14
 reason = "zstd-sys 2.0.16+zstd.1.5.7 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+
+# Not-compiled / not-reachable code paths (verified with cargo tree); reviewed 2026-11-14.
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0457"
+ignoreUntil = 2027-02-14
+reason = "rmcp 2.2.0 OAuth client SSRF; rust-template enables only rmcp server + transport-streamable-http-server features (cargo tree -e features -i rmcp: no auth/client features), so the vulnerable client code is not compiled. Fix is rmcp 3.7+ (major: sessionless MCP 2026-07-28 migration) - follow-up; review 2027-02-14"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0462"
+ignoreUntil = 2027-02-14
+reason = "rmcp 2.2.0 unbounded body buffering in Streamable HTTP *clients* (reqwest/unix-socket); only server features enabled, client transports not compiled. Fix is rmcp 3.9+ (major migration) - follow-up; review 2027-02-14"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0194"
+ignoreUntil = 2027-02-14
+reason = "quick-xml 0.39.4 locked only via object_store 0.13.2, an optional polars-io cloud dependency not enabled; cargo tree --target all -e all -i quick-xml is empty (not compiled); object_store pins ^0.39; review 2027-02-14"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0195"
+ignoreUntil = 2027-02-14
+reason = "quick-xml 0.39.4 locked only via object_store 0.13.2, an optional polars-io cloud dependency not enabled; cargo tree --target all -e all -i quick-xml is empty (not compiled); object_store pins ^0.39; review 2027-02-14"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0141"
+ignoreUntil = 2027-02-14
+reason = "bincode 2.0.1 unmaintained notice (no vulnerability, no fix); locked only as optional dep of polars-utils 0.55.2, feature not enabled; cargo tree -i bincode is empty; review 2027-02-14"
+
+[[IgnoredVulns]]
+id = "GHSA-69hj-f68j-2879"
+ignoreUntil = 2027-02-14
+reason = "filelock 3.19.1 is a false positive from OSV v2.7 resolving root requirements-dev.txt without environment markers: virtualenv pins filelock==3.19.1 only for python_version<\"3.10\"; on Python >=3.10 it requires filelock>=3.24.2,<5 and pip installs filelock 4.2.x (patched). Repo tooling runs on 3.13/3.15. Re-check when OSV honours markers; review 2027-02-14"
+
+[[IgnoredVulns]]
+id = "GHSA-8mx5-7m5m-r77g"
+ignoreUntil = 2027-02-14
+reason = "filelock 3.19.1 is a false positive from OSV v2.7 resolving root requirements-dev.txt without environment markers: virtualenv pins filelock==3.19.1 only for python_version<\"3.10\"; on Python >=3.10 it requires filelock>=3.24.2,<5 and pip installs filelock 4.2.x (patched). Repo tooling runs on 3.13/3.15. Re-check when OSV honours markers; review 2027-02-14"
+
+[[IgnoredVulns]]
+id = "GHSA-qmgc-5h2g-mvrw"
+ignoreUntil = 2027-02-14
+reason = "filelock 3.19.1 is a false positive from OSV v2.7 resolving root requirements-dev.txt without environment markers: virtualenv pins filelock==3.19.1 only for python_version<\"3.10\"; on Python >=3.10 it requires filelock>=3.24.2,<5 and pip installs filelock 4.2.x (patched). Repo tooling runs on 3.13/3.15. Re-check when OSV honours markers; review 2027-02-14"
+
+[[IgnoredVulns]]
+id = "GHSA-w853-jp5j-5j7f"
+ignoreUntil = 2027-02-14
+reason = "filelock 3.19.1 is a false positive from OSV v2.7 resolving root requirements-dev.txt without environment markers: virtualenv pins filelock==3.19.1 only for python_version<\"3.10\"; on Python >=3.10 it requires filelock>=3.24.2,<5 and pip installs filelock 4.2.x (patched). Repo tooling runs on 3.13/3.15. Re-check when OSV honours markers; review 2027-02-14"
