@@ -27,7 +27,9 @@ class FlightBatchConsumer:
     async def __aenter__(self) -> "FlightBatchConsumer":
         location = f"grpc://{self._settings.flight_host}:{self._settings.flight_port}"
         self._client = await asyncio.to_thread(flight.connect, location)
-        self._state = ConnectionState.RECONNECTING  # connected to server, not yet streaming
+        self._state = (
+            ConnectionState.RECONNECTING
+        )  # connected to server, not yet streaming
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -50,24 +52,24 @@ class FlightBatchConsumer:
             client = self._client
             self._state = ConnectionState.RECONNECTING
         ticket = flight.Ticket(self._settings.flight_ticket.encode())
-        reader = client.do_get(ticket)            # raises if the server is unreachable
+        reader = client.do_get(ticket)  # raises if the server is unreachable
         with self._lock:
-            if self._closing:                     # close() won the race during do_get
+            if self._closing:  # close() won the race during do_get
                 self._cancel(reader)
                 return
-            self._reader = reader                 # tracked so close() can cancel it
+            self._reader = reader  # tracked so close() can cancel it
             self._state = ConnectionState.CONNECTED
         try:
             for chunk in reader:
                 yield chunk.data
         except Exception:
             if self._closing:
-                return                              # intentional shutdown — exit cleanly
+                return  # intentional shutdown — exit cleanly
             self._state = ConnectionState.RECONNECTING
             raise
         finally:
             with self._lock:
-                if self._reader is reader:          # don't clobber a reader close() swapped
+                if self._reader is reader:  # don't clobber a reader close() swapped
                     self._reader = None
         if self._closing:
             return

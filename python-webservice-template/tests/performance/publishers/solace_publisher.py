@@ -4,6 +4,7 @@ Environment variables:
   SOLACE_HOST, SOLACE_PORT, SOLACE_VPN, SOLACE_USERNAME, SOLACE_PASSWORD,
   SOLACE_TOPIC, PUBLISH_INTERVAL (seconds between publishes, default 0.1)
 """
+
 import os
 import time
 

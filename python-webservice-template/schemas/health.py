@@ -9,8 +9,9 @@ class HealthStatusResponse(BaseModel):
 
 class ProbeResult(BaseModel):
     """Result of a single dependency health probe."""
+
     name: str
-    status: str            # "up" | "down"
+    status: str  # "up" | "down"
     latency_ms: float
     error: str | None = None
 
@@ -32,6 +33,7 @@ class CheckResult(BaseModel):
     additionally populates transport/connection_state/etc. Serialised with
     response_model_exclude_none so each check shows only its relevant fields.
     """
+
     name: str
     status: str
     latency_ms: float | None = None
@@ -49,7 +51,7 @@ class LivenessResponse(BaseModel):
 
 
 class ReadinessResponse(BaseModel):
-    status: str            # "ready" | "not_ready"
+    status: str  # "ready" | "not_ready"
     checks: list[CheckResult]
 
 

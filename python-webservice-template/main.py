@@ -45,7 +45,9 @@ def create_lifespan(settings: Settings, mcp: FastMCP):
         container: Container = app.state.container
         async with AsyncExitStack() as stack:
             pg_pool = await stack.enter_async_context(PostgresClient(settings))
-            schema_sql = (Path(__file__).parent / "scripts" / "postgres-init.sql").read_text()
+            schema_sql = (
+                Path(__file__).parent / "scripts" / "postgres-init.sql"
+            ).read_text()
             async with pg_pool.acquire() as conn:
                 await conn.execute(schema_sql)
             container.register_singleton(ConfigService, ConfigService(pg_pool))
@@ -65,11 +67,14 @@ def create_lifespan(settings: Settings, mcp: FastMCP):
                 compaction_runs=settings.lsm_compaction_runs,
                 key_columns=settings.lsm_key_columns,
             )
-            ingest_svc = await stack.enter_async_context(StreamIngestService(consumer, store, settings))
+            ingest_svc = await stack.enter_async_context(
+                StreamIngestService(consumer, store, settings)
+            )
             container.register_singleton(StreamIngestService, ingest_svc)
 
             await stack.enter_async_context(mcp.session_manager.run())
             yield
+
     return lifespan
 
 
@@ -96,7 +101,12 @@ def create_app(settings: Settings) -> FastAPI:
         title=settings.app_title,
         version=settings.app_version,
         description=settings.app_description,
-        openapi_tags=[health.TAG_METADATA, data.TAG_METADATA, config.TAG_METADATA, cache.TAG_METADATA],
+        openapi_tags=[
+            health.TAG_METADATA,
+            data.TAG_METADATA,
+            config.TAG_METADATA,
+            cache.TAG_METADATA,
+        ],
         lifespan=create_lifespan(settings, mcp),
     )
     app.state.container = container
@@ -118,7 +128,9 @@ def create_app(settings: Settings) -> FastAPI:
         allow_headers=settings.cors_allow_headers,
         allow_credentials=settings.cors_allow_credentials,
     )
-    app.add_middleware(CorrelationIdMiddleware, header_name=settings.correlation_id_header)
+    app.add_middleware(
+        CorrelationIdMiddleware, header_name=settings.correlation_id_header
+    )
     # MaxBodySizeMiddleware must be LAST (outermost) — Starlette LIFO ordering.
     app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_request_body_bytes)
 
@@ -142,7 +154,7 @@ def create_app(settings: Settings) -> FastAPI:
             "version": settings.app_version,
             "description": settings.app_description,
             "docs": "/docs",
-            "MCP": "/mcp"
+            "MCP": "/mcp",
         }
 
     return app
@@ -157,8 +169,9 @@ app = create_app(get_settings())
 
 if __name__ == "__main__":
     import uvicorn
+
     log.info("Starting the application from main.py")
-    settings = get_settings()   # same cached instance as `app` above
+    settings = get_settings()  # same cached instance as `app` above
     uvicorn.run(
         app,
         host=settings.server_host,

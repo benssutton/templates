@@ -19,10 +19,10 @@ from settings import Settings
 
 log = logging.getLogger(__name__)
 
-_INGEST_BASE_DELAY = 1.0        # seconds before first retry
-_INGEST_MAX_DELAY = 60.0        # seconds — retry cap
-_INGEST_MAX_FAILURES = 5        # consecutive batches() failures before shutdown
-_JOIN_TIMEOUT = 10.0            # seconds to wait for ingest thread on shutdown
+_INGEST_BASE_DELAY = 1.0  # seconds before first retry
+_INGEST_MAX_DELAY = 60.0  # seconds — retry cap
+_INGEST_MAX_FAILURES = 5  # consecutive batches() failures before shutdown
+_JOIN_TIMEOUT = 10.0  # seconds to wait for ingest thread on shutdown
 
 
 def _default_shutdown() -> None:
@@ -66,7 +66,9 @@ class StreamIngestService:
         if self._thread is not None:
             await asyncio.to_thread(self._thread.join, _JOIN_TIMEOUT)
             if self._thread.is_alive():
-                log.error("ingest thread did not stop within %.0fs; abandoning", _JOIN_TIMEOUT)
+                log.error(
+                    "ingest thread did not stop within %.0fs; abandoning", _JOIN_TIMEOUT
+                )
             self._thread = None
 
     def _record_ingest(self, batch: pa.RecordBatch) -> None:
@@ -74,7 +76,8 @@ class StreamIngestService:
         if batch.nbytes > max_bytes:
             log.error(
                 "dropping ingest batch: %d bytes exceeds max_ingest_batch_bytes (%d)",
-                batch.nbytes, max_bytes,
+                batch.nbytes,
+                max_bytes,
             )
             return
         self._store.ingest(batch)
@@ -93,7 +96,9 @@ class StreamIngestService:
                 for batch in self._consumer.batches():
                     consecutive_failures = 0
                     delay = _INGEST_BASE_DELAY
-                    token = set_correlation_id(new_id())   # per-batch ID for this thread's logs
+                    token = set_correlation_id(
+                        new_id()
+                    )  # per-batch ID for this thread's logs
                     try:
                         self._record_ingest(batch)
                     except Exception:
@@ -107,7 +112,8 @@ class StreamIngestService:
                 consecutive_failures += 1
                 log.exception(
                     "consumer batches() failed (failure %d/%d)",
-                    consecutive_failures, _INGEST_MAX_FAILURES,
+                    consecutive_failures,
+                    _INGEST_MAX_FAILURES,
                 )
                 if shutdown_on_failure and consecutive_failures >= _INGEST_MAX_FAILURES:
                     log.critical(
@@ -153,7 +159,11 @@ class StreamIngestService:
         # - a batch was received but too long ago, or
         # - no batch has ever been received (use time-since-start as proxy).
         if threshold is not None:
-            elapsed = seconds_since if seconds_since is not None else (now - self._started_at).total_seconds()
+            elapsed = (
+                seconds_since
+                if seconds_since is not None
+                else (now - self._started_at).total_seconds()
+            )
             stale = elapsed > threshold
         else:
             stale = False
@@ -162,7 +172,9 @@ class StreamIngestService:
             connection_state=state.value,
             thread_alive=self._thread.is_alive() if self._thread is not None else False,
             last_batch_at=last,
-            seconds_since_last_batch=round(seconds_since, 3) if seconds_since is not None else None,
+            seconds_since_last_batch=(
+                round(seconds_since, 3) if seconds_since is not None else None
+            ),
             rows_ingested_total=self._rows_total,
             stale=stale,
         )

@@ -4,7 +4,6 @@ import time
 import pytest
 from httpx import AsyncClient
 
-
 pytestmark = pytest.mark.flight
 
 

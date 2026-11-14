@@ -21,7 +21,9 @@ async def get_live(health_service: HealthServiceDep):
     return health_service.liveness()
 
 
-@router.get("/ready", response_model=ReadinessResponse, response_model_exclude_none=True)
+@router.get(
+    "/ready", response_model=ReadinessResponse, response_model_exclude_none=True
+)
 async def get_ready(health_service: HealthServiceDep, response: Response):
     result = await health_service.readiness()
     if result.status != "ready":

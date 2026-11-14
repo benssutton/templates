@@ -34,6 +34,10 @@ async def connect_with_backoff(
             jitter = delay * 0.25 * random.random()
             log.warning(
                 "%s: attempt %d/%d failed – retrying in %.1fs: %s",
-                label, attempt, max_attempts, delay + jitter, exc,
+                label,
+                attempt,
+                max_attempts,
+                delay + jitter,
+                exc,
             )
             await asyncio.sleep(delay + jitter)

@@ -8,6 +8,7 @@ from schemas.health import ProbeResult
 
 log = logging.getLogger(__name__)
 
+
 class ConfigService:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
@@ -15,7 +16,9 @@ class ConfigService:
     async def get_all(self) -> list[ConfigEntry]:
         async with timed("postgres.config.get_all"):
             async with self._pool.acquire() as conn:
-                rows = await conn.fetch("SELECT key, value FROM configuration ORDER BY key")
+                rows = await conn.fetch(
+                    "SELECT key, value FROM configuration ORDER BY key"
+                )
         return [ConfigEntry(key=row["key"], value=row["value"]) for row in rows]
 
     async def set(self, key: str, value: str) -> ConfigEntry:
@@ -40,7 +43,9 @@ class ConfigService:
             async with self._pool.acquire() as conn:
                 await conn.execute("SELECT 1")
             latency_ms = (time.perf_counter() - start) * 1000
-            return ProbeResult(name="postgres", status="up", latency_ms=round(latency_ms, 2))
+            return ProbeResult(
+                name="postgres", status="up", latency_ms=round(latency_ms, 2)
+            )
         except Exception as exc:
             latency_ms = (time.perf_counter() - start) * 1000
             log.error("postgres health check failed: %s", exc)

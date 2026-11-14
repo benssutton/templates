@@ -1,4 +1,3 @@
-
 async def test_liveness_returns_alive(test_client):
     response = await test_client.get("/health/live")
     assert response.status_code == 200

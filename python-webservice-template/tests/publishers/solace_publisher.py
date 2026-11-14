@@ -6,8 +6,9 @@ from solace.messaging.resources.topic import Topic
 
 
 class SolacePublisher:
-    def __init__(self, host: str, port: int, vpn: str,
-                 username: str, password: str, topic: str) -> None:
+    def __init__(
+        self, host: str, port: int, vpn: str, username: str, password: str, topic: str
+    ) -> None:
         self._topic = topic
         props = {
             "solace.messaging.transport.host": f"tcp://{host}:{port}",

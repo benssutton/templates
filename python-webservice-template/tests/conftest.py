@@ -20,6 +20,7 @@ REDIS_IMAGE = "redis/redis-stack-server:latest"
 
 # ── ClickHouse fixtures ────────────────────────────────────────────────────
 
+
 @pytest.fixture(scope="session")
 def clickhouse_container():
     with ClickHouseContainer(CH_IMAGE, port=8123) as ch:
@@ -36,16 +37,21 @@ async def test_clickhouse_client(clickhouse_container):
         clickhouse_password=clickhouse_container.password or "",
         clickhouse_database="default",
     )
-    schema_sql = (Path(__file__).parent.parent / "scripts" / "clickhouse-init.sql").read_text()
+    schema_sql = (
+        Path(__file__).parent.parent / "scripts" / "clickhouse-init.sql"
+    ).read_text()
     async with ClickHouseClient(ch_settings) as client:
         await client.command(schema_sql)
-        with pa_ipc.open_file(Path(__file__).parent / "test_data" / "clickhouse_seed_data.ipc") as reader:
+        with pa_ipc.open_file(
+            Path(__file__).parent / "test_data" / "clickhouse_seed_data.ipc"
+        ) as reader:
             arrow_table = reader.read_all()
         await client.insert_arrow("default.items", arrow_table)
         yield client
 
 
 # ── Postgres fixtures ──────────────────────────────────────────────────────
+
 
 @pytest.fixture(scope="session")
 def postgres_container():
@@ -54,6 +60,7 @@ def postgres_container():
 
 
 # ── Redis fixtures ─────────────────────────────────────────────────────────
+
 
 @pytest.fixture(scope="session")
 def redis_container():
@@ -72,6 +79,7 @@ def redis_container():
 #   BATCH_3: 1 row → stays in memtable; tombstone beats id=2 in compacted run
 #
 # Expected GET /data/cache result: total=2, id=1→"v2", id=2 absent, id=3→"v1"
+
 
 @pytest.fixture(scope="session")
 def example_flight_server():
@@ -93,6 +101,7 @@ def example_flight_server():
 # own DI container, FastMCP instance, and lifespan — so multiple client
 # fixtures (flight / HTTP-ingest / Solace) can coexist in one pytest process
 # without sharing state.
+
 
 @pytest.fixture(scope="session")
 async def test_client(
@@ -133,5 +142,6 @@ def cid_caplog(caplog):
     """caplog with the production CorrelationIdFilter attached, so captured
     records expose `record.correlation_id`. Real logging, no mocking."""
     from core.correlation import CorrelationIdFilter
+
     caplog.handler.addFilter(CorrelationIdFilter())
     return caplog

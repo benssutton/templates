@@ -10,10 +10,7 @@ from schemas.data import DataRowsResponse
 log = logging.getLogger(__name__)
 
 TAG = "Data Service"
-TAG_METADATA = {
-    "name": TAG,
-    "description": "Endpoints for retrieving data"
-    }
+TAG_METADATA = {"name": TAG, "description": "Endpoints for retrieving data"}
 
 router = APIRouter(tags=[TAG])
 
@@ -43,7 +40,7 @@ async def ingest_batch(
     try:
         async with timed("ingest.decode"):
             reader = pa.ipc.open_stream(pa.BufferReader(body))
-            batches = list(reader)        # force full decode inside the timed block
+            batches = list(reader)  # force full decode inside the timed block
     except pa.ArrowInvalid as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     for batch in batches:

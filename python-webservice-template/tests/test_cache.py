@@ -17,7 +17,9 @@ async def test_post_cache_without_ttl(test_client: AsyncClient):
 
 
 async def test_post_cache_with_ttl(test_client: AsyncClient):
-    response = await test_client.post("/cache/", json={"key": "expiring", "value": "soon", "ttl_seconds": 60})
+    response = await test_client.post(
+        "/cache/", json={"key": "expiring", "value": "soon", "ttl_seconds": 60}
+    )
     assert response.status_code == 201
     assert response.json() == {"key": "expiring", "value": "soon", "ttl_seconds": 60}
 
@@ -68,4 +70,3 @@ async def test_post_cache_with_list_value(test_client: AsyncClient):
     get_response = await test_client.get("/cache/json_list")
     assert get_response.status_code == 200
     assert get_response.json()["value"] == [1, "two", {"three": 3}]
-

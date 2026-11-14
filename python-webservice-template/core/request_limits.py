@@ -4,6 +4,7 @@ Counts bytes as they stream from the client and aborts with 413 once the limit
 is crossed — works even when Content-Length is absent (chunked uploads). Applied
 app-wide so every current and future POST route inherits the policy.
 """
+
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 
@@ -61,9 +62,11 @@ class MaxBodySizeMiddleware:
 
     @staticmethod
     async def _reject(send: Send) -> None:
-        await send({
-            "type": "http.response.start",
-            "status": 413,
-            "headers": [(b"content-type", b"text/plain; charset=utf-8")],
-        })
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [(b"content-type", b"text/plain; charset=utf-8")],
+            }
+        )
         await send({"type": "http.response.body", "body": b"Payload Too Large"})

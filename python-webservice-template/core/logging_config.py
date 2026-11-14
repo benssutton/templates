@@ -5,6 +5,7 @@ Installs a stream handler on the root logger whose formatter includes
 exists. Safe to call multiple times — the multi-app test pattern constructs many
 apps in one process.
 """
+
 import logging
 
 from core.correlation import CorrelationIdFilter

@@ -10,7 +10,8 @@ pytestmark = pytest.mark.resilience
 
 
 async def test_clickhouse_unreachable_aborts_startup_after_bounded_retries(
-    postgres_container, redis_container,
+    postgres_container,
+    redis_container,
 ):
     # Real Postgres + Redis (both connect on the first try); ClickHouse points at
     # a closed port. With a tiny, Settings-driven backoff budget the real lifespan
@@ -21,7 +22,7 @@ async def test_clickhouse_unreachable_aborts_startup_after_bounded_retries(
         postgres_url=f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}",
         redis_url=f"redis://localhost:{redis_port}/0",
         clickhouse_host="127.0.0.1",
-        clickhouse_port=1,                 # nothing is listening here
+        clickhouse_port=1,  # nothing is listening here
         connect_max_attempts=3,
         connect_base_delay=0.001,
         connect_max_delay=0.005,
@@ -34,7 +35,9 @@ async def test_clickhouse_unreachable_aborts_startup_after_bounded_retries(
     with pytest.raises(Exception):
         async with lifespan_test_client(settings):
             pass
-    assert time.monotonic() - start < 15.0  # retries ≤15ms total; 15s allows for container/ASGI startup overhead
+    assert (
+        time.monotonic() - start < 15.0
+    )  # retries ≤15ms total; 15s allows for container/ASGI startup overhead
 
 
 async def test_stock_redis_without_json_module_aborts_startup(postgres_container):

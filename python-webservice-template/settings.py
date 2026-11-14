@@ -10,7 +10,9 @@ class Settings(BaseSettings):
 
     app_title: str = "Template Fast API Project"
     app_version: str = "1.0.0"
-    app_description: str = "A Python FAST API service with MCP endpoints and Rust extensions, ready for Claude"
+    app_description: str = (
+        "A Python FAST API service with MCP endpoints and Rust extensions, ready for Claude"
+    )
 
     status: str = "running"
 
@@ -22,7 +24,9 @@ class Settings(BaseSettings):
     mcp_name: str = "python-template"
     mcp_instructions: str = "Tools for this template application."
 
-    postgres_url: SecretStr = SecretStr("postgresql://appuser:password@localhost:5432/appdb")
+    postgres_url: SecretStr = SecretStr(
+        "postgresql://appuser:password@localhost:5432/appdb"
+    )
     postgres_pool_min_size: int = 2
     postgres_pool_max_size: int = 10
 
@@ -35,10 +39,10 @@ class Settings(BaseSettings):
     redis_url: SecretStr = SecretStr("redis://localhost:6379/0")
 
     flight_host: str = "localhost"
-    flight_port: int = 8815          # pyarrow Flight default
+    flight_port: int = 8815  # pyarrow Flight default
     flight_ticket: str = "items"
-    lsm_flush_rows: int = 1000       # memtable -> run threshold
-    lsm_compaction_runs: int = 4     # run count -> compaction threshold
+    lsm_flush_rows: int = 1000  # memtable -> run threshold
+    lsm_compaction_runs: int = 4  # run count -> compaction threshold
     lsm_key_columns: list[str] = ["id"]  # merge partition key; single extension point
 
     # Ingestion transport selector
@@ -51,14 +55,22 @@ class Settings(BaseSettings):
 
     # Observability
     metrics_enabled: bool = True
-    health_check_timeout_seconds: float = 2.0                 # per-dependency ping timeout
-    ingest_staleness_threshold_seconds: float | None = None   # None = staleness never reported
-    ingest_stale_fails_readiness: bool = False                # stale -> 503 only if True
-    ingest_max_disconnect_seconds: float | None = 60.0        # non-CONNECTED longer than this -> SIGTERM; None disables
+    health_check_timeout_seconds: float = 2.0  # per-dependency ping timeout
+    ingest_staleness_threshold_seconds: float | None = (
+        None  # None = staleness never reported
+    )
+    ingest_stale_fails_readiness: bool = False  # stale -> 503 only if True
+    ingest_max_disconnect_seconds: float | None = (
+        60.0  # non-CONNECTED longer than this -> SIGTERM; None disables
+    )
 
     # Inbound size limits
-    max_request_body_bytes: int = 16 * 1024 * 1024     # 16 MiB; over-limit HTTP body -> 413
-    max_ingest_batch_bytes: int = 16 * 1024 * 1024     # 16 MiB; over-limit stream batch -> dropped+logged
+    max_request_body_bytes: int = (
+        16 * 1024 * 1024
+    )  # 16 MiB; over-limit HTTP body -> 413
+    max_ingest_batch_bytes: int = (
+        16 * 1024 * 1024
+    )  # 16 MiB; over-limit stream batch -> dropped+logged
 
     # Correlation ID header name (inbound adoption + response echo).
     correlation_id_header: str = "X-Request-ID"
@@ -67,7 +79,7 @@ class Settings(BaseSettings):
     cors_allow_origins: list[str] = ["*"]
     cors_allow_methods: list[str] = ["*"]
     cors_allow_headers: list[str] = ["*"]
-    cors_allow_credentials: bool = False     # must stay False while origins == ["*"]
+    cors_allow_credentials: bool = False  # must stay False while origins == ["*"]
 
     @model_validator(mode="after")
     def _cors_credentials_check(self) -> "Settings":

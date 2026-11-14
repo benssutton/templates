@@ -13,6 +13,7 @@ only point at which delete tombstones are reclaimed; a tombstone in the
 memtable or an un-compacted run continues to shadow older versions of the
 same key across all in-memory frames until a full merge has occurred.
 """
+
 from dataclasses import dataclass
 
 import pyarrow as pa
@@ -21,8 +22,9 @@ import polars as pl
 ORDER_COLUMN = "seqno"
 
 
-def _merge_frame(frames: tuple[pl.DataFrame, ...],
-                 key_columns: list[str]) -> pl.DataFrame | None:
+def _merge_frame(
+    frames: tuple[pl.DataFrame, ...], key_columns: list[str]
+) -> pl.DataFrame | None:
     if not frames:
         return None
     combined = pl.concat(frames, how="vertical")
@@ -30,8 +32,7 @@ def _merge_frame(frames: tuple[pl.DataFrame, ...],
     # (newest seqno first). key_columns is the single extension point:
     # ["id"] today, ["id", "version"] later, with no other change.
     winners = (
-        combined
-        .with_columns(
+        combined.with_columns(
             pl.col(ORDER_COLUMN)
             .rank("ordinal", descending=True)
             .over(key_columns)
@@ -43,9 +44,9 @@ def _merge_frame(frames: tuple[pl.DataFrame, ...],
     return winners
 
 
-def _merge_to_rows(frames: tuple[pl.DataFrame, ...],
-                   key_columns: list[str],
-                   limit: int | None) -> tuple[list[dict], int]:
+def _merge_to_rows(
+    frames: tuple[pl.DataFrame, ...], key_columns: list[str], limit: int | None
+) -> tuple[list[dict], int]:
     winners = _merge_frame(frames, key_columns)
     if winners is None:
         return [], 0
@@ -63,8 +64,12 @@ class _Snapshot:
 
 
 class LSMStore:
-    def __init__(self, flush_rows: int, compaction_runs: int,
-                 key_columns: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        flush_rows: int,
+        compaction_runs: int,
+        key_columns: list[str] | None = None,
+    ) -> None:
         self._flush_rows = flush_rows
         self._compaction_runs = compaction_runs
         self._key_columns = key_columns or ["id"]
@@ -109,8 +114,9 @@ class LSMStore:
         self._runs = [merged] if merged.height > 0 else []
 
     def _publish(self) -> None:
-        self._snapshot = _Snapshot(runs=tuple(self._runs),
-                                   memtable=tuple(self._memtable))
+        self._snapshot = _Snapshot(
+            runs=tuple(self._runs), memtable=tuple(self._memtable)
+        )
 
     def query(self, limit: int) -> tuple[list[dict], int]:
         snap = self._snapshot  # atomic read, no lock

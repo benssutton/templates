@@ -28,7 +28,7 @@ async def test_middleware_generates_id_when_absent():
     app = create_app(Settings())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.get("/")
-    assert len(r.headers["X-Request-ID"]) == 32    # uuid4().hex is always 32 hex chars
+    assert len(r.headers["X-Request-ID"]) == 32  # uuid4().hex is always 32 hex chars
 
 
 @pytest.mark.asyncio
@@ -54,6 +54,6 @@ async def test_timed_is_silent_when_no_request_active():
     from core.correlation import timed
 
     assert boundary_samples_var.get() is None
-    async with timed("clickhouse.select"):   # must not raise
+    async with timed("clickhouse.select"):  # must not raise
         pass
     assert boundary_samples_var.get() is None

@@ -2,7 +2,11 @@ import threading
 
 import pyarrow.flight as flight
 
-from tests.publishers.flight_server import ExampleFlightServer, make_batch, _default_script
+from tests.publishers.flight_server import (
+    ExampleFlightServer,
+    make_batch,
+    _default_script,
+)
 
 
 def test_example_server_streams_script():

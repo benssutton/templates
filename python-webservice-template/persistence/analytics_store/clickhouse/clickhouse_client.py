@@ -19,7 +19,7 @@ class ClickHouseClient:
                 password=self._settings.clickhouse_password.get_secret_value(),
                 database=self._settings.clickhouse_database,
             )
-            if not await client.ping():           # smoke-test: raises on failure -> retried
+            if not await client.ping():  # smoke-test: raises on failure -> retried
                 await client.close()
                 raise ConnectionError("ClickHouse startup ping returned False")
             return client

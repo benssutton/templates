@@ -5,7 +5,7 @@ from core.system_metrics import collect_system_snapshot
 
 def test_collect_system_snapshot_returns_plausible_values():
     process = psutil.Process()
-    process.cpu_percent()           # prime (first call returns 0.0)
+    process.cpu_percent()  # prime (first call returns 0.0)
     snapshot = collect_system_snapshot(process)
 
     assert snapshot.process.memory_rss_bytes > 0

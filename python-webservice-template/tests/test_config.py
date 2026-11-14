@@ -27,7 +27,9 @@ async def test_post_config_creates_entry(test_client: AsyncClient):
 async def test_post_config_upserts_on_duplicate_key(test_client: AsyncClient):
     key = "test_upsert_key"
     await test_client.post("/config/", json={"key": key, "value": "staging"})
-    response = await test_client.post("/config/", json={"key": key, "value": "production"})
+    response = await test_client.post(
+        "/config/", json={"key": key, "value": "production"}
+    )
     assert response.status_code == 201
     assert response.json() == {"key": key, "value": "production"}
 

@@ -81,13 +81,10 @@ class SolaceBatchConsumer:
 
     def _connect(self) -> MessagingService:
         props = {
-            "solace.messaging.transport.host":
-                f"tcp://{self._settings.solace_host}:{self._settings.solace_port}",
+            "solace.messaging.transport.host": f"tcp://{self._settings.solace_host}:{self._settings.solace_port}",
             "solace.messaging.service.vpn-name": self._settings.solace_vpn,
-            "solace.messaging.authentication.scheme.basic.username":
-                self._settings.solace_username,
-            "solace.messaging.authentication.scheme.basic.password":
-                self._settings.solace_password.get_secret_value(),
+            "solace.messaging.authentication.scheme.basic.username": self._settings.solace_username,
+            "solace.messaging.authentication.scheme.basic.password": self._settings.solace_password.get_secret_value(),
         }
         svc = MessagingService.builder().from_properties(props).build()
         svc.connect()
@@ -103,22 +100,21 @@ class SolaceBatchConsumer:
 
     def batches(self) -> Iterator[pa.RecordBatch]:
         self._receiver = (
-            self._service
-            .create_direct_message_receiver_builder()
+            self._service.create_direct_message_receiver_builder()
             .with_subscriptions([TopicSubscription.of(self._settings.solace_topic)])
             .build()
         )
         self._receiver.start()
         self._receiver.receive_async(_BatchHandler(self._queue))
         while True:
-            item = self._queue.get()    # blocks until message or None sentinel
+            item = self._queue.get()  # blocks until message or None sentinel
             if item is None:
                 break
             yield item
 
     def close(self) -> None:
         self._set_state(ConnectionState.DOWN)
-        self._queue.put(None)           # unblocks batches() generator
+        self._queue.put(None)  # unblocks batches() generator
         if self._receiver is not None:
             self._receiver.terminate()
             self._receiver = None

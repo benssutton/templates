@@ -7,6 +7,7 @@ the ID surfaces the full causal trail. asyncio.to_thread copies the context, so
 the HTTP /data/ingest path carries the request ID into the store-write thread
 automatically; the streaming ingest thread sets its own per-batch ID.
 """
+
 import contextvars
 import logging
 import time

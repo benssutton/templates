@@ -1,4 +1,10 @@
-from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Gauge, Info, generate_latest
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    Gauge,
+    Info,
+    generate_latest,
+)
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from settings import Settings
@@ -14,42 +20,79 @@ class MetricsService:
         self._instrumentator = Instrumentator(registry=self.registry)
 
         self.app_info = Info("app", "Application info", registry=self.registry)
-        self.app_info.info({"title": settings.app_title, "version": settings.app_version})
+        self.app_info.info(
+            {"title": settings.app_title, "version": settings.app_version}
+        )
 
         self.dep_up = Gauge(
-            "dependency_up", "1 if dependency reachable else 0", ["name"], registry=self.registry)
+            "dependency_up",
+            "1 if dependency reachable else 0",
+            ["name"],
+            registry=self.registry,
+        )
         self.dep_latency = Gauge(
-            "dependency_check_latency_seconds", "Dependency health-check latency",
-            ["name"], registry=self.registry)
+            "dependency_check_latency_seconds",
+            "Dependency health-check latency",
+            ["name"],
+            registry=self.registry,
+        )
 
         self.ingest_state = Gauge(
-            "ingest_connection_state", "Ingest transport connection state (1=active)",
-            ["transport", "state"], registry=self.registry)
+            "ingest_connection_state",
+            "Ingest transport connection state (1=active)",
+            ["transport", "state"],
+            registry=self.registry,
+        )
         self.ingest_secs = Gauge(
-            "ingest_seconds_since_last_batch", "Seconds since last ingested batch",
-            registry=self.registry)
+            "ingest_seconds_since_last_batch",
+            "Seconds since last ingested batch",
+            registry=self.registry,
+        )
         self.ingest_rows = Gauge(
-            "ingest_rows_ingested", "Total rows ingested", registry=self.registry)
+            "ingest_rows_ingested", "Total rows ingested", registry=self.registry
+        )
 
-        self.proc_cpu = Gauge("process_cpu_percent", "Process CPU percent", registry=self.registry)
+        self.proc_cpu = Gauge(
+            "process_cpu_percent", "Process CPU percent", registry=self.registry
+        )
         self.proc_mem = Gauge(
-            "process_memory_rss_bytes", "Process resident memory bytes", registry=self.registry)
+            "process_memory_rss_bytes",
+            "Process resident memory bytes",
+            registry=self.registry,
+        )
         self.proc_threads = Gauge(
-            "process_num_threads", "Process thread count", registry=self.registry)
+            "process_num_threads", "Process thread count", registry=self.registry
+        )
         self.proc_fds = Gauge(
-            "process_open_files", "Process open file count", registry=self.registry)
+            "process_open_files", "Process open file count", registry=self.registry
+        )
         self.proc_uptime = Gauge(
-            "process_uptime_seconds", "Process uptime seconds", registry=self.registry)
+            "process_uptime_seconds", "Process uptime seconds", registry=self.registry
+        )
 
-        self.sys_cpu = Gauge("system_cpu_percent", "Host CPU percent", registry=self.registry)
+        self.sys_cpu = Gauge(
+            "system_cpu_percent", "Host CPU percent", registry=self.registry
+        )
         self.sys_mem_total = Gauge(
-            "system_memory_total_bytes", "Host total memory bytes", registry=self.registry)
+            "system_memory_total_bytes",
+            "Host total memory bytes",
+            registry=self.registry,
+        )
         self.sys_mem_avail = Gauge(
-            "system_memory_available_bytes", "Host available memory bytes", registry=self.registry)
+            "system_memory_available_bytes",
+            "Host available memory bytes",
+            registry=self.registry,
+        )
         self.sys_mem_pct = Gauge(
-            "system_memory_used_percent", "Host memory used percent", registry=self.registry)
+            "system_memory_used_percent",
+            "Host memory used percent",
+            registry=self.registry,
+        )
         self.boot_time = Gauge(
-            "system_boot_time_seconds", "Host boot time (unix seconds)", registry=self.registry)
+            "system_boot_time_seconds",
+            "Host boot time (unix seconds)",
+            registry=self.registry,
+        )
 
     def instrument(self, app) -> None:
         self._instrumentator.instrument(app)
@@ -64,7 +107,8 @@ class MetricsService:
         ingest = status.ingest
         for state in ("connected", "reconnecting", "down"):
             self.ingest_state.labels(transport=ingest.transport, state=state).set(
-                1.0 if ingest.connection_state == state else 0.0)
+                1.0 if ingest.connection_state == state else 0.0
+            )
         secs = ingest.seconds_since_last_batch
         self.ingest_secs.set(secs if secs is not None else float("nan"))
         self.ingest_rows.set(ingest.rows_ingested_total)

@@ -62,9 +62,7 @@ async def test_delays_are_positive_and_increasing():
             raise ConnectionError("not yet")
         return "ok"
 
-    await connect_with_backoff(
-        connect, label="test", max_attempts=5, base_delay=0.01
-    )
+    await connect_with_backoff(connect, label="test", max_attempts=5, base_delay=0.01)
 
     deltas = [b - a for a, b in zip(timestamps, timestamps[1:])]
     assert len(deltas) == 3

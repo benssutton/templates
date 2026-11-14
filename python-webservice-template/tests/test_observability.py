@@ -48,6 +48,7 @@ def streaming_flight_server():
 async def _poll_ready(client: AsyncClient, expected_code: int, timeout: float = 10.0):
     import asyncio
     import time
+
     deadline = time.monotonic() + timeout
     last = None
     while time.monotonic() < deadline:
@@ -59,11 +60,15 @@ async def _poll_ready(client: AsyncClient, expected_code: int, timeout: float = 
 
 
 async def test_liveness_always_200(
-    postgres_container, clickhouse_container, test_clickhouse_client,
-    redis_container, streaming_flight_server,
+    postgres_container,
+    clickhouse_container,
+    test_clickhouse_client,
+    redis_container,
+    streaming_flight_server,
 ):
     settings = _settings(
-        postgres_container, clickhouse_container,
+        postgres_container,
+        clickhouse_container,
         f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
         streaming_flight_server.port,
     )
@@ -74,11 +79,15 @@ async def test_liveness_always_200(
 
 
 async def test_readiness_all_up_returns_200(
-    postgres_container, clickhouse_container, test_clickhouse_client,
-    redis_container, streaming_flight_server,
+    postgres_container,
+    clickhouse_container,
+    test_clickhouse_client,
+    redis_container,
+    streaming_flight_server,
 ):
     settings = _settings(
-        postgres_container, clickhouse_container,
+        postgres_container,
+        clickhouse_container,
         f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
         streaming_flight_server.port,
     )
@@ -96,11 +105,15 @@ async def test_readiness_all_up_returns_200(
 
 
 async def test_status_structure_and_ingest_freshness(
-    postgres_container, clickhouse_container, test_clickhouse_client,
-    redis_container, streaming_flight_server,
+    postgres_container,
+    clickhouse_container,
+    test_clickhouse_client,
+    redis_container,
+    streaming_flight_server,
 ):
     settings = _settings(
-        postgres_container, clickhouse_container,
+        postgres_container,
+        clickhouse_container,
         f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
         streaming_flight_server.port,
     )
@@ -115,16 +128,20 @@ async def test_status_structure_and_ingest_freshness(
 
 
 async def test_metrics_endpoint_exposes_series(
-    postgres_container, clickhouse_container, test_clickhouse_client,
-    redis_container, streaming_flight_server,
+    postgres_container,
+    clickhouse_container,
+    test_clickhouse_client,
+    redis_container,
+    streaming_flight_server,
 ):
     settings = _settings(
-        postgres_container, clickhouse_container,
+        postgres_container,
+        clickhouse_container,
         f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
         streaming_flight_server.port,
     )
     async with lifespan_test_client(settings) as client:
-        await client.get("/health/live")          # generate one request metric
+        await client.get("/health/live")  # generate one request metric
         resp = await client.get("/metrics")
         assert resp.status_code == 200
         assert "text/plain" in resp.headers["content-type"]
@@ -137,7 +154,10 @@ async def test_metrics_endpoint_exposes_series(
 
 
 async def test_ingest_disconnect_fails_readiness(
-    postgres_container, clickhouse_container, test_clickhouse_client, redis_container,
+    postgres_container,
+    clickhouse_container,
+    test_clickhouse_client,
+    redis_container,
 ):
     # Use a finite (non-looping) server: after exhausting the script, batches()
     # raises ConnectionError and the consumer enters RECONNECTING state.
@@ -148,10 +168,11 @@ async def test_ingest_disconnect_fails_readiness(
     server = ExampleFlightServer(location, _STREAM_SCRIPT, interval=0.0, loop=False)
     threading.Thread(target=server.serve, daemon=True).start()
     settings = _settings(
-        postgres_container, clickhouse_container,
+        postgres_container,
+        clickhouse_container,
         f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
         server.port,
-        ingest_max_disconnect_seconds=None,   # watchdog disabled; avoid SIGTERM in tests
+        ingest_max_disconnect_seconds=None,  # watchdog disabled; avoid SIGTERM in tests
     )
     async with lifespan_test_client(settings) as client:
         # Stream ends immediately; consumer enters RECONNECTING → readiness 503.
@@ -163,8 +184,11 @@ async def test_ingest_disconnect_fails_readiness(
 
 
 async def test_idle_ingest_is_stale_but_ready(
-    postgres_container, clickhouse_container, test_clickhouse_client,
-    redis_container, streaming_flight_server,
+    postgres_container,
+    clickhouse_container,
+    test_clickhouse_client,
+    redis_container,
+    streaming_flight_server,
 ):
     """Connected ingest that is idle (no recent batches) reports stale=True but
     does not fail readiness when ingest_stale_fails_readiness=False.
@@ -185,11 +209,15 @@ async def test_idle_ingest_is_stale_but_ready(
     # A fake consumer that is CONNECTED but never produces batches.
     class _IdleConsumer:
         def batches(self):
-            threading.Event().wait()    # blocks forever until close()
+            threading.Event().wait()  # blocks forever until close()
             return
             yield
-        def close(self): pass
-        def connection_state(self): return ConnectionState.CONNECTED
+
+        def close(self):
+            pass
+
+        def connection_state(self):
+            return ConnectionState.CONNECTED
 
     settings = Settings(
         ingest_transport="flight",
@@ -203,12 +231,12 @@ async def test_idle_ingest_is_stale_but_ready(
     # health_check does not require the ingest thread to be running.
     health = await svc.health_check()
     assert health.connection_state == "connected"
-    assert health.stale is False    # not yet past threshold
+    assert health.stale is False  # not yet past threshold
 
     await asyncio.sleep(0.6)
     health2 = await svc.health_check()
     assert health2.connection_state == "connected"
-    assert health2.stale is True    # past 0.5 s threshold, no batch ever received
+    assert health2.stale is True  # past 0.5 s threshold, no batch ever received
 
     # Confirm that stale-but-connected does NOT fail the HealthService readiness
     # check (ingest_stale_fails_readiness=False).
@@ -218,22 +246,28 @@ async def test_idle_ingest_is_stale_but_ready(
     readiness = await health_svc.readiness()
     ingest_check = next(c for c in readiness.checks if c.name == "ingest")
     assert ingest_check.status == "up"
-    assert readiness.status == "not_ready"   # deps not available, but ingest is up
+    assert readiness.status == "not_ready"  # deps not available, but ingest is up
 
 
 async def test_dependency_down_fails_readiness(
-    postgres_container, clickhouse_container, test_clickhouse_client, streaming_flight_server,
+    postgres_container,
+    clickhouse_container,
+    test_clickhouse_client,
+    streaming_flight_server,
 ):
     dedicated_redis = RedisContainer(REDIS_IMAGE)
     dedicated_redis.start()
     try:
         redis_url = f"redis://localhost:{int(dedicated_redis.get_exposed_port(6379))}/0"
         settings = _settings(
-            postgres_container, clickhouse_container, redis_url, streaming_flight_server.port,
+            postgres_container,
+            clickhouse_container,
+            redis_url,
+            streaming_flight_server.port,
         )
         async with lifespan_test_client(settings) as client:
             assert (await _poll_ready(client, 200)).status_code == 200
-            dedicated_redis.stop()             # kill only this test's redis
+            dedicated_redis.stop()  # kill only this test's redis
             resp = await _poll_ready(client, 503, timeout=15.0)
             assert resp.status_code == 503
             redis_check = {c["name"]: c for c in resp.json()["checks"]}["redis"]
@@ -246,14 +280,20 @@ async def test_dependency_down_fails_readiness(
 
 
 async def test_health_probe_error_is_generic_not_leaky(
-    postgres_container, clickhouse_container, test_clickhouse_client, streaming_flight_server,
+    postgres_container,
+    clickhouse_container,
+    test_clickhouse_client,
+    streaming_flight_server,
 ):
     dedicated_redis = RedisContainer(REDIS_IMAGE)
     dedicated_redis.start()
     try:
         redis_url = f"redis://localhost:{int(dedicated_redis.get_exposed_port(6379))}/0"
         settings = _settings(
-            postgres_container, clickhouse_container, redis_url, streaming_flight_server.port,
+            postgres_container,
+            clickhouse_container,
+            redis_url,
+            streaming_flight_server.port,
         )
         async with lifespan_test_client(settings) as client:
             assert (await _poll_ready(client, 200)).status_code == 200
@@ -278,13 +318,16 @@ async def test_health_probe_error_is_generic_not_leaky(
 
 
 async def test_clickhouse_health_check_exception_returns_generic_error(
-    postgres_container, redis_container, streaming_flight_server,
+    postgres_container,
+    redis_container,
+    streaming_flight_server,
 ):
     # clickhouse_connect.ping() raises OperationalError on a real network refusal
     # (rather than returning False), so the except branch in DataService.health_check
     # requires a genuine connection failure.  Pattern mirrors the Redis test above:
     # dedicated container, start app, kill container, confirm generic error in probe.
     from testcontainers.clickhouse import ClickHouseContainer
+
     dedicated_ch = ClickHouseContainer("clickhouse/clickhouse-server:latest", port=8123)
     dedicated_ch.start()
     try:
@@ -311,7 +354,9 @@ async def test_clickhouse_health_check_exception_returns_generic_error(
             pass
 
 
-async def test_postgres_health_check_exception_logs_and_returns_generic_error(postgres_container, caplog):
+async def test_postgres_health_check_exception_logs_and_returns_generic_error(
+    postgres_container, caplog
+):
     import asyncpg
     import logging
     from services.config import ConfigService
@@ -322,7 +367,7 @@ async def test_postgres_health_check_exception_logs_and_returns_generic_error(po
         min_size=0,
         max_size=1,
     )
-    await pool.close()   # closed pool → acquire() raises InterfaceError
+    await pool.close()  # closed pool → acquire() raises InterfaceError
     svc = ConfigService(pool)
     with caplog.at_level(logging.ERROR, logger="services.config"):
         result = await svc.health_check()
@@ -333,25 +378,32 @@ async def test_postgres_health_check_exception_logs_and_returns_generic_error(po
 
 
 async def test_streaming_assigns_distinct_per_batch_ids(
-    postgres_container, clickhouse_container, test_clickhouse_client,
-    redis_container, streaming_flight_server, cid_caplog,
+    postgres_container,
+    clickhouse_container,
+    test_clickhouse_client,
+    redis_container,
+    streaming_flight_server,
+    cid_caplog,
 ):
     import asyncio
     import logging
+
     settings = _settings(
-        postgres_container, clickhouse_container,
+        postgres_container,
+        clickhouse_container,
         f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
-        streaming_flight_server.port, ingest_max_disconnect_seconds=None,
+        streaming_flight_server.port,
+        ingest_max_disconnect_seconds=None,
     )
     with cid_caplog.at_level(logging.DEBUG):
         async with lifespan_test_client(settings) as client:
             await _poll_ready(client, 200)
-            await asyncio.sleep(0.3)     # let several batches stream in
+            await asyncio.sleep(0.3)  # let several batches stream in
     ingest_logs = [r for r in cid_caplog.records if "ingested batch" in r.getMessage()]
     cids = {r.correlation_id for r in ingest_logs}
     assert len(ingest_logs) >= 2
-    assert "-" not in cids               # every batch got a real ID
-    assert len(cids) >= 2                # and a DISTINCT one per batch
+    assert "-" not in cids  # every batch got a real ID
+    assert len(cids) >= 2  # and a DISTINCT one per batch
 
 
 async def test_ingest_never_started_metric_is_nan():
@@ -360,8 +412,14 @@ async def test_ingest_never_started_metric_is_nan():
     'just ingested'."""
     import math
     from schemas.health import (
-        AppInfo, DetailedStatusResponse, HostStats, IngestHealth,
-        ProcessStats, ProbeResult, RequestInfo, SystemSnapshot, UptimeInfo,
+        AppInfo,
+        DetailedStatusResponse,
+        HostStats,
+        IngestHealth,
+        ProcessStats,
+        RequestInfo,
+        SystemSnapshot,
+        UptimeInfo,
     )
     from services.metrics import MetricsService
 
@@ -380,36 +438,55 @@ async def test_ingest_never_started_metric_is_nan():
                 ),
                 requests=RequestInfo(),
                 system=SystemSnapshot(
-                    process=ProcessStats(cpu_percent=0.0, memory_rss_bytes=0, num_threads=0, open_files=0),
-                    host=HostStats(cpu_percent=0.0, memory_total_bytes=0, memory_available_bytes=0, memory_percent=0.0),
+                    process=ProcessStats(
+                        cpu_percent=0.0, memory_rss_bytes=0, num_threads=0, open_files=0
+                    ),
+                    host=HostStats(
+                        cpu_percent=0.0,
+                        memory_total_bytes=0,
+                        memory_available_bytes=0,
+                        memory_percent=0.0,
+                    ),
                 ),
             )
 
     from settings import Settings
+
     metrics = MetricsService(Settings())
     await metrics.refresh(_FakeHealthService())
 
     text = metrics.render()[0].decode()
     secs_line = next(
-        (l for l in text.splitlines() if l.startswith("ingest_seconds_since_last_batch ")),
+        (
+            line
+            for line in text.splitlines()
+            if line.startswith("ingest_seconds_since_last_batch ")
+        ),
         None,
     )
     assert secs_line is not None, "ingest_seconds_since_last_batch metric not found"
     raw_value = secs_line.split(" ")[1]
-    assert math.isnan(float(raw_value)), (
-        f"expected NaN for never-ingested gauge, got {raw_value!r}"
-    )
+    assert math.isnan(
+        float(raw_value)
+    ), f"expected NaN for never-ingested gauge, got {raw_value!r}"
 
 
 async def test_get_data_logs_clickhouse_timing(
-    postgres_container, clickhouse_container, test_clickhouse_client,
-    redis_container, streaming_flight_server, cid_caplog,
+    postgres_container,
+    clickhouse_container,
+    test_clickhouse_client,
+    redis_container,
+    streaming_flight_server,
+    cid_caplog,
 ):
     import logging
+
     settings = _settings(
-        postgres_container, clickhouse_container,
+        postgres_container,
+        clickhouse_container,
         f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
-        streaming_flight_server.port, ingest_max_disconnect_seconds=None,
+        streaming_flight_server.port,
+        ingest_max_disconnect_seconds=None,
     )
     with cid_caplog.at_level(logging.DEBUG, logger="core.correlation"):
         async with lifespan_test_client(settings) as client:

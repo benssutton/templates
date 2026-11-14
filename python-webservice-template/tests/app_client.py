@@ -1,4 +1,5 @@
 """Shared helper for running an isolated app + lifespan in async tests."""
+
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -43,7 +44,9 @@ async def lifespan_test_client(settings: Settings):
         raise RuntimeError("app lifespan exited before signalling readiness")
 
     try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost:8000") as client:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://localhost:8000"
+        ) as client:
             yield client
     finally:
         lifespan_done.set()

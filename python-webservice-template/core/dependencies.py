@@ -48,5 +48,7 @@ HealthServiceDep = Annotated[HealthService, Depends(get_health_service)]
 DataServiceDep = Annotated[DataService, Depends(get_data_service)]
 ConfigServiceDep = Annotated[ConfigService, Depends(get_config_service)]
 CacheServiceDep = Annotated[CacheService, Depends(get_cache_service)]
-StreamIngestServiceDep = Annotated[StreamIngestService, Depends(get_stream_ingest_service)]
+StreamIngestServiceDep = Annotated[
+    StreamIngestService, Depends(get_stream_ingest_service)
+]
 MetricsServiceDep = Annotated[MetricsService, Depends(get_metrics_service)]

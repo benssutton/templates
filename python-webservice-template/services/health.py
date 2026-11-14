@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import psutil
@@ -37,7 +36,7 @@ class HealthService:
         self._container = container
         self._started_at = time.monotonic()
         self._process = psutil.Process()
-        self._process.cpu_percent()        # prime process CPU delta
+        self._process.cpu_percent()  # prime process CPU delta
         psutil.cpu_percent(interval=None)  # prime host CPU delta
 
     # Kept for the MCP get_health_status tool (REST-mirroring, simple string).
@@ -48,33 +47,43 @@ class HealthService:
         return time.monotonic() - self._started_at
 
     def liveness(self) -> LivenessResponse:
-        return LivenessResponse(status="alive", uptime_seconds=round(self._uptime_seconds(), 3))
+        return LivenessResponse(
+            status="alive", uptime_seconds=round(self._uptime_seconds(), 3)
+        )
 
     async def _probe(self, service_type: type, name: str) -> ProbeResult:
         try:
             service = self._container.get(service_type)
         except ValueError:
-            return ProbeResult(name=name, status="down", latency_ms=0.0, error="initializing")
+            return ProbeResult(
+                name=name, status="down", latency_ms=0.0, error="initializing"
+            )
         try:
             return await asyncio.wait_for(
-                service.health_check(), timeout=self.settings.health_check_timeout_seconds
+                service.health_check(),
+                timeout=self.settings.health_check_timeout_seconds,
             )
         except asyncio.TimeoutError:
             return ProbeResult(
-                name=name, status="down",
+                name=name,
+                status="down",
                 latency_ms=round(self.settings.health_check_timeout_seconds * 1000, 2),
                 error="timeout",
             )
         except Exception as exc:
             log.error("%s health check raised: %s", name, exc)
-            return ProbeResult(name=name, status="down", latency_ms=0.0, error="unavailable")
+            return ProbeResult(
+                name=name, status="down", latency_ms=0.0, error="unavailable"
+            )
 
     async def _gather_dependencies(self) -> list[ProbeResult]:
-        return list(await asyncio.gather(
-            self._probe(ConfigService, "postgres"),
-            self._probe(DataService, "clickhouse"),
-            self._probe(CacheService, "redis"),
-        ))
+        return list(
+            await asyncio.gather(
+                self._probe(ConfigService, "postgres"),
+                self._probe(DataService, "clickhouse"),
+                self._probe(CacheService, "redis"),
+            )
+        )
 
     async def _ingest_health(self) -> IngestHealth:
         try:
@@ -82,7 +91,8 @@ class HealthService:
         except ValueError:
             return IngestHealth(
                 transport=self.settings.ingest_transport,
-                connection_state="down", thread_alive=False,
+                connection_state="down",
+                thread_alive=False,
             )
         return await service.health_check()
 
@@ -99,18 +109,27 @@ class HealthService:
         ingest_status = self._ingest_status(ingest)
 
         checks = [
-            CheckResult(name=d.name, status=d.status, latency_ms=d.latency_ms, error=d.error)
+            CheckResult(
+                name=d.name, status=d.status, latency_ms=d.latency_ms, error=d.error
+            )
             for d in deps
         ]
-        checks.append(CheckResult(
-            name="ingest", status=ingest_status, transport=ingest.transport,
-            connection_state=ingest.connection_state, thread_alive=ingest.thread_alive,
-            last_batch_at=ingest.last_batch_at,
-            seconds_since_last_batch=ingest.seconds_since_last_batch,
-        ))
+        checks.append(
+            CheckResult(
+                name="ingest",
+                status=ingest_status,
+                transport=ingest.transport,
+                connection_state=ingest.connection_state,
+                thread_alive=ingest.thread_alive,
+                last_batch_at=ingest.last_batch_at,
+                seconds_since_last_batch=ingest.seconds_since_last_batch,
+            )
+        )
 
         all_up = all(d.status == "up" for d in deps) and ingest_status == "up"
-        return ReadinessResponse(status="ready" if all_up else "not_ready", checks=checks)
+        return ReadinessResponse(
+            status="ready" if all_up else "not_ready", checks=checks
+        )
 
     async def detailed_status(self) -> DetailedStatusResponse:
         deps = await self._gather_dependencies()

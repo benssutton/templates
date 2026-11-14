@@ -35,7 +35,9 @@ class CacheService:
         try:
             await self._client.ping()
             latency_ms = (time.perf_counter() - start) * 1000
-            return ProbeResult(name="redis", status="up", latency_ms=round(latency_ms, 2))
+            return ProbeResult(
+                name="redis", status="up", latency_ms=round(latency_ms, 2)
+            )
         except Exception as exc:
             latency_ms = (time.perf_counter() - start) * 1000
             log.error("redis health check failed: %s", exc)

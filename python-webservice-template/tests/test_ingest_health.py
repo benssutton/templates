@@ -1,3 +1,4 @@
+import asyncio
 import threading
 
 import pyarrow.flight as flight
@@ -6,6 +7,8 @@ import pytest
 from ingestion.base import ConnectionState
 from ingestion.flight.client import FlightBatchConsumer
 from ingestion.solace.client import SolaceBatchConsumer, _StateListener
+from persistence.stream_store.lsm_store import LSMStore
+from services.stream_ingest import StreamIngestService
 from settings import Settings
 from tests.publishers.flight_server import ExampleFlightServer, make_batch
 
@@ -18,10 +21,14 @@ async def test_flight_consumer_unexpected_stream_end_sets_reconnecting():
     threading.Thread(target=server.serve, daemon=True).start()
     try:
         consumer = FlightBatchConsumer(
-            Settings(flight_host="localhost", flight_port=server.port, flight_ticket="items")
+            Settings(
+                flight_host="localhost", flight_port=server.port, flight_ticket="items"
+            )
         )
         await consumer.__aenter__()
-        assert consumer.connection_state() == ConnectionState.RECONNECTING  # connected, not streaming yet
+        assert (
+            consumer.connection_state() == ConnectionState.RECONNECTING
+        )  # connected, not streaming yet
 
         # The script has one batch then the stream ends; an unexpected end must
         # raise (so the ingest loop reconnects) and leave state RECONNECTING.
@@ -48,15 +55,6 @@ def test_solace_consumer_state_transitions_via_listeners():
     assert consumer.connection_state() == ConnectionState.DOWN
 
 
-import asyncio
-
-from persistence.stream_store.lsm_store import LSMStore
-from services.stream_ingest import StreamIngestService
-
-# Note: `threading` and `Settings` are already imported earlier in this file
-# (Task 5 block); `make_batch` and `ConnectionState` likewise.
-
-
 class _FakeConsumer:
     """Real (non-mock) BatchConsumer whose state is fixed and whose batches()
     blocks until close(), so the ingest thread stays alive during tests."""
@@ -78,8 +76,12 @@ class _FakeConsumer:
 
 
 async def test_ingest_health_tracks_freshness_after_ingest():
-    settings = Settings(ingest_transport="flight", ingest_staleness_threshold_seconds=None)
-    svc = StreamIngestService(_FakeConsumer(ConnectionState.CONNECTED), LSMStore(100, 4), settings)
+    settings = Settings(
+        ingest_transport="flight", ingest_staleness_threshold_seconds=None
+    )
+    svc = StreamIngestService(
+        _FakeConsumer(ConnectionState.CONNECTED), LSMStore(100, 4), settings
+    )
 
     before = await svc.health_check()
     assert before.connection_state == "connected"
@@ -97,7 +99,9 @@ async def test_disconnect_watchdog_invokes_shutdown_hook():
     triggered = asyncio.Event()
     settings = Settings(ingest_transport="flight", ingest_max_disconnect_seconds=0.2)
     svc = StreamIngestService(
-        _FakeConsumer(ConnectionState.DOWN), LSMStore(100, 4), settings,
+        _FakeConsumer(ConnectionState.DOWN),
+        LSMStore(100, 4),
+        settings,
         shutdown_hook=triggered.set,
     )
     async with svc:
