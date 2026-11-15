@@ -1,10 +1,10 @@
-use crate::support::{test_settings, TestApp};
+use crate::support::{app_settings, TestApp};
 
 /// /health/live has no instrumented boundaries, so only `total` appears.
 /// (Boundary samples like clickhouse_select arrive with R2's stores.)
 #[tokio::test]
 async fn request_without_boundaries_has_only_total() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let r = app.get("/health/live").await;
     assert_eq!(r.status(), 200);
     let header = r.headers()["server-timing"].to_str().unwrap().to_owned();
@@ -19,7 +19,7 @@ async fn request_without_boundaries_has_only_total() {
 /// Matches the k6 parser (tests/performance/lib/serverTiming.js).
 #[tokio::test]
 async fn header_is_parseable_by_the_k6_grammar() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let header = app.get("/health/status").await.headers()["server-timing"]
         .to_str()
         .unwrap()

@@ -6,14 +6,15 @@ use crate::core::{boundary_timing, correlation, cors, last_request, request_limi
 use crate::health::ingest::NoopIngestHealth;
 use crate::mcp;
 use crate::openapi::ApiDoc;
-use crate::routers::{health, metrics, root};
+use crate::persistence::Stores;
+use crate::routers::{cache, config, data, health, metrics, root};
 use crate::services;
 use crate::settings::Settings;
 use crate::state::AppState;
 use axum::{
     http::{HeaderName, StatusCode},
     middleware::{from_fn, from_fn_with_state},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use std::sync::Arc;
@@ -27,17 +28,31 @@ pub struct App {
 
 impl App {
     /// Final step of the ordered shutdown, called by `server::serve` after
-    /// in-flight HTTP has drained. R2 closes the store pools here. R3 closes
-    /// the consumer when `Shutdown` fires, before the drain completes.
+    /// in-flight HTTP has drained: close the store pools. R3 closes the
+    /// consumer when `Shutdown` fires, before the drain completes.
     pub async fn close(&self) {
         self.state.shutdown.trigger("app closed");
+        self.state.stores.close().await;
     }
 }
 
-/// Build the app. Fails (and `main` exits non-zero) on invalid settings;
-/// from R2 on, also when a store cannot be reached within the retry budget.
+/// Build the app. Fails (and `main` exits non-zero) on invalid settings,
+/// or when a store cannot be reached and smoke-tested within the retry
+/// budget (`connect_max_attempts`).
 pub async fn create_app(settings: Settings) -> anyhow::Result<App> {
-    let state = AppState::new(settings, Vec::new(), Arc::new(NoopIngestHealth))?;
+    // Invalid config fails before any retry budget is spent on the stores.
+    settings.validate()?;
+    let stores = Stores::connect(&settings).await?;
+    let probes = stores.probes();
+    // Until `AppState` owns the stores, a failure here must close them
+    // (the Postgres pool would otherwise leak).
+    let state = match AppState::new(settings, stores.clone(), probes, Arc::new(NoopIngestHealth)) {
+        Ok(state) => state,
+        Err(err) => {
+            stores.close().await;
+            return Err(err);
+        }
+    };
     Ok(App {
         router: router(state.clone()),
         state,
@@ -79,6 +94,14 @@ pub fn router(state: AppState) -> Router {
         .route("/health/live", get(health::get_live))
         .route("/health/ready", get(health::get_ready))
         .route("/health/status", get(health::get_status))
+        // Python's canonical paths end in "/" (`/config/`, `/cache/`); both
+        // forms are routed so that no redirect is needed (Deviation 9).
+        .route("/config", get(config::get_config).post(config::set_config))
+        .route("/config/", get(config::get_config).post(config::set_config))
+        .route("/data", get(data::get_data))
+        .route("/cache", post(cache::set_cache))
+        .route("/cache/", post(cache::set_cache))
+        .route("/cache/{key}", get(cache::get_cache))
         .merge(mcp::build_router(state.clone()));
     if state.metrics.is_some() {
         routes = routes.route("/metrics", get(metrics::get_metrics));

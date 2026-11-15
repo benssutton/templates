@@ -88,7 +88,7 @@ async fn chunked_body_over_limit_returns_413() {
 async fn app_rejects_oversized_bodies_on_any_route() {
     let app = crate::support::TestApp::spawn(rust_template::settings::Settings {
         max_request_body_bytes: 16,
-        ..crate::support::test_settings()
+        ..crate::support::app_settings().await
     })
     .await;
     let r = app

@@ -1,13 +1,14 @@
 use crate::probes::probe;
-use crate::support::{test_settings, TestApp};
+use crate::support::{app_settings, TestApp};
 use rust_template::app::{router, App};
 use rust_template::health::ingest::NoopIngestHealth;
+use rust_template::persistence::Stores;
 use rust_template::state::AppState;
 use std::sync::Arc;
 
 #[tokio::test]
 async fn liveness_returns_alive() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let (status, body) = app.get_json("/health/live").await;
     assert_eq!(status, 200);
     assert_eq!(body["status"], "alive");
@@ -16,14 +17,17 @@ async fn liveness_returns_alive() {
 
 #[tokio::test]
 async fn status_reports_app_uptime_ingest_requests_and_system() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let (status, body) = app.get_json("/health/status").await;
     assert_eq!(status, 200);
     assert_eq!(body["app"]["status"], "testing");
     assert_eq!(body["app"]["title"], "Rust Template Service");
     assert!(body["uptime"]["process_seconds"].as_f64().unwrap() >= 0.0);
     assert!(body["uptime"]["system_boot_seconds"].as_f64().unwrap() > 0.0);
-    assert!(body["dependencies"].as_array().unwrap().is_empty()); // R1: no stores yet
+    let deps = body["dependencies"].as_array().unwrap();
+    let names: Vec<&str> = deps.iter().map(|d| d["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["postgres", "clickhouse", "redis"]);
+    assert!(deps.iter().all(|d| d["status"] == "up"), "{deps:?}");
     assert_eq!(body["ingest"]["transport"], "noop");
     assert_eq!(body["ingest"]["connection_state"], "connected");
     assert!(body["ingest"]["last_batch_at"].is_null());
@@ -44,9 +48,9 @@ async fn status_reports_app_uptime_ingest_requests_and_system() {
 
 #[tokio::test]
 async fn readiness_is_ready_with_an_ingest_check() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let (status, body) = app.get_json("/health/ready").await;
-    assert_eq!(status, 200);
+    assert_eq!(status, 200, "{body}");
     assert_eq!(body["status"], "ready");
     let checks = body["checks"].as_array().unwrap();
     let ingest = checks.iter().find(|c| c["name"] == "ingest").unwrap();
@@ -61,8 +65,13 @@ async fn readiness_is_ready_with_an_ingest_check() {
 
 #[tokio::test]
 async fn readiness_is_503_when_a_probe_fails_and_never_leaks_detail() {
+    let settings = app_settings().await;
+    let stores = Stores::connect(&settings).await.expect("stores");
+    // Real stores back the services, but the registry gets only these two
+    // static probes (not `stores.probes()`), so the failure is deterministic.
     let state = AppState::new(
-        test_settings(),
+        settings,
+        stores,
         vec![
             probe("postgres", Ok(()), 0),
             probe("redis", Err("redis://:hunter2@localhost:6379 refused"), 0),
@@ -95,7 +104,7 @@ async fn readiness_is_503_when_a_probe_fails_and_never_leaks_detail() {
     assert_eq!(redis["error"], "unavailable");
     assert!(redis.get("transport").is_none(), "{redis}");
 
-    // /health/status reports the same probe, with `error: null` for the up one.
+    // /health/status reports the same probes, with `error: null` for the up one.
     let (_, status) = app.get_json("/health/status").await;
     let deps = status["dependencies"].as_array().unwrap();
     assert_eq!(deps[0]["name"], "postgres");
@@ -105,7 +114,7 @@ async fn readiness_is_503_when_a_probe_fails_and_never_leaks_detail() {
 
 #[tokio::test]
 async fn root_returns_service_info() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let (status, body) = app.get_json("/").await;
     assert_eq!(status, 200);
     assert_eq!(body["title"], "Rust Template Service");
@@ -117,7 +126,7 @@ async fn root_returns_service_info() {
 /// FastAPI's 404 body for unknown paths.
 #[tokio::test]
 async fn unknown_path_is_a_json_404() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let (status, body) = app.get_json("/no/such/path").await;
     assert_eq!(status, 404);
     assert_eq!(body, serde_json::json!({ "detail": "Not Found" }));
@@ -126,7 +135,7 @@ async fn unknown_path_is_a_json_404() {
 /// FastAPI's 405 body (and `Allow` header) for a known path, wrong method.
 #[tokio::test]
 async fn wrong_method_is_a_json_405() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let response = crate::support::client()
         .post(app.url("/health/live"))
         .send()
@@ -141,7 +150,7 @@ async fn wrong_method_is_a_json_405() {
 
 #[tokio::test]
 async fn stop_drains_and_returns_ok() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     assert_eq!(app.get("/health/live").await.status(), 200);
     app.stop().await.expect("clean shutdown");
 }

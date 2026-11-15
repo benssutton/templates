@@ -1,4 +1,4 @@
-use crate::support::{client, test_settings};
+use crate::support::{app_settings, client};
 use rust_template::app::create_app;
 use rust_template::server::{serve, Tls};
 use rust_template::settings::Settings;
@@ -37,7 +37,7 @@ fn tls_mode_follows_the_ssl_settings() {
 #[tokio::test]
 async fn serves_https_with_the_configured_certificate() {
     let (cert, key) = self_signed_pem();
-    let app = create_app(test_settings()).await.unwrap();
+    let app = create_app(app_settings().await).await.unwrap();
     let shutdown = app.state.shutdown.clone();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -64,7 +64,7 @@ async fn serves_https_with_the_configured_certificate() {
 
 #[tokio::test]
 async fn missing_certificate_is_a_startup_error() {
-    let app = create_app(test_settings()).await.unwrap();
+    let app = create_app(app_settings().await).await.unwrap();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let err = serve(
         listener,

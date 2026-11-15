@@ -2,7 +2,7 @@
 name = "rust-template"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.94"
 
 [lib]
 name = "rust_template"
@@ -19,17 +19,25 @@ axum = "=0.8.9"
 # no-provider: we install rustls' ring provider ourselves (see server::install_crypto_provider).
 axum-server = { version = "=0.8.0", features = ["tls-rustls-no-provider"] }
 chrono = { version = "=0.4.44", default-features = false, features = ["clock", "serde", "std"] }
+# Official ClickHouse client (HTTP + RowBinary). No TLS features: the stores
+# are reached on a private network, and `rustls-tls` would pull aws-lc.
+clickhouse = { version = "=0.15.3", default-features = false }
 dotenvy = "=0.15.7"
 envy = "=0.4.2"
 fastrand = "=2.5.0"
 metrics = "=0.24.6"
 # default features pull an HTTP listener + push gateway (and aws-lc-rs); we only render.
 metrics-exporter-prometheus = { version = "=0.18.3", default-features = false }
+# ConnectionManager reconnects by itself. RedisJSON is driven with redis::cmd
+# (JSON.SET / JSON.GET), so the `json` feature is not needed.
+redis = { version = "=1.8.1", default-features = false, features = ["tokio-comp", "connection-manager"] }
 rmcp = { version = "=2.2.0", features = ["server", "transport-streamable-http-server"] }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 secrecy = { version = "=0.10.3", features = ["serde"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.150"
+# Runtime queries only (no compile-time macros, no DATABASE_URL at build time). No TLS.
+sqlx = { version = "=0.9.0", default-features = false, features = ["runtime-tokio", "postgres"] }
 sysinfo = "=0.39.6"
 thiserror = "=2.0.18"
 tokio = { version = "=1.52.3", features = ["full"] }
@@ -42,5 +50,14 @@ utoipa-swagger-ui = { version = "=10.0.2", features = ["axum"] }
 uuid = { version = "=1.23.2", features = ["v4"] }
 
 [dev-dependencies]
+# Arrow IPC reader for the ClickHouse seed file (tests/test_data/clickhouse_seed_data.ipc).
+arrow = { version = "=60.1.0", default-features = false, features = ["ipc"] }
+# Removes the shared test containers when the test binary exits (statics are never dropped).
+dtor = "=1.0.6"
 rcgen = "=0.14.10"
 reqwest = { version = "=0.13.4", default-features = false, features = ["json", "http2", "rustls-no-provider"] }
+# No TLS features: the local npipe / unix Docker socket needs none, and the
+# defaults add rustls providers (testcontainers-modules' clickhouse module
+# would add aws-lc-sys through reqwest).
+testcontainers = { version = "=0.27.3", default-features = false }
+testcontainers-modules = { version = "=0.15.0", default-features = false, features = ["postgres", "redis"] }

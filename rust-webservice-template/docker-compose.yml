@@ -1,8 +1,48 @@
 name: rust-template
 
-# R1: the app only. R2 adds db/clickhouse/redis; R3 adds solace (+ solace-init
-# if the AMQP spike requires SEMP provisioning) and a demo publisher.
+# R2: the app and its three stores. The store ports are not published (the
+# app reaches them on the compose network), so this stack can run next to the
+# Python and Java stacks. R3 adds solace (+ solace-init if the AMQP spike
+# requires SEMP provisioning) and a demo publisher.
 services:
+  db:
+    image: pgvector/pgvector:0.8.4-pg18
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-appuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-appdb}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-appuser} -d ${POSTGRES_DB:-appdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    environment:
+      # A password lets the `default` user log in over the network (as in Java's compose).
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - ./scripts/clickhouse-init.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./scripts/clickhouse-seed.sh:/docker-entrypoint-initdb.d/02-seed.sh:ro
+      - ./tests/test_data/clickhouse_seed_data.ipc:/tmp/clickhouse_seed_data.ipc:ro
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis/redis-stack-server:latest
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   app:
     build: .
     ports:
@@ -13,6 +53,19 @@ services:
       # R3 switches the default to solace once the broker is in compose.
       INGEST_TRANSPORT: noop
       RUST_LOG: info
+      POSTGRES_URL: postgresql://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-appdb}
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: clickhouse
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsk https://localhost/health/live || exit 1"]
       interval: 5s

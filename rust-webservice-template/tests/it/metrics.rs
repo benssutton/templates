@@ -1,9 +1,9 @@
-use crate::support::{test_settings, TestApp};
+use crate::support::{app_settings, TestApp};
 use rust_template::settings::Settings;
 
 #[tokio::test]
 async fn metrics_endpoint_exposes_series() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     assert_eq!(app.get("/health/live").await.status(), 200); // one request metric
     let response = app.get("/metrics").await;
     assert_eq!(response.status(), 200);
@@ -31,7 +31,7 @@ async fn metrics_endpoint_exposes_series() {
 /// (instrumentator's `should_group_untemplated`), never the raw path.
 #[tokio::test]
 async fn http_requests_total_is_labelled_with_the_route_template() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     assert_eq!(app.get("/health/live").await.status(), 200);
     assert_eq!(app.get("/no/such/path").await.status(), 404);
     let text = app.get("/metrics").await.text().await.unwrap();
@@ -65,8 +65,35 @@ async fn http_requests_total_is_labelled_with_the_route_template() {
 async fn metrics_disabled_means_no_endpoint() {
     let app = TestApp::spawn(Settings {
         metrics_enabled: false,
-        ..test_settings()
+        ..app_settings().await
     })
     .await;
     assert_eq!(app.get("/metrics").await.status(), 404);
+}
+
+/// R2 routes are labelled with their templates too: `/config` (not
+/// `/config/`, which is its own route) and `/cache/{key}` (never the key).
+#[tokio::test]
+async fn r2_routes_are_labelled_with_their_templates() {
+    let app = TestApp::spawn(app_settings().await).await;
+    let key = format!("metrics-{}", uuid::Uuid::new_v4().simple());
+    assert_eq!(app.get("/config").await.status(), 200);
+    assert_eq!(app.get(&format!("/cache/{key}")).await.status(), 404);
+    let text = app.get("/metrics").await.text().await.unwrap();
+
+    let requests_total: Vec<&str> = text
+        .lines()
+        .filter(|l| l.starts_with("http_requests_total{"))
+        .collect();
+    let config = requests_total
+        .iter()
+        .find(|l| l.contains(r#"handler="/config""#))
+        .unwrap_or_else(|| panic!("no /config series in {requests_total:?}"));
+    assert!(config.contains(r#"status="2xx""#), "{config}");
+    let cache = requests_total
+        .iter()
+        .find(|l| l.contains(r#"handler="/cache/{key}""#))
+        .unwrap_or_else(|| panic!("no /cache/{{key}} series in {requests_total:?}"));
+    assert!(cache.contains(r#"status="4xx""#), "{cache}");
+    assert!(!text.contains(&key), "raw keys must not become labels");
 }

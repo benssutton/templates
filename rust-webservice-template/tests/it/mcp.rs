@@ -1,4 +1,4 @@
-use crate::support::{test_settings, TestApp};
+use crate::support::{app_settings, TestApp};
 use serde_json::{json, Value};
 
 fn parse(body: &str, content_type: &str) -> Value {
@@ -76,7 +76,7 @@ async fn initialize_at(app: &TestApp, path: &str) -> String {
 
 #[tokio::test]
 async fn tool_list_is_exactly_get_health_status() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let session = initialize(&app).await;
     let (_, list) = rpc(
         &app,
@@ -95,7 +95,7 @@ async fn tool_list_is_exactly_get_health_status() {
 
 #[tokio::test]
 async fn get_health_status_mirrors_the_rest_status_field() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let session = initialize(&app).await;
     let (_, call) = rpc(
         &app,
@@ -117,7 +117,7 @@ async fn get_health_status_mirrors_the_rest_status_field() {
 /// middleware stack (correlation ID; metrics labelled with the mount path).
 #[tokio::test]
 async fn mcp_methods_reach_rmcp_through_the_middleware_stack() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let session = initialize(&app).await;
 
     // GET without a session: rmcp's own 400, not the JSON 404/405 fallback.
@@ -157,7 +157,7 @@ async fn mcp_methods_reach_rmcp_through_the_middleware_stack() {
 /// mounted at `/mcp`); Rust serves both, sharing one session manager.
 #[tokio::test]
 async fn trailing_slash_endpoint_serves_the_full_flow() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let session = initialize_at(&app, "/mcp/").await;
     let (_, list) = rpc_at(
         &app,

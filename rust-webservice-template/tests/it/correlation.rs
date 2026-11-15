@@ -1,16 +1,17 @@
 use crate::probes::probe;
-use crate::support::{logs, test_settings, TestApp};
+use crate::support::{app_settings, logs, test_settings, TestApp};
 use axum::{http::HeaderName, middleware::from_fn_with_state, routing::get, Router};
 use rust_template::app::{router, App};
 use rust_template::core::correlation;
 use rust_template::health::ingest::NoopIngestHealth;
+use rust_template::persistence::Stores;
 use rust_template::settings::Settings;
 use rust_template::state::AppState;
 use std::sync::Arc;
 
 #[tokio::test]
 async fn echoes_an_inbound_id() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let r = app
         .client()
         .get(app.url("/"))
@@ -23,7 +24,7 @@ async fn echoes_an_inbound_id() {
 
 #[tokio::test]
 async fn generates_a_32_hex_id_when_absent() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let r = app.get("/").await;
     let id = r.headers()["x-request-id"].to_str().unwrap().to_owned();
     assert_eq!(id.len(), 32, "{id}");
@@ -39,7 +40,7 @@ async fn generates_a_32_hex_id_when_absent() {
 async fn header_name_is_configurable() {
     let app = TestApp::spawn(Settings {
         correlation_id_header: "X-Correlation-ID".into(),
-        ..test_settings()
+        ..app_settings().await
     })
     .await;
     let r = app
@@ -55,7 +56,7 @@ async fn header_name_is_configurable() {
 
 #[tokio::test]
 async fn error_responses_still_carry_the_id() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let r = app
         .client()
         .get(app.url("/no-such-route"))
@@ -116,8 +117,13 @@ async fn log_lines_inside_a_request_carry_the_correlation_id() {
 #[tokio::test]
 async fn probe_failure_logs_carry_the_correlation_id() {
     logs::ensure_installed();
+    let settings = app_settings().await;
+    let stores = Stores::connect(&settings).await.expect("stores");
+    // Real stores back the services; the registry gets only the failing
+    // static probe (not `stores.probes()`), so the failure is deterministic.
     let state = AppState::new(
-        test_settings(),
+        settings,
+        stores,
         vec![probe("redis", Err("refused"), 0)],
         Arc::new(NoopIngestHealth),
     )

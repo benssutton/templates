@@ -7,6 +7,10 @@ use crate::core::shutdown::Shutdown;
 use crate::health::ingest::IngestHealthProvider;
 use crate::health::probe::HealthProbe;
 use crate::health::registry::ProbeRegistry;
+use crate::persistence::Stores;
+use crate::services::cache::CacheService;
+use crate::services::config::ConfigService;
+use crate::services::data::DataService;
 use crate::services::health::HealthService;
 use crate::services::metrics::MetricsService;
 use crate::settings::Settings;
@@ -16,7 +20,7 @@ use std::sync::Arc;
 pub struct AppState {
     pub settings: Arc<Settings>,
     pub last_request: LastRequest,
-    /// Empty in R1; R2 registers each store's probe after it connects.
+    /// `create_app` registers the three store probes (`Stores::probes`).
     pub probes: ProbeRegistry,
     /// `NoopIngestHealth` until R3.
     pub ingest_health: Arc<dyn IngestHealthProvider>,
@@ -24,12 +28,20 @@ pub struct AppState {
     /// `None` when `metrics_enabled = false`.
     pub metrics: Option<Arc<MetricsService>>,
     pub shutdown: Shutdown,
+    /// This app's store handles; `App::close` closes them.
+    pub stores: Stores,
+    pub config: Arc<ConfigService>,
+    pub data: Arc<DataService>,
+    pub cache: Arc<CacheService>,
 }
 
 impl AppState {
     /// Validates `settings` first, so an `AppState` always holds valid config.
+    /// `probes` is separate from `stores` so tests can register their own
+    /// probes (`create_app` passes `stores.probes()`).
     pub fn new(
         settings: Settings,
+        stores: Stores,
         probes: Vec<Arc<dyn HealthProbe>>,
         ingest_health: Arc<dyn IngestHealthProvider>,
     ) -> anyhow::Result<Self> {
@@ -48,6 +60,9 @@ impl AppState {
         } else {
             None
         };
+        let config = Arc::new(ConfigService::new(stores.postgres.pool().clone()));
+        let data = Arc::new(DataService::new(stores.clickhouse.client().clone()));
+        let cache = Arc::new(CacheService::new(stores.redis.connection()));
         Ok(Self {
             settings,
             last_request,
@@ -56,6 +71,10 @@ impl AppState {
             health,
             metrics,
             shutdown: Shutdown::new(),
+            stores,
+            config,
+            data,
+            cache,
         })
     }
 }

@@ -7,6 +7,7 @@ pub mod error;
 pub mod health;
 pub mod mcp;
 pub mod openapi;
+pub mod persistence;
 pub mod routers;
 pub mod schemas;
 pub mod server;

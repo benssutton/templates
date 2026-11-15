@@ -23,7 +23,7 @@ async fn preflight_includes_max_age_600() {
     assert_eq!(r.headers()["access-control-max-age"], "600");
 }
 
-use crate::support::{test_settings, TestApp};
+use crate::support::{app_settings, TestApp};
 
 async fn preflight(app: &TestApp, origin: &str) -> reqwest::Response {
     app.client()
@@ -39,7 +39,7 @@ async fn preflight(app: &TestApp, origin: &str) -> reqwest::Response {
 async fn preflight_allows_a_configured_origin() {
     let app = TestApp::spawn(Settings {
         cors_allow_origins: vec!["https://app.example.com".into()],
-        ..test_settings()
+        ..app_settings().await
     })
     .await;
     let r = preflight(&app, "https://app.example.com").await;
@@ -56,7 +56,7 @@ async fn preflight_allows_a_configured_origin() {
 
 #[tokio::test]
 async fn wildcard_default_allows_any_origin() {
-    let app = TestApp::spawn(test_settings()).await;
+    let app = TestApp::spawn(app_settings().await).await;
     let r = preflight(&app, "https://arbitrary.example.com").await;
     assert_eq!(r.status(), 200);
     assert_eq!(r.headers()["access-control-allow-origin"], "*");
@@ -67,7 +67,7 @@ async fn credentials_with_explicit_origin_mirror_methods() {
     let app = TestApp::spawn(Settings {
         cors_allow_origins: vec!["https://app.example.com".into()],
         cors_allow_credentials: true,
-        ..test_settings()
+        ..app_settings().await
     })
     .await;
     let r = preflight(&app, "https://app.example.com").await;
