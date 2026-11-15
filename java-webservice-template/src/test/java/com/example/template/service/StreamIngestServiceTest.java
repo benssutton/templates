@@ -242,4 +242,46 @@ class StreamIngestServiceTest {
             svc.close();
         }
     }
+
+    /**
+     * Binds and then fails, as a Solace session does after a healed terminal
+     * interruption on a quiet queue (no deliveries), {@code failures} times in a
+     * row; then binds and blocks until closed.
+     */
+    static final class BindThenFailConsumer extends ScriptedConsumer {
+        final AtomicInteger calls = new AtomicInteger();
+        private final int failures;
+
+        BindThenFailConsumer(int failures) {
+            this.failures = failures;
+        }
+
+        @Override
+        public void consume(Consumer<Delivery> sink, Runnable onBound) throws Exception {
+            int n = calls.incrementAndGet();
+            onBound.run();
+            if (n <= failures) {
+                throw new IllegalStateException("service interrupted after bind (call " + n + ")");
+            }
+            super.consume(sink, onBound);
+        }
+    }
+
+    @Test
+    void aSuccessfulBindResetsTheConsecutiveFailureCount() {
+        IngestSettings s = settings();
+        s.setMaxDisconnectSeconds(3600); // enables the 5-consecutive-failures shutdown
+        BindThenFailConsumer consumer = new BindThenFailConsumer(6); // > MAX_FAILURES (5)
+        AtomicBoolean shutdown = new AtomicBoolean();
+        StreamIngestService svc = new StreamIngestService(consumer, new LsmStore(), s, () -> shutdown.set(true));
+        svc.start();
+        try {
+            // Each bind resets the backoff to the 1 s base: 6 waits of 1-1.25 s, not 1+2+4+8+16.
+            await().atMost(15, TimeUnit.SECONDS).until(() -> consumer.calls.get() == 7 || shutdown.get());
+            assertThat(shutdown.get()).as("shutdown requested").isFalse();
+            assertThat(svc.currentHealth().threadAlive()).as("ingest thread alive").isTrue();
+        } finally {
+            svc.close();
+        }
+    }
 }

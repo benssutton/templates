@@ -40,15 +40,21 @@ class Delivery:
     redelivered: bool = False
 
 
+OnBound = Callable[[], None]
+
+
 class BatchConsumer(Protocol):
     """Synchronous interface run on the dedicated ingest thread.
 
     deliveries() is a blocking generator; close() must be thread-safe and
     unblock any pending deliveries() call so the ingest thread can exit.
+    It calls on_bound() (if given) once the transport is bound and ready to
+    deliver: proof the transport is healthy, so the ingest loop resets its
+    consecutive-failure count even if no message ever arrives.
     connection_state() is a cheap, cached read (no I/O).
     """
 
-    def deliveries(self) -> Iterator[Delivery]: ...
+    def deliveries(self, on_bound: OnBound | None = None) -> Iterator[Delivery]: ...
 
     def close(self) -> None: ...
 

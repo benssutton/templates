@@ -124,7 +124,7 @@ async def test_idle_ingest_is_stale_but_ready():
     from services.stream_ingest import StreamIngestService
 
     class _IdleConsumer:
-        def deliveries(self):
+        def deliveries(self, on_bound=None):
             threading.Event().wait()
             yield from ()
 

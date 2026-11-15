@@ -19,6 +19,19 @@ public class NoopBatchConsumer implements BatchConsumer {
 
     @Override
     public void consume(Consumer<Delivery> sink) throws InterruptedException {
+        consume(sink, () -> { });
+    }
+
+    /**
+     * Signals bound at once: there is nothing to connect to, so it is "ready" as
+     * soon as it idles, which matches connectionState() reporting CONNECTED. It
+     * only ever ends cleanly, so the signal can't hide a failure.
+     */
+    @Override
+    public void consume(Consumer<Delivery> sink, Runnable onBound) throws InterruptedException {
+        if (!closed) {
+            onBound.run();
+        }
         synchronized (lock) {
             while (!closed) {
                 lock.wait();

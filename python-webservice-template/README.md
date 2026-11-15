@@ -97,11 +97,30 @@ writes them into the LSM store; the data is then served from `/data/cache`.
   |---|---|
   | Written | ACCEPTED (acked) |
   | Store write raised | FAILED: redelivered, with an increasing backoff between redeliveries |
-  | Not Arrow IPC / missing key columns / unmergeable / over `max_ingest_batch_bytes` | REJECTED: never redelivered (DMQ if configured) |
+  | Not Arrow IPC / missing key columns / unmergeable / over `max_ingest_batch_bytes` (any batch in the message) | REJECTED before any write: never redelivered (DMQ if configured) |
 
   Auto-created queues use Solace's default unlimited max-redelivery and have no
   dead-message queue; production should configure max-redelivery and a DMQ.
 - **`noop` transport** (`INGEST_TRANSPORT=noop`) for deployments without a broker.
+  Under Compose, `app` depends on a healthy `solace`, so a plain `up` still starts
+  the broker; skip it with `docker compose up -d db clickhouse redis && INGEST_TRANSPORT=noop docker compose up -d --no-deps app`.
+- **Recovery after a terminal interruption.** The SDK reconnects forever, so a
+  network partition is normally healed by the SDK itself. If it does report a
+  terminal service interruption, `deliveries()` raises `SolaceServiceInterrupted`;
+  the ingest loop counts a failure and backs off, and the next `deliveries()`
+  call disconnects the dead service and connects a fresh one (same backoff as
+  startup). Connection state goes DOWN, then CONNECTED again. A successful bind
+  resets the loop's consecutive-failure count, so only failures to *bind* (or
+  connect) add up to a shutdown.
+- **Deliberate divergences from the Java template**:
+  - *Startup:* Python connects to Solace with backoff in the lifespan and fails
+    startup if the broker is unreachable. Java connects lazily inside the ingest
+    loop: it comes up live with ingest DOWN, and the watchdog or the
+    consecutive-failure path exits.
+  - *Size limit:* `max_ingest_batch_bytes` measures the decoded Arrow `nbytes` of
+    each batch in Python, and the encoded message payload in Java. In both, a
+    message is validated in full (size + required columns) before anything is
+    written, so a REJECTED message leaves nothing in the store.
 - **HTTP ingest** path for pushing a batch directly:
   [`POST /data/ingest`](routers/data.py) (422 for an unmergeable batch).
 - **Extension point: Message Replay.** The durable queue buffers only unacked
@@ -142,10 +161,10 @@ Enterprise-grade stability through fail-fast startup and self-recovery.
 | **HTTPS / TLS** | Uvicorn serves over TLS using a key/cert pair; a script generates a self-signed pair for local dev | [`ssl_keyfile`/`ssl_certfile`](settings.py), [certs/generate_self_signed_cert.py](certs/generate_self_signed_cert.py) |
 | **Fail-fast startup** | Critical dependencies are eagerly connected and smoke-tested in the lifespan; if one cannot be reached after retries, startup aborts and the process exits | [main.py lifespan](main.py) |
 | **Reconnect with randomised backoff** | Startup connections retry with exponential delay **+ up to 25% jitter**, capped, for `connect_max_attempts` before giving up | [`connect_with_backoff`](core/retry.py) |
-| **Ingest self-recovery** | The Solace SDK reconnects forever and the persistent flow resumes after a network partition; unsettled messages stay on the durable queue and are redelivered. After a terminal service interruption or a receiver-level flow termination, `deliveries()` stays blocked and the disconnect watchdog is the recovery path ("Recovery limits" in [ingestion/solace/client.py](ingestion/solace/client.py)). If binding the queue fails N consecutive times (e.g. permission denied), the ingest loop requests a graceful `SIGTERM` | [`_ingest_loop`](services/stream_ingest.py) |
+| **Ingest self-recovery** | The Solace SDK reconnects forever and the persistent flow resumes after a network partition; unsettled messages stay on the durable queue and are redelivered. After a terminal service interruption, `deliveries()` raises, the ingest loop backs off and the next call reconnects with a fresh service. A receiver-level flow termination on a live service is not signalled ("Recovery" in [ingestion/solace/client.py](ingestion/solace/client.py)). If binding the queue fails N consecutive times (e.g. permission denied), the ingest loop requests a graceful `SIGTERM` | [`_ingest_loop`](services/stream_ingest.py) |
 | **Disconnect watchdog** | The single give-up point: if the transport stays non-connected longer than `ingest_max_disconnect_seconds`, the app shuts itself down rather than silently serving stale data | [`_disconnect_watchdog`](services/stream_ingest.py) |
 | **Max-payload middleware** | Outermost middleware rejects oversized HTTP bodies with **413** (fast-path on `Content-Length`, byte-counting for chunked uploads) — before any handler runs | [core/request_limits.py](core/request_limits.py), [wiring](main.py) |
-| **Decoded-batch limit** | A second, independent guard (`max_ingest_batch_bytes`) checks each batch *after* Arrow decode and logs at ERROR. HTTP path: the batch is dropped and the request still returns 202 (so the caller isn't retried into a storm). Solace path: the message is REJECTED — removed, never redelivered (to the DMQ if configured) | [`_record_ingest`](services/stream_ingest.py) |
+| **Decoded-batch limit** | A second, independent guard (`max_ingest_batch_bytes`) checks each batch *after* Arrow decode and logs at ERROR. HTTP path: the batch is dropped and the request still returns 202 (so the caller isn't retried into a storm). Solace path: every batch is checked before any is written, and the message is REJECTED — removed, never redelivered (to the DMQ if configured) | [`_record_ingest`, `_decide`](services/stream_ingest.py) |
 | **Secret hygiene** | All credentials are `SecretStr` — never printed in `repr`/logs; health probes return generic `"unavailable"` tokens, never raw exception strings | [settings.py](settings.py), [`_probe`](services/health.py#L53-L70) |
 
 ---

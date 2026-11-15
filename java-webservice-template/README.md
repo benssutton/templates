@@ -79,10 +79,28 @@ messaging and writes them into the LSM store, served from `/data/cache`.
   Auto-created queues use Solace's default unlimited max-redelivery and have no
   dead-message queue; production queues should configure both.
 - **`noop` opt-out:** `INGEST_TRANSPORT=noop` connects to nothing and idles, for
-  HTTP-only ingest (`POST /data/ingest`) without a broker.
+  HTTP-only ingest (`POST /data/ingest`) without a broker. Under compose, `app`
+  depends on a healthy `solace`, so skip that dependency explicitly:
+  `docker compose up -d postgres clickhouse redis && INGEST_TRANSPORT=noop docker compose up -d --no-deps app`.
+- **Extension point: Message Replay.** The durable queue buffers only unacked
+  messages; to rebuild the in-memory cache after a restart, build the receiver in
+  `SolaceBatchConsumer` with a replay strategy
+  (`withMessageReplay(ReplayStrategy...)`) against a broker replay log, configured
+  alongside `template.ingest.solace.queue` / `topic`.
+- **Connect timing (differs from Python):** the consumer connects lazily inside the
+  ingest loop; each `consume()` builds a fresh `MessagingService`. With the broker
+  unreachable the app still comes up live with ingest `DOWN`, and the retry
+  failure path or the disconnect watchdog exits the process. Python connects with
+  backoff in its lifespan and fails startup instead. Both reconnect with a fresh
+  service after a terminal interruption.
+- **Batch size limit (differs from Python):** `max-batch-bytes` is checked against
+  the encoded message payload, all-or-nothing, before any write. Python checks the
+  decoded Arrow `nbytes` of each batch, also before any write.
 - **Resilience and shutdown:** SDK lifecycle listeners drive `ConnectionState`;
   the SDK reconnects forever. Transport failures retry with jittered exponential
-  backoff; 5 consecutive failures, or the transport staying disconnected longer than
+  backoff; a successful bind (the persistent receiver started) or a delivery resets
+  the backoff and the failure count. 5 consecutive failures without a successful
+  bind, or the transport staying disconnected longer than
   `max-disconnect-seconds`, trigger the shutdown hook, which calls `System.exit(3)`
   on a separate non-blocking thread so an orchestrator restarts the process.
   Graceful shutdown uses `@Bean(preDestroy = "close")` in `StreamIngestBeans`
@@ -105,15 +123,22 @@ Compose also starts the `solace` broker (SMF on 55555, SEMP on 8080) and a
 `solace-publisher` demo that runs `ExampleSolacePublisher`, continuously
 publishing Arrow batches to `ingest/batches`. The publisher has
 `restart: on-failure` because the broker's health check passes shortly before the
-message VPN accepts clients and the demo does not retry its connect. Set
-`INGEST_TRANSPORT=noop` to run the app without ingest from the broker.
+message VPN accepts clients and the demo does not retry its connect. To run the
+app without the broker (HTTP-only ingest), start its other dependencies first and
+skip `app`'s `solace` dependency with `--no-deps`; `INGEST_TRANSPORT=noop docker compose up app`
+alone would still start the broker and wait for it to be healthy:
+```bash
+docker compose up -d postgres clickhouse redis
+INGEST_TRANSPORT=noop docker compose up -d --no-deps app
+```
 
 ## How this maps to python-webservice-template
 Micronaut's `ApplicationContext` replaces the Python hand-rolled DI container;
 `@MicronautTest` replaces `create_app` isolation. Deliberate divergences:
 native DI; **append-only LSM store** (compaction pushed to the client, so
 `/data/cache` rows carry `seqno`+`op`); **Jedis** for RedisJSON; **async-profiler**
-for Layer-2 profiling. Everything else mirrors the Python structure and naming.
+for Layer-2 profiling; lazy Solace connect and an encoded-payload batch size check
+(see [Streaming ingestion](#streaming-ingestion-solace)). Everything else mirrors the Python structure and naming.
 
 ## Performance profiling
 See [PERF_PROFILING_RUNBOOK.md](PERF_PROFILING_RUNBOOK.md) — Layer 1 (k6 +

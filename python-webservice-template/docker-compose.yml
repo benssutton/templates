@@ -119,8 +119,10 @@ services:
         condition: service_healthy
       solace:
         condition: service_healthy
-      # Solace is a required dependency (default transport). For HTTP-only
-      # ingest without a broker: INGEST_TRANSPORT=noop docker compose up app db clickhouse redis
+      # Solace is a required dependency (default transport): even with
+      # INGEST_TRANSPORT=noop, `up app` starts the broker and waits for it.
+      # For HTTP-only ingest without a broker, skip the dependency:
+      #   docker compose up -d db clickhouse redis && INGEST_TRANSPORT=noop docker compose up -d --no-deps app
     healthcheck:
       # HTTPS with an unverified context — the cert is self-signed (dev only).
       test: ["CMD-SHELL", "python -c \"import ssl, urllib.request; urllib.request.urlopen('https://localhost/health/live', context=ssl._create_unverified_context())\""]

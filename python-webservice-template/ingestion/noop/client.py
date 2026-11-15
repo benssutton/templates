@@ -1,7 +1,7 @@
 import threading
 from typing import Iterator
 
-from ingestion.base import ConnectionState, Delivery
+from ingestion.base import ConnectionState, Delivery, OnBound
 from settings import Settings
 
 
@@ -19,7 +19,9 @@ class NoopBatchConsumer:
     async def __aexit__(self, *_: object) -> None:
         self.close()
 
-    def deliveries(self) -> Iterator[Delivery]:
+    def deliveries(self, on_bound: OnBound | None = None) -> Iterator[Delivery]:
+        if on_bound is not None:
+            on_bound()  # nothing to bind: always "bound"
         self._closed.wait()
         yield from ()
 

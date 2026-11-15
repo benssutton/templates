@@ -85,13 +85,18 @@ class LSMStore:
         self._runs: list[pl.DataFrame] = []
         self._snapshot = _Snapshot(runs=(), memtable=())
 
-    def ingest(self, batch: pa.RecordBatch) -> None:
+    def validate(self, batch: pa.RecordBatch) -> None:
+        """Raise InvalidBatchError if ingest() would refuse this batch. Pure (no
+        state change), so callers can check a whole message before writing any of it."""
         required = [*self._key_columns, "op"]
         missing = [c for c in required if c not in batch.schema.names]
         if missing:
             # Validate up front: an un-keyed frame would be accepted here and only
             # fail later inside compaction, poisoning every subsequent query.
             raise InvalidBatchError(f"batch missing required columns: {missing}")
+
+    def ingest(self, batch: pa.RecordBatch) -> None:
+        self.validate(batch)
         frame = pl.from_arrow(batch)
         # from_arrow() is typed DataFrame | Series; a RecordBatch always yields a DataFrame.
         assert isinstance(frame, pl.DataFrame)

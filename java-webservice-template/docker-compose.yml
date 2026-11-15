@@ -70,6 +70,9 @@ services:
       postgres: { condition: service_healthy }
       clickhouse: { condition: service_started }
       redis: { condition: service_started }
+      # Even with INGEST_TRANSPORT=noop this starts the broker and waits for it. For a
+      # broker-free run: `docker compose up -d postgres clickhouse redis &&
+      # INGEST_TRANSPORT=noop docker compose up -d --no-deps app`.
       solace: { condition: service_healthy }
     ports:
       - "443:443"

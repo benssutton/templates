@@ -75,7 +75,8 @@ class StreamIngestService:
             except asyncio.CancelledError:
                 pass
             self._watchdog_task = None
-        self._consumer.close()
+        # close() may block in the SDK (receiver terminate, disconnect): off-loop.
+        await asyncio.to_thread(self._consumer.close)
         if self._thread is not None:
             await asyncio.to_thread(self._thread.join, _JOIN_TIMEOUT)
             if self._thread.is_alive():
@@ -84,9 +85,9 @@ class StreamIngestService:
                 )
             self._thread = None
 
-    def _record_ingest(self, batch: pa.RecordBatch) -> bool:
-        """Write one batch. False = refused as oversized (logged). Raises
-        InvalidBatchError for an unmergeable batch; anything else is unexpected."""
+    def _oversized(self, batch: pa.RecordBatch) -> bool:
+        """True (and logged) if the decoded batch exceeds max_ingest_batch_bytes.
+        Measures decoded Arrow nbytes per batch (Java measures the encoded payload)."""
         max_bytes = self._settings.max_ingest_batch_bytes
         if batch.nbytes > max_bytes:
             log.error(
@@ -94,23 +95,38 @@ class StreamIngestService:
                 batch.nbytes,
                 max_bytes,
             )
-            return False
+            return True
+        return False
+
+    def _write(self, batch: pa.RecordBatch) -> None:
         self._store.ingest(batch)
         self._last_batch_at = datetime.now(timezone.utc)
         self._rows_total += batch.num_rows
         log.debug("ingested batch: rows=%d", batch.num_rows)
+
+    def _record_ingest(self, batch: pa.RecordBatch) -> bool:
+        """Write one batch. False = refused as oversized (logged). Raises
+        InvalidBatchError for an unmergeable batch; anything else is unexpected."""
+        if self._oversized(batch):
+            return False
+        self._write(batch)
         return True
 
     def _decide(self, delivery: Delivery) -> _Outcome:
         """Write every batch and decide the outcome. Never settles: the caller
         settles exactly once, so a raising callback can't cause a second one."""
         # One message may carry several batches; settle once, after all of them.
-        # A FAILED message is redelivered whole, so batches written before the
-        # failure are re-applied - harmless under newest-wins merge semantics.
+        # All-or-nothing: validate EVERY batch (size + the store's own rules)
+        # before writing any, so a REJECTED message leaves nothing in the store.
+        # A FAILED message is redelivered whole, so batches written before an
+        # unexpected write error are re-applied - harmless under newest-wins merge.
         try:
             for batch in delivery.batches:
-                if not self._record_ingest(batch):
+                if self._oversized(batch):
                     return _Outcome.REJECT
+                self._store.validate(batch)
+            for batch in delivery.batches:
+                self._write(batch)
         except InvalidBatchError:
             log.exception("rejecting unmergeable message")
             return _Outcome.REJECT
@@ -142,12 +158,18 @@ class StreamIngestService:
         # ingest_max_disconnect_seconds=None disables *all* automatic shutdown:
         # the watchdog (see __aenter__) and this consecutive-failure trigger.
         shutdown_on_failure = self._settings.ingest_max_disconnect_seconds is not None
+
+        def _healthy() -> None:
+            # A bind or a delivery proves the transport works: without this, healed
+            # interruptions on a quiet queue would add up to a shutdown over time.
+            nonlocal consecutive_failures, delay
+            consecutive_failures = 0
+            delay = _INGEST_BASE_DELAY
+
         while True:
             try:
-                for delivery in self._consumer.deliveries():
-                    # Receiving a delivery proves the transport works.
-                    consecutive_failures = 0
-                    delay = _INGEST_BASE_DELAY
+                for delivery in self._consumer.deliveries(on_bound=_healthy):
+                    _healthy()
                     outcome: _Outcome | None = None
                     token = set_correlation_id(
                         new_id()

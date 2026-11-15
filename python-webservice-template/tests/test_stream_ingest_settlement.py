@@ -6,22 +6,24 @@ import time
 
 import pyarrow as pa
 
-from ingestion.base import ConnectionState, Delivery
+from ingestion.base import ConnectionState, Delivery, OnBound
 from persistence.stream_store.lsm_store import LSMStore
-from services.stream_ingest import StreamIngestService
+from services.stream_ingest import _INGEST_MAX_FAILURES, StreamIngestService
 from settings import Settings
 from tests.publishers.batches import make_batch
 from tests.support.wait import eventually
 
 
 class _ScriptedConsumer:
-    """Yields the given deliveries, then idles until close()."""
+    """Binds trivially, yields the given deliveries, then idles until close()."""
 
     def __init__(self, deliveries: list[Delivery]) -> None:
         self._deliveries = deliveries
         self._closed = threading.Event()
 
-    def deliveries(self):
+    def deliveries(self, on_bound: OnBound | None = None):
+        if on_bound is not None:
+            on_bound()
         yield from self._deliveries
         self._closed.wait()
 
@@ -92,6 +94,26 @@ async def test_oversized_batch_rejects():
     assert store.query(100)[1] == 0
 
 
+async def test_invalid_second_batch_rejects_without_writing_the_first():
+    """All-or-nothing: every batch is validated before any write, so a REJECTED
+    message leaves nothing behind in the store."""
+    bad = pa.record_batch({"name": ["x"], "value": ["v"], "op": ["upsert"]})
+    outcomes, store = await _settle_one([make_batch([(1, "a", "v1", "upsert")]), bad])
+    assert outcomes == ["reject"]
+    assert store.query(100)[1] == 0
+
+
+async def test_oversized_second_batch_rejects_without_writing_the_first():
+    small = make_batch([(1, "a", "v1", "upsert")])
+    big = make_batch([(i, "b" * 100, "v1", "upsert") for i in range(2, 50)])
+    assert small.nbytes < big.nbytes
+    outcomes, store = await _settle_one(
+        [small, big], max_ingest_batch_bytes=big.nbytes - 1
+    )
+    assert outcomes == ["reject"]
+    assert store.query(100)[1] == 0
+
+
 async def test_unexpected_store_error_fails_for_redelivery():
     outcomes, _ = await _settle_one(
         [make_batch([(1, "a", "v1", "upsert")])],
@@ -150,6 +172,98 @@ async def test_persistent_store_failure_backs_off_between_fails():
         await eventually(lambda: len(fail_times) >= 3, timeout=5, what="three fails")
     assert fail_times[1] - fail_times[0] >= 1.0
     assert fail_times[2] - fail_times[1] >= 2.0
+
+
+class _InterruptedOnceConsumer(_ScriptedConsumer):
+    """First deliveries() raises a transport error (as SolaceBatchConsumer does
+    after a terminal service interruption); the next call delivers."""
+
+    def __init__(self, deliveries: list[Delivery]) -> None:
+        super().__init__(deliveries)
+        self.calls = 0
+
+    def deliveries(self, on_bound: OnBound | None = None):
+        self.calls += 1
+        if self.calls == 1:
+            raise ConnectionError("service terminally interrupted")
+        yield from super().deliveries(on_bound)
+
+
+class _BindsThenInterruptedConsumer(_ScriptedConsumer):
+    """Each of the first `cycles` calls binds, then raises: a reconnect that
+    heals and is later interrupted again. Afterwards it idles until close()."""
+
+    def __init__(self, cycles: int) -> None:
+        super().__init__([])
+        self.cycles = cycles
+        self.calls = 0
+
+    def deliveries(self, on_bound: OnBound | None = None):
+        self.calls += 1
+        if self.calls <= self.cycles:
+            if on_bound is not None:
+                on_bound()
+            raise ConnectionError("service terminally interrupted")
+        yield from super().deliveries(on_bound)
+
+
+async def test_successful_bind_resets_the_consecutive_failure_count():
+    """A bind proves the transport works, like a delivery does: interruptions
+    that each heal (bind again) must never add up to a shutdown, and the
+    transport backoff stays at its base delay instead of doubling."""
+    cycles = _INGEST_MAX_FAILURES + 1
+    consumer = _BindsThenInterruptedConsumer(cycles)
+    settings = Settings(ingest_transport="noop", ingest_max_disconnect_seconds=60.0)
+    shutdowns: list[bool] = []
+    svc = StreamIngestService(
+        consumer,
+        LSMStore(flush_rows=100, compaction_runs=4),
+        settings,
+        shutdown_hook=lambda: shutdowns.append(True),
+    )
+    started = time.monotonic()
+    async with svc:
+        await eventually(
+            lambda: consumer.calls == cycles + 1,
+            timeout=cycles * 1.25 + 5,
+            what="every interrupted cycle retried",
+        )
+    assert shutdowns == []
+    # Base delay each time (1-1.25 s), not 1+2+4+8+16+32 s.
+    assert time.monotonic() - started < cycles * 1.25 + 2
+
+
+async def test_transport_error_backs_off_then_next_call_delivers():
+    outcomes: list[str] = []
+    consumer = _InterruptedOnceConsumer(
+        [_delivery([make_batch([(1, "a", "v1", "upsert")])], outcomes)]
+    )
+    store = LSMStore(flush_rows=100, compaction_runs=4)
+    settings = Settings(ingest_transport="noop", ingest_max_disconnect_seconds=60.0)
+    shutdowns: list[bool] = []
+    svc = StreamIngestService(
+        consumer, store, settings, shutdown_hook=lambda: shutdowns.append(True)
+    )
+    started = time.monotonic()
+    async with svc:
+        await eventually(lambda: bool(outcomes), timeout=5, what="delivery settled")
+    assert time.monotonic() - started >= 1.0  # transport backoff before the retry
+    assert consumer.calls == 2
+    assert outcomes == ["accept"]
+    assert shutdowns == []
+
+
+async def test_close_during_transport_backoff_is_prompt():
+    consumer = _InterruptedOnceConsumer([])
+    settings = Settings(ingest_transport="noop", ingest_max_disconnect_seconds=None)
+    svc = StreamIngestService(
+        consumer, LSMStore(flush_rows=100, compaction_runs=4), settings
+    )
+    async with svc:
+        await eventually(lambda: consumer.calls == 1, timeout=5, what="first call")
+        started = time.monotonic()  # a ~1 s transport backoff is now pending
+    assert time.monotonic() - started < 0.5
+    assert consumer.calls == 1
 
 
 async def test_close_during_settlement_backoff_is_prompt():

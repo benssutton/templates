@@ -10,7 +10,8 @@ import java.util.List;
 import java.util.Properties;
 
 /**
- * Continuous Guaranteed publisher for docker-compose (replaces ExampleFlightServer).
+ * Demo publisher for docker-compose: continuously publishes Arrow IPC batches to a
+ * Solace topic as Guaranteed messages, for the app's ingest queue to consume.
  * Env: SOLACE_HOST, SOLACE_PORT, SOLACE_VPN, SOLACE_USERNAME, SOLACE_PASSWORD,
  * SOLACE_TOPIC, PUBLISH_INTERVAL_MS (default 100).
  */

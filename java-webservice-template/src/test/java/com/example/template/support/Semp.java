@@ -20,6 +20,8 @@ public final class Semp {
     private static final Pattern CLIENT_NAME = Pattern.compile("\"clientName\"\\s*:");
     private static final Pattern FLOW_ID = Pattern.compile("\"flowId\"\\s*:");
     private static final Pattern UNACKED = Pattern.compile("\"unackedMsgCount\"\\s*:\\s*(\\d+)");
+    /** {@code meta.error.status} of a SEMP error body; the error object's only "status" key. */
+    private static final Pattern NOT_FOUND = Pattern.compile("\"error\"\\s*:\\s*\\{[^}]*\"status\"\\s*:\\s*\"NOT_FOUND\"");
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(TIMEOUT).build();
@@ -51,8 +53,15 @@ public final class Semp {
         return r;
     }
 
+    /**
+     * SEMP v2 reports a missing object as HTTP 400 with {@code meta.error.status == "NOT_FOUND"} (not 404).
+     * Anything else that isn't a 200 (auth failure, 5xx) throws rather than reading as "absent".
+     */
     public boolean queueExists(String queue) {
-        return send("GET", "/config/msgVpns/default/queues/" + enc(queue), null).statusCode() == 200;
+        HttpResponse<String> r = send("GET", "/config/msgVpns/default/queues/" + enc(queue), null);
+        if (r.statusCode() == 200) return true;
+        if (r.statusCode() == 400 && NOT_FOUND.matcher(r.body()).find()) return false;
+        throw new IllegalStateException("SEMP " + r.statusCode() + ": " + r.body());
     }
 
     public List<String> queueSubscriptions(String queue) {

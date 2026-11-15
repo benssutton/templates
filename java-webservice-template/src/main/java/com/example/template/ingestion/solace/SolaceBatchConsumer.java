@@ -103,6 +103,12 @@ public class SolaceBatchConsumer implements BatchConsumer {
 
     @Override
     public void consume(Consumer<Delivery> sink) throws Exception {
+        consume(sink, () -> { });
+    }
+
+    /** {@code onBound} runs on this (the ingest) thread once the receiver has started. */
+    @Override
+    public void consume(Consumer<Delivery> sink, Runnable onBound) throws Exception {
         if (closed) {
             return;
         }
@@ -135,6 +141,7 @@ public class SolaceBatchConsumer implements BatchConsumer {
             PersistentMessageReceiver bound = r; // the callback settles on this flow, never a later one
             bound.receiveAsync(m -> onMessage(bound, box, m));
             LOG.info("Solace: bound queue {} (subscription {})", s.getQueue(), s.getTopic());
+            onBound.run(); // connect + bind succeeded: the transport is healthy
 
             while (true) {
                 Delivery d = box.take();

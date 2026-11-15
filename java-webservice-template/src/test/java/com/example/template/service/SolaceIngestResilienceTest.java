@@ -47,6 +47,7 @@ class SolaceIngestResilienceTest {
     @Test
     void repeatedBindDenialRequestsShutdown() throws Exception {
         // Session CONNECTED (watchdog quiet) but every bind denied: consecutive-failure path.
+        // start() throws before onBound, so nothing resets the count.
         // Real backoff 1+2+4+8 s (+ jitter) before failure 5.
         Names names = Names.unique();
         String user = "u-" + names.queue();

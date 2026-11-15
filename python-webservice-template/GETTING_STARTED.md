@@ -16,7 +16,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Solace needs a Docker VM with at least 3 GiB RAM (the broker alone takes ~1 GiB). `INGEST_TRANSPORT=noop` runs without a broker (HTTP ingest only).
+Solace needs a Docker VM with at least 3 GiB RAM (the broker alone takes ~1 GiB). For HTTP-only ingest without a broker: `docker compose up -d db clickhouse redis && INGEST_TRANSPORT=noop docker compose up -d --no-deps app` (`app` depends on a healthy `solace`, so a plain `up` would still start it).
 
 ### 2. Install Python Dependencies
 

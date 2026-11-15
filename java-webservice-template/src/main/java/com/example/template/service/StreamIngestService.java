@@ -27,8 +27,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Owns the ingest thread (consume loop with jittered backoff + consecutive-failure
- * shutdown), a settlement backoff after each failed delivery, and a disconnect
+ * Owns the ingest thread (consume loop with jittered backoff + shutdown after
+ * consecutive failures without a successful bind), a settlement backoff after each failed delivery, and a disconnect
  * watchdog. Every backoff wait is cut short by {@link #close()}. Mirrors Python
  * services/stream_ingest.py.
  * Implements the ingest-health seam so /health reports real transport state.
@@ -57,8 +57,10 @@ public class StreamIngestService implements IngestHealthProvider, StreamIngestHe
     /** The watchdog requests shutdown at most once (Python's watchdog returns after it). */
     private final AtomicBoolean watchdogFired = new AtomicBoolean();
 
-    // Backoff state, touched only by the ingest thread. A delivery proves the
-    // transport works, so it resets the transport backoff (as the Python loop does).
+    // Backoff state, touched only by the ingest thread (onBound and the sink both run
+    // on it, inside consume()). A successful bind, or a delivery, proves the transport
+    // works, so it resets the transport backoff (as the Python loop does): the
+    // shutdown fires only on MAX_FAILURES consecutive failures without a bind.
     private int consecutiveFailures;
     private double delay = BASE_DELAY;
     // Settlement backoff, separate from the transport backoff (`delay`): fail() makes
@@ -147,8 +149,7 @@ public class StreamIngestService implements IngestHealthProvider, StreamIngestHe
         if (stopping()) {
             return; // left unsettled: the broker redelivers it on the next bind
         }
-        consecutiveFailures = 0;
-        delay = BASE_DELAY;
+        resetTransportBackoff();
         Outcome outcome = null;
         String token = MDC.get("correlationId");
         MDC.put("correlationId", UUID.randomUUID().toString());
@@ -179,11 +180,17 @@ public class StreamIngestService implements IngestHealthProvider, StreamIngestHe
         }
     }
 
+    /** Ingest thread only: the transport is proven healthy (bound, or delivering). */
+    private void resetTransportBackoff() {
+        consecutiveFailures = 0;
+        delay = BASE_DELAY;
+    }
+
     private void ingestLoop() {
         boolean shutdownOnFailure = settings.getMaxDisconnectSeconds() > 0;
         while (!stopping()) {
             try {
-                consumer.consume(this::onDelivery);
+                consumer.consume(this::onDelivery, this::resetTransportBackoff);
                 return; // clean end — consumer closed
             } catch (Exception e) {
                 if (stopping()) {
@@ -192,7 +199,7 @@ public class StreamIngestService implements IngestHealthProvider, StreamIngestHe
                 consecutiveFailures++;
                 LOG.error("consumer failed (failure {}/{})", consecutiveFailures, MAX_FAILURES, e);
                 if (shutdownOnFailure && consecutiveFailures >= MAX_FAILURES) {
-                    LOG.error("ingest: {} consecutive failures; requesting shutdown", consecutiveFailures);
+                    LOG.error("ingest: {} consecutive failures without a successful bind; requesting shutdown", consecutiveFailures);
                     shutdownHook.run();
                     return;
                 }

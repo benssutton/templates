@@ -14,9 +14,15 @@ from typing import cast
 import pytest
 from pydantic import SecretStr
 from solace.messaging.errors.pubsubplus_client_error import PubSubPlusClientError
+from solace.messaging.messaging_service import ServiceEvent
 
 from ingestion.base import ConnectionState, Delivery
-from ingestion.solace.client import SolaceBatchConsumer
+from ingestion.solace.client import (
+    SolaceBatchConsumer,
+    SolaceServiceInterrupted,
+    _Session,
+    _StateListener,
+)
 from settings import Settings
 from tests.publishers.batches import make_batch
 from tests.publishers.solace_publisher import SolacePublisher
@@ -201,6 +207,151 @@ async def test_reconnects_and_resumes_after_network_partition(
             delivery.accept()
         finally:
             publisher.close()
+
+
+async def test_terminal_interruption_raises_and_next_call_reconnects(
+    solace_container, solace_names, semp, solace_publisher
+):
+    """Drives the SDK's terminal-interruption callback directly. A broker-side
+    trigger isn't reliable: with forever-retry the SDK keeps RECONNECTING when
+    the client username or the message VPN is disabled (both tried via SEMP)."""
+    consumer = SolaceBatchConsumer(
+        _settings(solace_container, solace_names, connect_base_delay=0.1)
+    )
+    async with consumer:
+        gen = consumer.deliveries()
+        first_run = asyncio.create_task(asyncio.to_thread(next, gen))
+        second_run: asyncio.Task | None = None
+        try:
+            await wait_for_queue(semp, solace_names.queue)
+            await eventually(
+                lambda: semp.queue_bind_count(solace_names.queue) == 1,
+                what="flow bound",
+            )
+            dead = consumer._session
+            assert dead is not None
+            _interrupt(consumer, dead)
+            with pytest.raises(SolaceServiceInterrupted):
+                await asyncio.wait_for(first_run, 10)
+            assert consumer.connection_state() == ConnectionState.DOWN
+            await eventually(
+                lambda: semp.queue_bind_count(solace_names.queue) == 0,
+                what="receiver torn down after the raise",
+            )
+
+            second = consumer.deliveries()  # hold a reference: GC would close it
+            second_run = asyncio.create_task(asyncio.to_thread(next, second))
+            await eventually(
+                lambda: semp.queue_bind_count(solace_names.queue) == 1,
+                what="re-bound on a fresh service",
+            )
+            assert consumer._session is not dead
+            assert consumer.connection_state() == ConnectionState.CONNECTED
+            # The dead service was disconnected, not leaked alongside the new one.
+            await eventually(
+                lambda: semp.client_count(consumer.client_name) == 1,
+                what="exactly one client connected",
+            )
+            solace_publisher.publish_batch(make_batch([(9, "again", "v1", "upsert")]))
+            delivery = await asyncio.wait_for(second_run, 20)
+            assert delivery.batches[0].column("id").to_pylist() == [9]
+            delivery.accept()
+            await asyncio.to_thread(cast(Generator[Delivery, None, None], second).close)
+        finally:
+            await _close_and_reap(consumer, first_run)
+            if second_run is not None:
+                await _close_and_reap(consumer, second_run)
+
+
+def _interrupt(consumer: SolaceBatchConsumer, session: _Session) -> None:
+    """What the SDK calls once it has given up reconnecting this service."""
+    _StateListener(consumer, session).on_service_interrupted(cast(ServiceEvent, None))
+
+
+async def test_interruption_between_calls_reconnects_on_entry_and_reports_bound(
+    solace_container, solace_names, semp, solace_publisher
+):
+    """Interrupted while no deliveries() is running (e.g. during the ingest
+    loop's backoff): the next call replaces the dead service before binding,
+    then signals on_bound."""
+    consumer = SolaceBatchConsumer(
+        _settings(solace_container, solace_names, connect_base_delay=0.1)
+    )
+    async with consumer:
+        dead = consumer._session
+        assert dead is not None
+        _interrupt(consumer, dead)
+        assert consumer.connection_state() == ConnectionState.DOWN
+        bound = threading.Event()
+        gen = consumer.deliveries(on_bound=bound.set)
+        run = asyncio.create_task(asyncio.to_thread(next, gen))
+        try:
+            await wait_for_queue(semp, solace_names.queue)
+            assert await asyncio.to_thread(bound.wait, 20), "on_bound not called"
+            assert consumer._session is not dead
+            assert consumer.connection_state() == ConnectionState.CONNECTED
+            solace_publisher.publish_batch(make_batch([(3, "x", "v1", "upsert")]))
+            delivery = await asyncio.wait_for(run, 20)
+            assert delivery.batches[0].column("id").to_pylist() == [3]
+            delivery.accept()
+            await asyncio.to_thread(cast(Generator[Delivery, None, None], gen).close)
+        finally:
+            await _close_and_reap(consumer, run)
+
+
+class _InterruptedBeforeBind(SolaceBatchConsumer):
+    """Real consumer whose FIRST reconnected service is interrupted at once:
+    the SDK event lands after the reconnect but before deliveries() has
+    published its inbox, so only the pre-bind re-check can notice it."""
+
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(settings)
+        self.armed = True
+
+    def _reconnect(self, dead: _Session) -> _Session | None:
+        session = super()._reconnect(dead)
+        if session is not None and self.armed:
+            self.armed = False
+            _interrupt(self, session)
+        return session
+
+
+async def test_interruption_before_bind_raises_then_next_call_reconnects(
+    solace_container, solace_names, semp, solace_publisher
+):
+    consumer = _InterruptedBeforeBind(
+        _settings(solace_container, solace_names, connect_base_delay=0.1)
+    )
+    async with consumer:
+        first = consumer._session
+        assert first is not None
+        _interrupt(consumer, first)  # so the first call reconnects on entry
+        bound = threading.Event()
+        gen = consumer.deliveries(on_bound=bound.set)
+        with pytest.raises(SolaceServiceInterrupted):
+            await asyncio.wait_for(asyncio.to_thread(next, gen), 20)
+        assert not bound.is_set()  # raised before receiver.start()
+        assert not consumer.armed
+        assert consumer.connection_state() == ConnectionState.DOWN
+        assert not semp.queue_exists(solace_names.queue)  # never bound
+
+        second = consumer.deliveries(on_bound=bound.set)
+        run = asyncio.create_task(asyncio.to_thread(next, second))
+        try:
+            await wait_for_queue(semp, solace_names.queue)
+            assert await asyncio.to_thread(bound.wait, 20), "on_bound not called"
+            assert consumer.connection_state() == ConnectionState.CONNECTED
+            await eventually(
+                lambda: semp.client_count(consumer.client_name) == 1,
+                what="exactly one client connected",
+            )
+            solace_publisher.publish_batch(make_batch([(4, "y", "v1", "upsert")]))
+            delivery = await asyncio.wait_for(run, 20)
+            assert delivery.batches[0].column("id").to_pylist() == [4]
+            delivery.accept()
+            await asyncio.to_thread(cast(Generator[Delivery, None, None], second).close)
+        finally:
+            await _close_and_reap(consumer, run)
 
 
 async def test_bind_fails_when_client_profile_denies_queue_creation(
