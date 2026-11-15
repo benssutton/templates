@@ -28,7 +28,7 @@ docker build -t perf-scripts ./tests/performance
 docker compose up -d --build
 docker run --rm --network python-template_default -e BASE_URL=https://app -e VUS=10 -e DURATION=60s perf-scripts run /scripts/profile_reads.js
 
-# Ingest (Arrow decode + LSM write) — idle stream so HTTP is the sole writer:
+# Ingest (Arrow decode + LSM write) — profiling override sets `INGEST_TRANSPORT=noop`, so HTTP is the sole writer:
 docker compose -f docker-compose.yml -f docker-compose.profiling.yml up -d --build
 docker run --rm --network python-template_default -e BASE_URL=https://app -e VUS=4 -e DURATION=60s perf-scripts run /scripts/profile_ingest.js
 ```

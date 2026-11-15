@@ -15,7 +15,7 @@ async def test_status_reports_app_and_system(test_client):
     assert body["uptime"]["process_seconds"] >= 0.0
     assert body["system"]["process"]["memory_rss_bytes"] > 0
     assert isinstance(body["dependencies"], list)
-    assert body["ingest"]["transport"] == "flight"
+    assert body["ingest"]["transport"] == "noop"
 
 
 async def test_root_returns_non_empty_json(test_client):

@@ -1,240 +1,132 @@
+import asyncio
+import logging
+import math
 import threading
 
-import pyarrow.flight as pa_flight
 import pytest
-from httpx import AsyncClient, Response
+from testcontainers.clickhouse import ClickHouseContainer
 from testcontainers.redis import RedisContainer
-
-from pydantic import SecretStr
 
 from settings import Settings
 from tests.app_client import lifespan_test_client
-from tests.publishers.flight_server import ExampleFlightServer, make_batch
+from tests.publishers.batches import make_batch
+from tests.support.settings import app_settings
+from tests.support.solace import broker_paused, wait_for_queue
+from tests.support.wait import check, poll_cache, poll_json, poll_ready
 
 pytestmark = pytest.mark.observability
 
 REDIS_IMAGE = "redis/redis-stack-server:latest"
-
-_STREAM_SCRIPT = [make_batch([(1, "a", "v1", "upsert"), (2, "b", "v1", "upsert")])]
-
-
-def _settings(pg, ch, redis_url, flight_port, **overrides) -> Settings:
-    return Settings(
-        status="testing",
-        postgres_url=SecretStr(
-            f"postgresql://{pg.username}:{pg.password}@localhost:{int(pg.get_exposed_port(5432))}/{pg.dbname}"
-        ),
-        clickhouse_host="localhost",
-        clickhouse_port=int(ch.get_exposed_port(8123)),
-        clickhouse_user=ch.username or "default",
-        clickhouse_password=SecretStr(ch.password or ""),
-        clickhouse_database="default",
-        redis_url=SecretStr(redis_url),
-        ingest_transport="flight",
-        flight_host="localhost",
-        flight_port=flight_port,
-        flight_ticket="items",
-        lsm_flush_rows=2,
-        lsm_compaction_runs=2,
-        **overrides,
-    )
-
-
-@pytest.fixture(scope="module")
-def streaming_flight_server():
-    location = pa_flight.Location.for_grpc_tcp("localhost", 0)
-    server = ExampleFlightServer(location, _STREAM_SCRIPT, interval=0.05, loop=True)
-    threading.Thread(target=server.serve, daemon=True).start()
-    yield server
-    server.shutdown()
-
-
-async def _poll_ready(
-    client: AsyncClient, expected_code: int, timeout: float = 10.0
-) -> Response:
-    import asyncio
-    import time
-
-    deadline = time.monotonic() + timeout
-    last = None
-    while time.monotonic() < deadline:
-        last = await client.get("/health/ready")
-        if last.status_code == expected_code:
-            return last
-        await asyncio.sleep(0.1)
-    assert last is not None, f"no /health/ready response within {timeout}s"
-    return last
-
-
-async def _poll_status_ingested(client: AsyncClient, timeout: float = 15.0) -> dict:
-    import asyncio
-    import time
-
-    deadline = time.monotonic() + timeout
-    body: dict = {}
-    while time.monotonic() < deadline:
-        body = (await client.get("/health/status")).json()
-        if body["ingest"]["rows_ingested_total"] > 0:
-            return body
-        await asyncio.sleep(0.1)
-    return body  # caller's assertion reports the stale value
+CH_IMAGE = "clickhouse/clickhouse-server:latest"
+BATCHES = [
+    make_batch([(1, "a", "v1", "upsert"), (2, "b", "v1", "upsert")]),
+    make_batch([(3, "c", "v1", "upsert")]),
+    make_batch([(4, "d", "v1", "upsert")]),
+]
 
 
 async def test_liveness_always_200(
-    postgres_container,
-    clickhouse_container,
-    test_clickhouse_client,
-    redis_container,
-    streaming_flight_server,
+    postgres_container, clickhouse_container, test_clickhouse_client, redis_container
 ):
-    settings = _settings(
-        postgres_container,
-        clickhouse_container,
-        f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
-        streaming_flight_server.port,
-    )
-    async with lifespan_test_client(settings) as client:
+    async with lifespan_test_client(
+        app_settings(postgres_container, clickhouse_container, redis_container)
+    ) as client:
         resp = await client.get("/health/live")
         assert resp.status_code == 200
         assert resp.json()["status"] == "alive"
 
 
-async def test_readiness_all_up_returns_200(
-    postgres_container,
-    clickhouse_container,
-    test_clickhouse_client,
-    redis_container,
-    streaming_flight_server,
-):
-    settings = _settings(
-        postgres_container,
-        clickhouse_container,
-        f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
-        streaming_flight_server.port,
-    )
-    async with lifespan_test_client(settings) as client:
-        resp = await _poll_ready(client, 200)
-        assert resp.status_code == 200
+async def test_readiness_all_up_returns_200(solace_settings):
+    async with lifespan_test_client(solace_settings()) as client:
+        resp = await poll_ready(client, 200)
         body = resp.json()
         assert body["status"] == "ready"
-        by_name = {c["name"]: c for c in body["checks"]}
-        assert by_name["postgres"]["status"] == "up"
-        assert by_name["clickhouse"]["status"] == "up"
-        assert by_name["redis"]["status"] == "up"
-        assert by_name["ingest"]["status"] == "up"
-        assert by_name["ingest"]["connection_state"] == "connected"
+        for dep in ("postgres", "clickhouse", "redis", "ingest"):
+            assert check(body, dep)["status"] == "up"
+        assert check(body, "ingest")["connection_state"] == "connected"
 
 
 async def test_status_structure_and_ingest_freshness(
-    postgres_container,
-    clickhouse_container,
-    test_clickhouse_client,
-    redis_container,
-    streaming_flight_server,
+    solace_settings, solace_names, semp, solace_publisher
 ):
-    settings = _settings(
-        postgres_container,
-        clickhouse_container,
-        f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
-        streaming_flight_server.port,
-    )
-    async with lifespan_test_client(settings) as client:
-        await _poll_ready(client, 200)
-        # Readiness only means the ingest stream is connected; the first batch
-        # may not have been consumed yet on a slow runner. Wait (bounded) for it.
-        body = await _poll_status_ingested(client)
+    async with lifespan_test_client(solace_settings()) as client:
+        await wait_for_queue(semp, solace_names.queue)
+        solace_publisher.publish_batch(BATCHES[0])
+        await poll_cache(client, expected_total=2)
+        # The store becomes visible a moment before the ingest counters update.
+        _, body = await poll_json(
+            client,
+            "/health/status",
+            lambda r, b: r.is_success
+            and (b.get("ingest") or {}).get("rows_ingested_total") == 2,
+            timeout=10.0,
+            what="rows_ingested_total == 2",
+        )
         assert body["app"]["status"] == "testing"
         assert body["uptime"]["process_seconds"] >= 0.0
         assert body["system"]["process"]["memory_rss_bytes"] > 0
-        assert body["ingest"]["rows_ingested_total"] > 0
+        assert body["ingest"]["transport"] == "solace"
+        assert body["ingest"]["rows_ingested_total"] == 2
         assert body["ingest"]["last_batch_at"] is not None
 
 
 async def test_metrics_endpoint_exposes_series(
-    postgres_container,
-    clickhouse_container,
-    test_clickhouse_client,
-    redis_container,
-    streaming_flight_server,
+    postgres_container, clickhouse_container, test_clickhouse_client, redis_container
 ):
-    settings = _settings(
-        postgres_container,
-        clickhouse_container,
-        f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
-        streaming_flight_server.port,
-    )
-    async with lifespan_test_client(settings) as client:
+    async with lifespan_test_client(
+        app_settings(postgres_container, clickhouse_container, redis_container)
+    ) as client:
         await client.get("/health/live")  # generate one request metric
         resp = await client.get("/metrics")
         assert resp.status_code == 200
         assert "text/plain" in resp.headers["content-type"]
-        text = resp.text
-        assert "http_request_duration_seconds" in text
-        assert "dependency_up" in text
-        assert "ingest_connection_state" in text
-        assert "ingest_seconds_since_last_batch" in text
-        assert "process_memory_rss_bytes" in text
+        for series in (
+            "http_request_duration_seconds",
+            "dependency_up",
+            "ingest_connection_state",
+            "ingest_seconds_since_last_batch",
+            "process_memory_rss_bytes",
+        ):
+            assert series in resp.text
 
 
-async def test_ingest_disconnect_fails_readiness(
-    postgres_container,
-    clickhouse_container,
-    test_clickhouse_client,
-    redis_container,
+async def test_broker_partition_fails_readiness_then_recovers(
+    solace_settings, solace_container
 ):
-    # Use a finite (non-looping) server: after exhausting the script, batches()
-    # raises ConnectionError and the consumer enters RECONNECTING state.
-    # Because the server is still running, each reconnection cycle resets the
-    # failure counter (one batch succeeds then the stream ends again), so the
-    # 5-failure SIGTERM is never triggered.
-    location = pa_flight.Location.for_grpc_tcp("localhost", 0)
-    server = ExampleFlightServer(location, _STREAM_SCRIPT, interval=0.0, loop=False)
-    threading.Thread(target=server.serve, daemon=True).start()
-    settings = _settings(
-        postgres_container,
-        clickhouse_container,
-        f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
-        server.port,
-        ingest_max_disconnect_seconds=None,  # watchdog disabled; avoid SIGTERM in tests
-    )
+    # watchdog off: this test is about readiness, not shutdown
+    settings = solace_settings(ingest_max_disconnect_seconds=None)
     async with lifespan_test_client(settings) as client:
-        # Stream ends immediately; consumer enters RECONNECTING → readiness 503.
-        resp = await _poll_ready(client, 503)
-        assert resp.status_code == 503
-        ingest = {c["name"]: c for c in resp.json()["checks"]}["ingest"]
-        assert ingest["connection_state"] != "connected"
-    server.shutdown()
+        await poll_ready(client, 200)
+        with broker_paused(solace_container):
+            # Wait for the partition to be the cause of the 503, not merely
+            # the first 503 (SDK keepalive needs ~30-35 s to notice).
+            resp = await poll_ready(
+                client,
+                503,
+                until=lambda b: check(b, "ingest")["connection_state"]
+                == "reconnecting",
+                timeout=90.0,
+            )
+            ingest = check(resp.json(), "ingest")
+            assert ingest["connection_state"] == "reconnecting"
+            assert ingest["status"] == "down"
+        await poll_ready(client, 200, timeout=90.0)
 
 
-async def test_idle_ingest_is_stale_but_ready(
-    postgres_container,
-    clickhouse_container,
-    test_clickhouse_client,
-    redis_container,
-    streaming_flight_server,
-):
-    """Connected ingest that is idle (no recent batches) reports stale=True but
-    does not fail readiness when ingest_stale_fails_readiness=False.
-
-    Uses a streaming server (loop=True) to keep the consumer CONNECTED, sets a
-    very short staleness threshold, then disables ingest metrics to prevent the
-    server from racing ahead before the stale check.  We verify behaviour via
-    the HealthService directly rather than through a real-server teardown that
-    can block the gRPC stream indefinitely on Windows.
-    """
-    import asyncio
+async def test_idle_ingest_is_stale_but_ready():
+    """Connected-but-idle ingest reports stale=True without failing readiness
+    when ingest_stale_fails_readiness=False. Transport-agnostic: an idle
+    in-process consumer, no broker needed."""
+    from core.container import Container
     from ingestion.base import ConnectionState
     from persistence.stream_store.lsm_store import LSMStore
     from services.health import HealthService
     from services.stream_ingest import StreamIngestService
-    from core.container import Container
 
-    # A fake consumer that is CONNECTED but never produces batches.
     class _IdleConsumer:
-        def batches(self):
-            threading.Event().wait()  # blocks forever until close()
-            return
-            yield
+        def deliveries(self):
+            threading.Event().wait()
+            yield from ()
 
         def close(self):
             pass
@@ -243,58 +135,47 @@ async def test_idle_ingest_is_stale_but_ready(
             return ConnectionState.CONNECTED
 
     settings = Settings(
-        ingest_transport="flight",
-        ingest_staleness_threshold_seconds=0.5,
+        ingest_transport="noop",
+        ingest_staleness_threshold_seconds=2.0,
         ingest_stale_fails_readiness=False,
         ingest_max_disconnect_seconds=None,
     )
-    store = LSMStore(flush_rows=100, compaction_runs=4)
-    svc = StreamIngestService(_IdleConsumer(), store, settings)
+    svc = StreamIngestService(
+        _IdleConsumer(), LSMStore(flush_rows=100, compaction_runs=4), settings
+    )
 
-    # health_check does not require the ingest thread to be running.
     health = await svc.health_check()
     assert health.connection_state == "connected"
-    assert health.stale is False  # not yet past threshold
-
-    await asyncio.sleep(0.6)
+    assert health.stale is False
+    await asyncio.sleep(2.5)
     health2 = await svc.health_check()
     assert health2.connection_state == "connected"
-    assert health2.stale is True  # past 0.5 s threshold, no batch ever received
+    assert health2.stale is True
 
-    # Confirm that stale-but-connected does NOT fail the HealthService readiness
-    # check (ingest_stale_fails_readiness=False).
     container = Container(settings)
     container.register_singleton(StreamIngestService, svc)
-    health_svc = HealthService(settings, container)
-    readiness = await health_svc.readiness()
+    readiness = await HealthService(settings, container).readiness()
     ingest_check = next(c for c in readiness.checks if c.name == "ingest")
     assert ingest_check.status == "up"
     assert readiness.status == "not_ready"  # deps not available, but ingest is up
 
 
 async def test_dependency_down_fails_readiness(
-    postgres_container,
-    clickhouse_container,
-    test_clickhouse_client,
-    streaming_flight_server,
+    postgres_container, clickhouse_container, test_clickhouse_client
 ):
     dedicated_redis = RedisContainer(REDIS_IMAGE)
     dedicated_redis.start()
     try:
-        redis_url = f"redis://localhost:{int(dedicated_redis.get_exposed_port(6379))}/0"
-        settings = _settings(
-            postgres_container,
-            clickhouse_container,
-            redis_url,
-            streaming_flight_server.port,
-        )
-        async with lifespan_test_client(settings) as client:
-            assert (await _poll_ready(client, 200)).status_code == 200
-            dedicated_redis.stop()  # kill only this test's redis
-            resp = await _poll_ready(client, 503, timeout=15.0)
+        async with lifespan_test_client(
+            app_settings(postgres_container, clickhouse_container, dedicated_redis)
+        ) as client:
+            await poll_ready(client, 200)
+            dedicated_redis.stop()
+            resp = await poll_ready(client, 503, timeout=15.0)
             assert resp.status_code == 503
-            redis_check = {c["name"]: c for c in resp.json()["checks"]}["redis"]
-            assert redis_check["status"] == "down"
+            assert {c["name"]: c for c in resp.json()["checks"]}["redis"][
+                "status"
+            ] == "down"
     finally:
         try:
             dedicated_redis.stop()
@@ -303,33 +184,21 @@ async def test_dependency_down_fails_readiness(
 
 
 async def test_health_probe_error_is_generic_not_leaky(
-    postgres_container,
-    clickhouse_container,
-    test_clickhouse_client,
-    streaming_flight_server,
+    postgres_container, clickhouse_container, test_clickhouse_client
 ):
     dedicated_redis = RedisContainer(REDIS_IMAGE)
     dedicated_redis.start()
     try:
-        redis_url = f"redis://localhost:{int(dedicated_redis.get_exposed_port(6379))}/0"
-        settings = _settings(
-            postgres_container,
-            clickhouse_container,
-            redis_url,
-            streaming_flight_server.port,
-        )
-        async with lifespan_test_client(settings) as client:
-            assert (await _poll_ready(client, 200)).status_code == 200
+        async with lifespan_test_client(
+            app_settings(postgres_container, clickhouse_container, dedicated_redis)
+        ) as client:
+            await poll_ready(client, 200)
             dedicated_redis.stop()
-            resp = await _poll_ready(client, 503, timeout=15.0)
-            assert resp.status_code == 503
+            resp = await poll_ready(client, 503, timeout=15.0)
             redis_check = {c["name"]: c for c in resp.json()["checks"]}["redis"]
             assert redis_check["status"] == "down"
-            # Two non-leaky paths can fire: CacheService catches the error and
-            # returns "unavailable"; or, when the dead connection hangs, the
-            # probe's wait_for trips first and returns "timeout". Both are
-            # intentional generic tokens — the point of the finding is that the
-            # raw exception string (host/port/errno) is never surfaced.
+            # CacheService returns "unavailable", or the probe's wait_for trips
+            # first with "timeout"; never the raw exception string.
             error = redis_check["error"]
             assert error in {"unavailable", "timeout"}
             assert "localhost" not in error and "Error" not in error
@@ -341,30 +210,17 @@ async def test_health_probe_error_is_generic_not_leaky(
 
 
 async def test_clickhouse_health_check_exception_returns_generic_error(
-    postgres_container,
-    redis_container,
-    streaming_flight_server,
+    postgres_container, redis_container
 ):
-    # clickhouse_connect.ping() raises OperationalError on a real network refusal
-    # (rather than returning False), so the except branch in DataService.health_check
-    # requires a genuine connection failure.  Pattern mirrors the Redis test above:
-    # dedicated container, start app, kill container, confirm generic error in probe.
-    from testcontainers.clickhouse import ClickHouseContainer
-
-    dedicated_ch = ClickHouseContainer("clickhouse/clickhouse-server:latest", port=8123)
+    dedicated_ch = ClickHouseContainer(CH_IMAGE, port=8123)
     dedicated_ch.start()
     try:
-        settings = _settings(
-            postgres_container,
-            dedicated_ch,
-            f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
-            streaming_flight_server.port,
-        )
-        async with lifespan_test_client(settings) as client:
-            assert (await _poll_ready(client, 200)).status_code == 200
+        async with lifespan_test_client(
+            app_settings(postgres_container, dedicated_ch, redis_container)
+        ) as client:
+            await poll_ready(client, 200)
             dedicated_ch.stop()
-            resp = await _poll_ready(client, 503, timeout=30.0)
-        assert resp.status_code == 503
+            resp = await poll_ready(client, 503, timeout=30.0)
         ch_check = {c["name"]: c for c in resp.json()["checks"]}["clickhouse"]
         assert ch_check["status"] == "down"
         error = ch_check.get("error", "")
@@ -381,7 +237,6 @@ async def test_postgres_health_check_exception_logs_and_returns_generic_error(
     postgres_container, caplog
 ):
     import asyncpg
-    import logging
     from services.config import ConfigService
 
     pg = postgres_container
@@ -390,50 +245,34 @@ async def test_postgres_health_check_exception_logs_and_returns_generic_error(
         min_size=0,
         max_size=1,
     )
-    await pool.close()  # closed pool → acquire() raises InterfaceError
+    await pool.close()  # closed pool -> acquire() raises InterfaceError
     svc = ConfigService(pool)
     with caplog.at_level(logging.ERROR, logger="services.config"):
         result = await svc.health_check()
-
     assert result.status == "down"
     assert result.error == "unavailable"
     assert "postgres health check failed" in caplog.text
 
 
-async def test_streaming_assigns_distinct_per_batch_ids(
-    postgres_container,
-    clickhouse_container,
-    test_clickhouse_client,
-    redis_container,
-    streaming_flight_server,
-    cid_caplog,
+async def test_streaming_assigns_distinct_per_message_ids(
+    solace_settings, solace_names, semp, solace_publisher, cid_caplog
 ):
-    import asyncio
-    import logging
-
-    settings = _settings(
-        postgres_container,
-        clickhouse_container,
-        f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
-        streaming_flight_server.port,
-        ingest_max_disconnect_seconds=None,
-    )
     with cid_caplog.at_level(logging.DEBUG):
-        async with lifespan_test_client(settings) as client:
-            await _poll_ready(client, 200)
-            await asyncio.sleep(0.3)  # let several batches stream in
+        async with lifespan_test_client(solace_settings()) as client:
+            await wait_for_queue(semp, solace_names.queue)
+            for batch in BATCHES:
+                solace_publisher.publish_batch(batch)
+            await poll_cache(client, expected_total=4)
     ingest_logs = [r for r in cid_caplog.records if "ingested batch" in r.getMessage()]
     cids = {r.correlation_id for r in ingest_logs}
-    assert len(ingest_logs) >= 2
-    assert "-" not in cids  # every batch got a real ID
-    assert len(cids) >= 2  # and a DISTINCT one per batch
+    assert len(ingest_logs) == 3
+    assert "-" not in cids  # every message got a real ID
+    assert len(cids) == 3  # and a DISTINCT one per message
 
 
 async def test_ingest_never_started_metric_is_nan():
     """ingest_seconds_since_last_batch must be NaN (not 0.0) before the first
-    batch arrives so monitoring systems can distinguish 'never ingested' from
-    'just ingested'."""
-    import math
+    batch so monitoring can distinguish 'never ingested' from 'just ingested'."""
     from schemas.health import (
         AppInfo,
         DetailedStatusResponse,
@@ -453,7 +292,7 @@ async def test_ingest_never_started_metric_is_nan():
                 uptime=UptimeInfo(process_seconds=1.0, system_boot_seconds=0.0),
                 dependencies=[],
                 ingest=IngestHealth(
-                    transport="flight",
+                    transport="solace",
                     connection_state="connected",
                     thread_alive=True,
                     seconds_since_last_batch=None,
@@ -473,25 +312,19 @@ async def test_ingest_never_started_metric_is_nan():
                 ),
             )
 
-    from settings import Settings
-
     metrics = MetricsService(Settings())
     await metrics.refresh(_FakeHealthService())
-
     text = metrics.render()[0].decode()
     secs_line = next(
         (
-            line
-            for line in text.splitlines()
-            if line.startswith("ingest_seconds_since_last_batch ")
+            ln
+            for ln in text.splitlines()
+            if ln.startswith("ingest_seconds_since_last_batch ")
         ),
         None,
     )
     assert secs_line is not None, "ingest_seconds_since_last_batch metric not found"
-    raw_value = secs_line.split(" ")[1]
-    assert math.isnan(
-        float(raw_value)
-    ), f"expected NaN for never-ingested gauge, got {raw_value!r}"
+    assert math.isnan(float(secs_line.split(" ")[1]))
 
 
 async def test_get_data_logs_clickhouse_timing(
@@ -499,20 +332,12 @@ async def test_get_data_logs_clickhouse_timing(
     clickhouse_container,
     test_clickhouse_client,
     redis_container,
-    streaming_flight_server,
     cid_caplog,
 ):
-    import logging
-
-    settings = _settings(
-        postgres_container,
-        clickhouse_container,
-        f"redis://localhost:{int(redis_container.get_exposed_port(6379))}/0",
-        streaming_flight_server.port,
-        ingest_max_disconnect_seconds=None,
-    )
     with cid_caplog.at_level(logging.DEBUG, logger="core.correlation"):
-        async with lifespan_test_client(settings) as client:
+        async with lifespan_test_client(
+            app_settings(postgres_container, clickhouse_container, redis_container)
+        ) as client:
             resp = await client.get("/data?limit=5")
             assert resp.status_code == 200
     assert any("clickhouse.select" in r.getMessage() for r in cid_caplog.records)

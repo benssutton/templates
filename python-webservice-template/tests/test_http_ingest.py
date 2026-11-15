@@ -1,75 +1,25 @@
 import asyncio
 import logging
-import threading
 import time
 
 import pyarrow as pa
-import pyarrow.flight as pa_flight
-import pyarrow.ipc as pa_ipc
 import pytest
 from httpx import AsyncClient
 
-from pydantic import SecretStr
-
-from settings import Settings
 from tests.app_client import lifespan_test_client
-from tests.publishers.flight_server import ExampleFlightServer, make_batch
+from tests.publishers.batches import make_batch, serialize_batch
+from tests.support.settings import app_settings
 
 pytestmark = pytest.mark.http_ingest
 
 
-def _serialize_batch(batch: pa.RecordBatch) -> bytes:
-    buf = pa.BufferOutputStream()
-    with pa_ipc.new_stream(buf, batch.schema) as writer:
-        writer.write_batch(batch)
-    return buf.getvalue().to_pybytes()
-
-
-@pytest.fixture(scope="module")
-def empty_flight_server():
-    location = pa_flight.Location.for_grpc_tcp("localhost", 0)
-    # Empty script: server accepts connections but sends zero batches
-    server = ExampleFlightServer(location, [], interval=0.0, loop=False)
-    threading.Thread(target=server.serve, daemon=True).start()
-    yield server
-    server.shutdown()
-
-
 @pytest.fixture(scope="module")
 async def test_client_http(
-    postgres_container,
-    clickhouse_container,
-    test_clickhouse_client,
-    redis_container,
-    empty_flight_server,
+    postgres_container, clickhouse_container, test_clickhouse_client, redis_container
 ):
-    pg_port = int(postgres_container.get_exposed_port(5432))
-    ch_port = int(clickhouse_container.get_exposed_port(8123))
-    redis_port = int(redis_container.get_exposed_port(6379))
-
-    http_settings = Settings(
-        status="testing",
-        postgres_url=SecretStr(
-            f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}"
-        ),
-        clickhouse_host="localhost",
-        clickhouse_port=ch_port,
-        clickhouse_user=clickhouse_container.username or "default",
-        clickhouse_password=SecretStr(clickhouse_container.password or ""),
-        clickhouse_database="default",
-        redis_url=SecretStr(f"redis://localhost:{redis_port}/0"),
-        ingest_transport="flight",
-        flight_host="localhost",
-        flight_port=empty_flight_server.port,
-        flight_ticket="items",
-        lsm_flush_rows=2,
-        lsm_compaction_runs=2,
-        ingest_max_disconnect_seconds=None,  # empty server by design; watchdog would kill the session
-    )
-
-    # Isolated app: own container, own FastMCP, own lifespan — safe to run
-    # in the same process as the session-scoped flight test_client.
-    async with lifespan_test_client(http_settings) as client:
+    settings = app_settings(postgres_container, clickhouse_container, redis_container)
+    # Isolated app: own container, own FastMCP, own lifespan.
+    async with lifespan_test_client(settings) as client:
         yield client
 
 
@@ -98,7 +48,7 @@ async def test_post_ingest_upsert_appears_in_cache(test_client_http: AsyncClient
     batch = make_batch([(100, "http", "v1", "upsert")])
     res = await test_client_http.post(
         "/data/ingest",
-        content=_serialize_batch(batch),
+        content=serialize_batch(batch),
         headers={"Content-Type": "application/vnd.apache.arrow.stream"},
     )
     assert res.status_code == 202
@@ -109,7 +59,7 @@ async def test_post_ingest_newest_wins(test_client_http: AsyncClient):
     batch_v2 = make_batch([(100, "http", "v2", "upsert")])
     res = await test_client_http.post(
         "/data/ingest",
-        content=_serialize_batch(batch_v2),
+        content=serialize_batch(batch_v2),
         headers={"Content-Type": "application/vnd.apache.arrow.stream"},
     )
     assert res.status_code == 202
@@ -120,7 +70,7 @@ async def test_post_ingest_tombstone(test_client_http: AsyncClient):
     delete_batch = make_batch([(100, "http", "v2", "delete")])
     res = await test_client_http.post(
         "/data/ingest",
-        content=_serialize_batch(delete_batch),
+        content=serialize_batch(delete_batch),
         headers={"Content-Type": "application/vnd.apache.arrow.stream"},
     )
     assert res.status_code == 202
@@ -145,7 +95,6 @@ async def test_post_ingest_invalid_body_returns_400(test_client_http: AsyncClien
 async def test_lsm_query_limit_zero_returns_all_rows():
     """limit=0 must not silently return an empty result."""
     from persistence.stream_store.lsm_store import LSMStore
-    from tests.publishers.flight_server import make_batch
 
     store = LSMStore(flush_rows=100, compaction_runs=4)
     store.ingest(make_batch([(1, "a", "v1", "upsert"), (2, "b", "v2", "upsert")]))
@@ -171,7 +120,7 @@ async def test_reinsert_after_delete_wins_over_http(test_client_http: AsyncClien
         batch = make_batch([(500, "rk", value, op)])
         res = await test_client_http.post(
             "/data/ingest",
-            content=_serialize_batch(batch),
+            content=serialize_batch(batch),
             headers={"Content-Type": "application/vnd.apache.arrow.stream"},
         )
         assert res.status_code == 202
@@ -187,7 +136,7 @@ async def test_http_ingest_propagates_request_id_to_store_write(
     with cid_caplog.at_level(logging.DEBUG):
         res = await test_client_http.post(
             "/data/ingest",
-            content=_serialize_batch(batch),
+            content=serialize_batch(batch),
             headers={
                 "Content-Type": "application/vnd.apache.arrow.stream",
                 "X-Request-ID": "req-xyz",
@@ -203,44 +152,37 @@ async def test_oversized_decoded_batch_is_dropped(
     clickhouse_container,
     test_clickhouse_client,
     redis_container,
-    empty_flight_server,
     caplog,
 ):
-    pg_port = int(postgres_container.get_exposed_port(5432))
-    ch_port = int(clickhouse_container.get_exposed_port(8123))
-    redis_port = int(redis_container.get_exposed_port(6379))
-    settings = Settings(
-        status="testing",
-        postgres_url=SecretStr(
-            f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}"
-        ),
-        clickhouse_host="localhost",
-        clickhouse_port=ch_port,
-        clickhouse_user=clickhouse_container.username or "default",
-        clickhouse_password=SecretStr(clickhouse_container.password or ""),
-        clickhouse_database="default",
-        redis_url=SecretStr(f"redis://localhost:{redis_port}/0"),
-        ingest_transport="flight",
-        flight_host="localhost",
-        flight_port=empty_flight_server.port,
-        flight_ticket="items",
-        lsm_flush_rows=2,
-        lsm_compaction_runs=2,
+    settings = app_settings(
+        postgres_container,
+        clickhouse_container,
+        redis_container,
         max_request_body_bytes=16
         * 1024
         * 1024,  # large: let the body reach the handler
         max_ingest_batch_bytes=1,  # tiny: any decoded batch is "oversized"
-        ingest_max_disconnect_seconds=None,
     )
     batch = make_batch([(300, "big", "v1", "upsert")])
     async with lifespan_test_client(settings) as client:
         with caplog.at_level(logging.ERROR):
             res = await client.post(
                 "/data/ingest",
-                content=_serialize_batch(batch),
+                content=serialize_batch(batch),
                 headers={"Content-Type": "application/vnd.apache.arrow.stream"},
             )
         assert res.status_code == 202  # endpoint accepts the request
         body = (await client.get("/data/cache?limit=100")).json()
         assert body["total"] == 0  # but the batch was dropped
     assert any("exceeds max_ingest_batch_bytes" in r.message for r in caplog.records)
+
+
+async def test_post_ingest_unmergeable_batch_returns_422(test_client_http: AsyncClient):
+    bad = pa.record_batch({"name": ["x"], "value": ["v"], "op": ["upsert"]})
+    res = await test_client_http.post(
+        "/data/ingest",
+        content=serialize_batch(bad),
+        headers={"Content-Type": "application/vnd.apache.arrow.stream"},
+    )
+    assert res.status_code == 422
+    assert "missing required columns" in res.json()["detail"]

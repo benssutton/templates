@@ -1,8 +1,6 @@
-import threading
 from pathlib import Path
 
 import pytest
-import pyarrow.flight as flight
 import pyarrow.ipc as pa_ipc
 from testcontainers.clickhouse import ClickHouseContainer
 from testcontainers.postgres import PostgresContainer
@@ -13,7 +11,20 @@ from pydantic import SecretStr
 from settings import Settings
 from persistence.analytics_store.clickhouse.clickhouse_client import ClickHouseClient
 from tests.app_client import lifespan_test_client
-from tests.publishers.flight_server import ExampleFlightServer, make_batch
+from tests.publishers.solace_publisher import SolacePublisher
+from tests.support.semp import Semp
+from tests.support.settings import (
+    SolaceNames,
+    app_settings,
+    new_solace_names,
+    solace_overrides,
+)
+from tests.support.solace import (
+    semp_url,
+    solace_broker,
+    wait_for_solace_messaging,
+    wait_for_solace_ready,
+)
 
 PG_IMAGE = "pgvector/pgvector:0.8.4-pg18"
 CH_IMAGE = "clickhouse/clickhouse-server:latest"
@@ -70,75 +81,88 @@ def redis_container():
         yield r
 
 
-# ── Flight fixtures ────────────────────────────────────────────────────────
-#
-# Three batches designed to exercise all LSM paths with lsm_flush_rows=2,
-# lsm_compaction_runs=2:
-#
-#   BATCH_1: 2 rows → flush threshold hit → run1 created
-#   BATCH_2: 2 rows → flush → run2 created → compaction triggered (2 runs)
-#             compaction merges run1+run2: id=1 gets v2 (higher seqno wins)
-#   BATCH_3: 1 row → stays in memtable; tombstone beats id=2 in compacted run
-#
-# Expected GET /data/cache result: total=2, id=1→"v2", id=2 absent, id=3→"v1"
-
-
-@pytest.fixture(scope="session")
-def example_flight_server():
-    script = [
-        make_batch([(1, "alpha", "v1", "upsert"), (2, "beta", "v1", "upsert")]),
-        make_batch([(1, "alpha", "v2", "upsert"), (3, "gamma", "v1", "upsert")]),
-        make_batch([(2, "beta", "v1", "delete")]),
-    ]
-    location = flight.Location.for_grpc_tcp("localhost", 0)
-    server = ExampleFlightServer(location, script, interval=0.02, loop=False)
-    threading.Thread(target=server.serve, daemon=True).start()
-    yield server
-    server.shutdown()
-
-
 # ── Async Test Client ──────────────────────────────────────────────────────
 #
 # Each client fixture builds its OWN isolated app via main.create_app — its
 # own DI container, FastMCP instance, and lifespan — so multiple client
-# fixtures (flight / HTTP-ingest / Solace) can coexist in one pytest process
+# fixtures (noop / HTTP-ingest / Solace) can coexist in one pytest process
 # without sharing state.
 
 
 @pytest.fixture(scope="session")
 async def test_client(
+    postgres_container, clickhouse_container, test_clickhouse_client, redis_container
+):
+    settings = app_settings(
+        postgres_container, clickhouse_container, redis_container
+    )  # noop transport
+    async with lifespan_test_client(settings) as client:
+        yield client
+
+
+# ── Solace fixtures ────────────────────────────────────────────────────────
+#
+# ONE broker per test session (its POST + start takes ~60 s). Tests isolate
+# themselves with a unique topic + queue from `solace_names`.
+
+
+@pytest.fixture(scope="session")
+def solace_container():
+    with solace_broker() as container:
+        wait_for_solace_ready(container)
+        # guaranteed-active only proves the router is up; the message VPN can
+        # still refuse SMF clients for a while. Wait for a real connect.
+        wait_for_solace_messaging(container)
+        yield container
+
+
+@pytest.fixture(scope="session")
+def semp(solace_container):
+    client = Semp(semp_url(solace_container))
+    yield client
+    client.close()
+
+
+@pytest.fixture
+def solace_names() -> SolaceNames:
+    return new_solace_names()
+
+
+@pytest.fixture
+def solace_settings(
     postgres_container,
     clickhouse_container,
     test_clickhouse_client,
     redis_container,
-    example_flight_server,
+    solace_container,
+    solace_names,
 ):
-    pg_port = int(postgres_container.get_exposed_port(5432))
-    ch_port = int(clickhouse_container.get_exposed_port(8123))
-    redis_port = int(redis_container.get_exposed_port(6379))
+    """Builder for app Settings wired to every container plus this test's own
+    Solace topic/queue; keyword overrides are passed through to Settings."""
 
-    flight_settings = Settings(
-        status="testing",
-        postgres_url=SecretStr(
-            f"postgresql://{postgres_container.username}:{postgres_container.password}@localhost:{pg_port}/{postgres_container.dbname}"
-        ),
-        clickhouse_host="localhost",
-        clickhouse_port=ch_port,
-        clickhouse_user=clickhouse_container.username or "default",
-        clickhouse_password=SecretStr(clickhouse_container.password or ""),
-        clickhouse_database="default",
-        redis_url=SecretStr(f"redis://localhost:{redis_port}/0"),
-        ingest_transport="flight",
-        flight_host="localhost",
-        flight_port=example_flight_server.port,
-        flight_ticket="items",
-        lsm_flush_rows=2,
-        lsm_compaction_runs=2,
-        ingest_max_disconnect_seconds=None,  # finite server by design; watchdog would kill the session
+    def build(**overrides) -> Settings:
+        return app_settings(
+            postgres_container,
+            clickhouse_container,
+            redis_container,
+            **{**solace_overrides(solace_container, solace_names), **overrides},
+        )
+
+    return build
+
+
+@pytest.fixture
+def solace_publisher(solace_container, solace_names):
+    publisher = SolacePublisher(
+        host=solace_container.get_container_host_ip(),
+        port=int(solace_container.get_exposed_port(55555)),
+        vpn="default",
+        username="admin",
+        password="admin",
+        topic=solace_names.topic,
     )
-
-    async with lifespan_test_client(flight_settings) as client:
-        yield client
+    yield publisher
+    publisher.close()
 
 
 @pytest.fixture

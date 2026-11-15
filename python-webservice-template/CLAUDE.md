@@ -9,6 +9,7 @@ This application is intended as an illustration and re-usable template of best p
 main.py                         FastAPI app entry point; lifespan manages DB connections
 settings.py                     Pydantic BaseSettings config; env vars override defaults
   certs/                        Self-signed SSL certificates & certificate generation script
+  ingestion/                    Streaming transports behind BatchConsumer: solace/ (Guaranteed), noop/
   core/                         DI container and dependency getters
   docs/                         Folder for Claude to store specs and plans.  Not used by the application.
   mcp_routers/                  MCP tools, resources and prompts
@@ -17,8 +18,7 @@ settings.py                     Pydantic BaseSettings config; env vars override 
       clickhouse/               ClickHouse via clickhouse-connect async client
     cache_store/
       redis/                    Redis via redis-py async client
-    stream_store/
-      flight/                   Apache arrow flight client and LSM store of record batches.
+    stream_store/               In-memory LSM store of record batches
     transaction_store/          
       postgres/                 Postgres via asyncpg connection pool
 
@@ -28,7 +28,7 @@ settings.py                     Pydantic BaseSettings config; env vars override 
   services/                     All business logic (health, data, config)
   tests/                        Pytest integration tests + k6 performance tests
     test_data/                  Binary test fixtures (clickhouse_seed_data.ipc) + fixture generator notebook
-    publishers/                 Reusable dummy publishers used by tests and docker-compose (flight_server.py, solace_publisher.py)
+    publishers/                 Reusable dummy publishers used by tests and docker-compose (solace_publisher.py)
     performance/                k6 performance test scripts
       lib/                      Shared k6 check helpers and SLO threshold presets
       data/                     k6 test data (rows_params.json, clickhouse-seed.sh)
@@ -84,7 +84,7 @@ settings.py                     Pydantic BaseSettings config; env vars override 
 **Inbound Size Policy**
 - Two independent limits guard against oversized payloads:
   1. **HTTP body limit** (`max_request_body_bytes`, default 16 MiB): enforced by `core/request_limits.MaxBodySizeMiddleware` — the outermost middleware. Returns 413 before the route handler runs (or after body drain for chunked uploads without `Content-Length`).
-  2. **Decoded batch limit** (`max_ingest_batch_bytes`, default 16 MiB): enforced in `services/stream_ingest._record_ingest`. A batch that exceeds this after Arrow IPC decoding is dropped and logged at ERROR level; the request still returns 202 so the caller is not retried.
+  2. **Decoded batch limit** (`max_ingest_batch_bytes`, default 16 MiB): enforced in `services/stream_ingest._record_ingest` (the Solace outcome is decided in `_decide`). A batch that exceeds this after Arrow IPC decoding is logged at ERROR level. HTTP path: the batch is dropped and the request still returns 202 so the caller is not retried. Solace path: the message is REJECTED — never redelivered (to the DMQ if configured).
 - Both limits are `Settings` fields and can be tuned per deployment or per-test without code changes.
 
 **Security Posture**
@@ -96,9 +96,13 @@ settings.py                     Pydantic BaseSettings config; env vars override 
 **Testing**
 - Tests invoke REST endpoints via an async HTTPX test client.
 - Each client fixture builds its own isolated app with `tests/app_client.py::lifespan_test_client(settings)` — the helper calls `main.create_app(settings)`, runs the lifespan in a dedicated task (anyio cancel scopes must enter/exit in one task), and fails fast if startup raises rather than hanging on a readiness event.
-- Because every app is isolated (own container, own MCP), the flight, HTTP-ingest, and Solace client fixtures can all run in a single pytest process — "run all tests" works from the IDE.
+- Because every app is isolated (own container, own MCP), the HTTP-ingest and Solace client fixtures can all run in a single pytest process — "run all tests" works from the IDE.
 - Test behaviour is configured via the `Settings` passed to `create_app` (e.g. `status="testing"`, `ingest_transport`); no monkeypatching, no dependency overrides needed.
-- Each test session starts fresh testcontainer instances for Postgres and ClickHouse; containers are torn down at session end.
+- `test_client` uses the `noop` transport. Anything that streams uses `solace_container` (session-scoped, one broker) plus `solace_names` (a unique topic and queue per test) and the `solace_settings` fixture.
+- Broker-side assertions go through `tests/support/semp.py` (the `semp` helper). Network partitions are simulated with `broker_paused` (`docker pause` of the broker).
+- Broker findings (Task B0, `solace/solace-pubsub-standard:10.26.10`): the default client profile ALLOWS guaranteed endpoint creation, so no init service or SEMP patch is needed; the VPN basic auth type is `none`.
+- Settlement outcomes: ACCEPTED after the store write; FAILED (redelivered, increasing backoff) when the write raises; REJECTED for malformed, unmergeable or oversized batches. Auto-created queues have unlimited max-redelivery and no DMQ; production should configure both. The SDK reconnects forever; the watchdog (`ingest_max_disconnect_seconds`) is the single give-up point. One queue per replica.
+- Each test session starts fresh testcontainer instances for Postgres, ClickHouse, Redis and Solace; containers are torn down at session end.
 - Postgres schema is created from `scripts/postgres-init.sql` via the `postgres_pool` fixture.
 - ClickHouse schema is created from `scripts/clickhouse-init.sql` (single source of truth shared with docker-compose). Seed data is loaded from `tests/test_data/clickhouse_seed_data.ipc` via `client.insert_arrow()`.
 

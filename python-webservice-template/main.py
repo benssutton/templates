@@ -17,7 +17,7 @@ from persistence.analytics_store.clickhouse.clickhouse_client import ClickHouseC
 from persistence.cache_store.redis.redis_client import RedisClient
 from persistence.transaction_store.postgres.postgres_client import PostgresClient
 from persistence.stream_store.lsm_store import LSMStore
-from ingestion.flight.client import FlightBatchConsumer
+from ingestion.noop.client import NoopBatchConsumer
 from ingestion.solace.client import SolaceBatchConsumer
 from routers import health, data, config, cache, metrics
 from mcp_routers import tools
@@ -34,8 +34,8 @@ logging.getLogger("asyncio").addFilter(
 )
 
 _CONSUMERS = {
-    "flight": FlightBatchConsumer,
     "solace": SolaceBatchConsumer,
+    "noop": NoopBatchConsumer,
 }
 
 

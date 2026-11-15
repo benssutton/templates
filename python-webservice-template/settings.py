@@ -38,15 +38,12 @@ class Settings(BaseSettings):
 
     redis_url: SecretStr = SecretStr("redis://localhost:6379/0")
 
-    flight_host: str = "localhost"
-    flight_port: int = 8815  # pyarrow Flight default
-    flight_ticket: str = "items"
     lsm_flush_rows: int = 1000  # memtable -> run threshold
     lsm_compaction_runs: int = 4  # run count -> compaction threshold
     lsm_key_columns: list[str] = ["id"]  # merge partition key; single extension point
 
     # Ingestion transport selector
-    ingest_transport: Literal["flight", "solace"] = "flight"
+    ingest_transport: Literal["solace", "noop"] = "solace"
 
     # Connection retry/backoff (Postgres, Redis, ClickHouse, Solace startup)
     connect_max_attempts: int = Field(default=5, ge=1)
@@ -90,13 +87,17 @@ class Settings(BaseSettings):
             )
         return self
 
-    # Solace — only resolved when ingest_transport="solace"
+    # Solace PubSub+ (default transport; Guaranteed messaging)
     solace_host: str = "localhost"
     solace_port: int = 55555
     solace_vpn: str = "default"
     solace_username: str = "admin"
     solace_password: SecretStr = SecretStr("admin")
     solace_topic: str = "ingest/batches"
+    # Durable exclusive queue this instance binds to (created on start if the
+    # client profile allows). ONE QUEUE PER REPLICA: the LSM store is a
+    # per-instance cache, and an exclusive queue delivers to one consumer only.
+    solace_queue: str = "python-template/ingest"
 
 
 @lru_cache(maxsize=1)

@@ -8,7 +8,7 @@ Environment variables:
 import os
 import time
 
-from tests.publishers.flight_server import make_batch
+from tests.publishers.batches import make_batch
 from tests.publishers.solace_publisher import SolacePublisher
 
 BATCHES = [

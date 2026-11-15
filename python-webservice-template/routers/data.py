@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from core.correlation import timed
 from core.dependencies import DataServiceDep, StreamIngestServiceDep
+from persistence.stream_store.lsm_store import InvalidBatchError
 from schemas.data import DataRowsResponse
 
 log = logging.getLogger(__name__)
@@ -43,6 +44,11 @@ async def ingest_batch(
             batches = list(reader)  # force full decode inside the timed block
     except pa.ArrowInvalid as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    for batch in batches:
-        await svc.ingest_batch(batch)
+    try:
+        # Not atomic: batches before an invalid one are already written (harmless
+        # under newest-wins upsert semantics).
+        for batch in batches:
+            await svc.ingest_batch(batch)
+    except InvalidBatchError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"accepted": True}

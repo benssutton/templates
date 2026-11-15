@@ -36,7 +36,7 @@ clickhouse-connect[async]>=0.7,<2.0
 redis[hiredis]>=5.0,<7.0
 
 # Solace
-solace-pubsubplus>=1.8,<2.0
+solace-pubsubplus>=1.11,<2.0
 
 # Data
 polars>=1.0,<2.0

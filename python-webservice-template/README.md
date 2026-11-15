@@ -40,13 +40,13 @@ the whole test suite run in a single pytest session).
 
 | Feature | What it does | Entry point |
 | --- | --- | --- |
-| **FastAPI app factory** | Builds an isolated app; lifespan eagerly opens & smoke-tests every dependency before serving traffic | [`create_app` / `create_lifespan`](main.py#L42-L148) |
+| **FastAPI app factory** | Builds an isolated app; lifespan eagerly opens & smoke-tests every dependency before serving traffic | [`create_app` / `create_lifespan`](main.py) |
 | **Pydantic settings** | All config is a typed `BaseSettings` model; env vars / `.env` override defaults; secrets use `SecretStr` | [settings.py](settings.py) |
 | **Dependency injection** | A small custom `Container` holds singletons per app; route params resolve them via typed `Annotated` aliases | [core/container.py](core/container.py), [core/dependencies.py](core/dependencies.py) |
 | **REST-first routers** | Every capability — data, config, cache, health, metrics — is a REST endpoint. Routers are thin; logic lives in services | [routers/](routers/) |
 | **Pydantic schemas** | Request/response models give automatic validation + OpenAPI docs | [schemas/](schemas/) |
-| **OpenAPI / Swagger** | Tag metadata is co-located with each router and assembled in the factory; docs served at `/docs` | [`openapi_tags`](main.py#L99) |
-| **MCP server** | A `FastMCP` server is mounted at `/mcp` as a **starting point** for exposing capabilities to AI agents. One example tool (`get_health_status`) mirrors a REST endpoint by calling the same service; `resources.py` / `prompts.py` are stubs to fill in. MCPs are optional and add no new logic | [mcp_routers/tools.py](mcp_routers/tools.py), [`app.mount("/mcp")`](main.py#L136) |
+| **OpenAPI / Swagger** | Tag metadata is co-located with each router and assembled in the factory; docs served at `/docs` | [`openapi_tags`](main.py) |
+| **MCP server** | A `FastMCP` server is mounted at `/mcp` as a **starting point** for exposing capabilities to AI agents. One example tool (`get_health_status`) mirrors a REST endpoint by calling the same service; `resources.py` / `prompts.py` are stubs to fill in. MCPs are optional and add no new logic | [mcp_routers/tools.py](mcp_routers/tools.py), [`app.mount("/mcp")`](main.py) |
 
 > **Design note — REST-first, MCP as a starting point.** Application management,
 > configuration, observability and functional calls are *all* REST endpoints.
@@ -61,7 +61,7 @@ the whole test suite run in a single pytest session).
 
 Each external dependency is wrapped in an **async context manager** that opens
 the connection in `__aenter__` and closes it in `__aexit__`. The lifespan in
-[main.py](main.py#L42-L73) enters them in order, so a
+[main.py](main.py) enters them in order, so a
 failed dependency aborts startup (fail-fast) and a clean/exception shutdown
 always closes them.
 
@@ -84,18 +84,37 @@ the app, docker-compose and the tests:
 A dedicated background thread consumes batches from a streaming transport and
 writes them into the LSM store; the data is then served from `/data/cache`.
 
-- **Pluggable transport** chosen by one setting (`ingest_transport`): Apache
-  **Arrow Flight** or **Solace**. Both implement the same
-  [`BatchConsumer` protocol](ingestion/base.py).
-  - Flight: [ingestion/flight/client.py](ingestion/flight/client.py)
-  - Solace: [ingestion/solace/client.py](ingestion/solace/client.py)
-- **Ingest loop, reconnection & shutdown logic**:
-  [services/stream_ingest.py](services/stream_ingest.py#L85-L140)
-  — per-batch correlation IDs, randomised exponential backoff on failure, a
-  consecutive-failure limit, and a disconnect watchdog (see
-  [Resilience](#5-resilience)).
+- **Transport: Solace PubSub+ Guaranteed messaging** (`ingest_transport="solace"`,
+  the default). The consumer binds a **durable exclusive queue** (`solace_queue`),
+  creating it on start with the `solace_topic` subscription attached
+  ([ingestion/solace/client.py](ingestion/solace/client.py)). One queue per replica:
+  the LSM store is a per-instance cache.
+- **Settle after write.** Each message becomes a [`Delivery`](ingestion/base.py);
+  [`StreamIngestService`](services/stream_ingest.py) settles it once the batches
+  are in the LSM store:
+
+  | Situation | Outcome |
+  |---|---|
+  | Written | ACCEPTED (acked) |
+  | Store write raised | FAILED: redelivered, with an increasing backoff between redeliveries |
+  | Not Arrow IPC / missing key columns / unmergeable / over `max_ingest_batch_bytes` | REJECTED: never redelivered (DMQ if configured) |
+
+  Auto-created queues use Solace's default unlimited max-redelivery and have no
+  dead-message queue; production should configure max-redelivery and a DMQ.
+- **`noop` transport** (`INGEST_TRANSPORT=noop`) for deployments without a broker.
 - **HTTP ingest** path for pushing a batch directly:
-  [`POST /data/ingest`](routers/data.py#L37-L51).
+  [`POST /data/ingest`](routers/data.py) (422 for an unmergeable batch).
+- **Extension point: Message Replay.** The durable queue buffers only unacked
+  messages; to rebuild the in-memory cache after a restart, start the receiver
+  with a replay strategy (`with_message_replay`) against a broker replay log.
+- **Ingest loop, reconnection & shutdown logic**:
+  [services/stream_ingest.py](services/stream_ingest.py)
+  — per-message correlation IDs; transport reconnect/bind failures retry with
+  randomised exponential backoff and, after N consecutive failures, request
+  shutdown; a FAILED settlement is followed by an increasing backoff between
+  redeliveries; plus a disconnect watchdog (see [Resilience](#5-resilience)).
+- **HTTP ingest** path for pushing a batch directly:
+  [`POST /data/ingest`](routers/data.py).
 
 ---
 
@@ -110,7 +129,7 @@ The application exposes the data points needed for monitoring and debugging.
 | **Correlation middleware** | Adopts or generates an `X-Request-ID`, stamps every log line via a logging filter, echoes it back. Propagates across `to_thread` into the store-write thread | [core/correlation.py](core/correlation.py) |
 | **Server-Timing header** | Each response carries a W3C `Server-Timing` header built from `timed()` boundary samples — per-request latency attribution with no external tooling | [core/boundary_timing.py](core/boundary_timing.py), [`timed()`](core/correlation.py#L74-L87) |
 | **System metrics** | Process & host CPU / memory / threads / open files via psutil | [core/system_metrics.py](core/system_metrics.py) |
-| **Grafana + Prometheus stack** | `docker compose --profile observability up` brings up Prometheus (`:9090`) scraping `/metrics` and a pre-provisioned Grafana dashboard (`:3000`) | [observability/](observability/), [docker-compose.yml](docker-compose.yml#L142-L165) |
+| **Grafana + Prometheus stack** | `docker compose --profile observability up` brings up Prometheus (`:9090`) scraping `/metrics` and a pre-provisioned Grafana dashboard (`:3000`) | [observability/](observability/), [docker-compose.yml](docker-compose.yml) |
 
 ---
 
@@ -120,14 +139,14 @@ Enterprise-grade stability through fail-fast startup and self-recovery.
 
 | Measure | Behaviour | Entry point |
 | --- | --- | --- |
-| **HTTPS / TLS** | Uvicorn serves over TLS using a key/cert pair; a script generates a self-signed pair for local dev | [`ssl_keyfile`/`ssl_certfile`](settings.py#L19-L20), [certs/generate_self_signed_cert.py](certs/generate_self_signed_cert.py) |
-| **Fail-fast startup** | Critical dependencies are eagerly connected and smoke-tested in the lifespan; if one cannot be reached after retries, startup aborts and the process exits | [main.py lifespan](main.py#L42-L73) |
+| **HTTPS / TLS** | Uvicorn serves over TLS using a key/cert pair; a script generates a self-signed pair for local dev | [`ssl_keyfile`/`ssl_certfile`](settings.py), [certs/generate_self_signed_cert.py](certs/generate_self_signed_cert.py) |
+| **Fail-fast startup** | Critical dependencies are eagerly connected and smoke-tested in the lifespan; if one cannot be reached after retries, startup aborts and the process exits | [main.py lifespan](main.py) |
 | **Reconnect with randomised backoff** | Startup connections retry with exponential delay **+ up to 25% jitter**, capped, for `connect_max_attempts` before giving up | [`connect_with_backoff`](core/retry.py) |
-| **Ingest self-recovery** | The ingest loop reconnects with the same jittered backoff; after N consecutive failures it requests a graceful `SIGTERM` shutdown so an orchestrator can restart it | [`_ingest_loop`](services/stream_ingest.py#L85-L121) |
-| **Disconnect watchdog** | If the transport stays non-connected longer than `ingest_max_disconnect_seconds`, the app shuts itself down rather than silently serving stale data | [`_disconnect_watchdog`](services/stream_ingest.py#L123-L144) |
-| **Max-payload middleware** | Outermost middleware rejects oversized HTTP bodies with **413** (fast-path on `Content-Length`, byte-counting for chunked uploads) — before any handler runs | [core/request_limits.py](core/request_limits.py), [wiring](main.py#L122-L123) |
-| **Decoded-batch limit** | A second, independent guard drops over-sized batches *after* Arrow decode and logs at ERROR (still returns 202 so the caller isn't retried into a storm) | [`_record_ingest`](services/stream_ingest.py#L72-L83) |
-| **Secret hygiene** | All credentials are `SecretStr` — never printed in `repr`/logs; health probes return generic `"unavailable"` tokens, never raw exception strings | [settings.py](settings.py#L25-L35), [`_probe`](services/health.py#L53-L70) |
+| **Ingest self-recovery** | The Solace SDK reconnects forever and the persistent flow resumes after a network partition; unsettled messages stay on the durable queue and are redelivered. After a terminal service interruption or a receiver-level flow termination, `deliveries()` stays blocked and the disconnect watchdog is the recovery path ("Recovery limits" in [ingestion/solace/client.py](ingestion/solace/client.py)). If binding the queue fails N consecutive times (e.g. permission denied), the ingest loop requests a graceful `SIGTERM` | [`_ingest_loop`](services/stream_ingest.py) |
+| **Disconnect watchdog** | The single give-up point: if the transport stays non-connected longer than `ingest_max_disconnect_seconds`, the app shuts itself down rather than silently serving stale data | [`_disconnect_watchdog`](services/stream_ingest.py) |
+| **Max-payload middleware** | Outermost middleware rejects oversized HTTP bodies with **413** (fast-path on `Content-Length`, byte-counting for chunked uploads) — before any handler runs | [core/request_limits.py](core/request_limits.py), [wiring](main.py) |
+| **Decoded-batch limit** | A second, independent guard (`max_ingest_batch_bytes`) checks each batch *after* Arrow decode and logs at ERROR. HTTP path: the batch is dropped and the request still returns 202 (so the caller isn't retried into a storm). Solace path: the message is REJECTED — removed, never redelivered (to the DMQ if configured) | [`_record_ingest`](services/stream_ingest.py) |
+| **Secret hygiene** | All credentials are `SecretStr` — never printed in `repr`/logs; health probes return generic `"unavailable"` tokens, never raw exception strings | [settings.py](settings.py), [`_probe`](services/health.py#L53-L70) |
 
 ---
 
@@ -146,7 +165,7 @@ targets **>90% coverage** and follows a few firm rules.
 - **Async & parallel.** Tests are `async` and run concurrently to keep the cycle
   short ([pytest.ini](pytest.ini)).
 - **Multiple application instances in one process.** Because every app is built
-  by `create_app`, the Flight, HTTP-ingest and Solace fixtures each get their own
+  by `create_app`, the HTTP-ingest and Solace fixtures (one shared broker, per-test topic/queue) each get their own
   isolated app — "run all tests" works from the IDE. See the multi-app
   observability tests in
   [tests/test_observability.py](tests/test_observability.py).
@@ -195,7 +214,7 @@ Everything is configured through [settings.py](settings.py)
 (Pydantic `BaseSettings`). Defaults are sane for local dev; override any field
 with an environment variable or a `.env` file. Notable groups:
 
-- **Connections:** `postgres_*`, `clickhouse_*`, `redis_url`, `flight_*`, `solace_*`
+- **Connections:** `postgres_*`, `clickhouse_*`, `redis_url`, `solace_*` (including `solace_queue`)
 - **TLS:** `ssl_keyfile`, `ssl_certfile`
 - **Retry/backoff:** `connect_max_attempts`, `connect_base_delay`, `connect_max_delay`
 - **Observability:** `metrics_enabled`, `health_check_timeout_seconds`,
@@ -218,7 +237,7 @@ mcp_routers/             MCP starting point — one example tool; resources/prom
 schemas/                 Pydantic request/response models
 services/                Business logic — health, data, config, cache, stream_ingest, metrics
 persistence/             One package per backing store (postgres, clickhouse, redis, lsm)
-ingestion/               Streaming transports (Arrow Flight, Solace) behind BatchConsumer
+ingestion/               Streaming transports (Solace, noop) behind BatchConsumer
 scripts/                 SQL DDL/DML (shared by app, compose and tests)
 observability/           Prometheus config + Grafana dashboards & provisioning
 certs/                   Self-signed TLS cert + generator

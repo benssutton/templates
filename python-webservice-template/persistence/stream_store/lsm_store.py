@@ -22,6 +22,11 @@ import polars as pl
 ORDER_COLUMN = "seqno"
 
 
+class InvalidBatchError(ValueError):
+    """The batch cannot be merged (missing key/op columns). Retrying the same
+    batch can never succeed, so transports must reject it, not redeliver it."""
+
+
 def _merge_frame(
     frames: tuple[pl.DataFrame, ...], key_columns: list[str]
 ) -> pl.DataFrame | None:
@@ -81,6 +86,12 @@ class LSMStore:
         self._snapshot = _Snapshot(runs=(), memtable=())
 
     def ingest(self, batch: pa.RecordBatch) -> None:
+        required = [*self._key_columns, "op"]
+        missing = [c for c in required if c not in batch.schema.names]
+        if missing:
+            # Validate up front: an un-keyed frame would be accepted here and only
+            # fail later inside compaction, poisoning every subsequent query.
+            raise InvalidBatchError(f"batch missing required columns: {missing}")
         frame = pl.from_arrow(batch)
         # from_arrow() is typed DataFrame | Series; a RecordBatch always yields a DataFrame.
         assert isinstance(frame, pl.DataFrame)

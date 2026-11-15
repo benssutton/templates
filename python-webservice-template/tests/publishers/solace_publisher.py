@@ -1,15 +1,24 @@
 import pyarrow as pa
-import pyarrow.ipc as pa_ipc
 from solace.messaging.messaging_service import MessagingService
-from solace.messaging.publisher.direct_message_publisher import DirectMessagePublisher
+from solace.messaging.publisher.persistent_message_publisher import (
+    PersistentMessagePublisher,
+)
 from solace.messaging.resources.topic import Topic
+
+from tests.publishers.batches import serialize_batch
+
+_ACK_TIMEOUT_MS = 15000
 
 
 class SolacePublisher:
+    """Publishes Guaranteed (persistent) messages and waits for the broker's
+    ack, so a returned publish_* call means the message is spooled on every
+    queue whose subscription matches the topic."""
+
     def __init__(
         self, host: str, port: int, vpn: str, username: str, password: str, topic: str
     ) -> None:
-        self._topic = topic
+        self._topic = Topic.of(topic)
         props = {
             "solace.messaging.transport.host": f"tcp://{host}:{port}",
             "solace.messaging.service.vpn-name": vpn,
@@ -20,24 +29,27 @@ class SolacePublisher:
             MessagingService.builder().from_properties(props).build()
         )
         self._service.connect()
-        self._publisher: DirectMessagePublisher = (
-            self._service.create_direct_message_publisher_builder().build()
+        self._publisher: PersistentMessagePublisher = (
+            self._service.create_persistent_message_publisher_builder().build()
         )
         self._publisher.start()
 
     def publish_batch(self, batch: pa.RecordBatch) -> None:
-        buf = pa.BufferOutputStream()
-        with pa_ipc.new_stream(buf, batch.schema) as writer:
-            writer.write_batch(batch)
-        # The Solace SDK's build() accepts bytearray for a binary payload;
-        # plain `bytes` matches none of its payload-type branches and fails
-        # with "Failed to create attachment for the message".
-        payload = bytearray(buf.getvalue().to_pybytes())
-        # SDK annotates `converter: ObjectToBytes[T] = None` (implicit Optional).
+        self.publish_bytes(serialize_batch(batch))
+
+    def publish_bytes(self, payload: bytes) -> None:
+        # The SDK's build() needs bytearray for a binary payload; plain bytes
+        # fails with "Failed to create attachment for the message".
         builder = self._service.message_builder()
-        message = builder.build(payload)  # pyright: ignore[reportArgumentType]
-        self._publisher.publish(message=message, destination=Topic.of(self._topic))
+        message = builder.build(
+            bytearray(payload)
+        )  # pyright: ignore[reportArgumentType]
+        self._publisher.publish_await_acknowledgement(
+            message, self._topic, _ACK_TIMEOUT_MS
+        )
 
     def close(self) -> None:
-        self._publisher.terminate()
-        self._service.disconnect()
+        try:
+            self._publisher.terminate()
+        finally:
+            self._service.disconnect()

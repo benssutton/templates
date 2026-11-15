@@ -9,12 +9,14 @@
 ### 1. Create Local Docker Services 
 
 ```bash
-# Start all services (Postgres, Clickhouse, Redis & Flight Server)
+# Start all services (Postgres/pgvector, ClickHouse, Redis, Solace + demo publisher)
 docker compose up -d --build
 
 # Verify all containers are running
 docker compose ps
 ```
+
+Solace needs a Docker VM with at least 3 GiB RAM (the broker alone takes ~1 GiB). `INGEST_TRANSPORT=noop` runs without a broker (HTTP ingest only).
 
 ### 2. Install Python Dependencies
 
