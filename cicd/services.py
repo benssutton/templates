@@ -21,7 +21,7 @@ SERVICES: tuple[Service, ...] = (
     Service("java", "java-webservice-template", "java", True,
             "java-template_default", "templates-java"),
     Service("rust", "rust-webservice-template", "rust", False,
-            "", "templates-rust"),
+            "rust-template_default", "templates-rust"),
 )
 
 # A change to any of these re-runs every service.

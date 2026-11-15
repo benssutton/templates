@@ -1,0 +1,21 @@
+name: rust-template
+
+# R1: the app only. R2 adds db/clickhouse/redis; R3 adds solace (+ solace-init
+# if the AMQP spike requires SEMP provisioning) and a demo publisher.
+services:
+  app:
+    build: .
+    ports:
+      # HTTPS on the default port, like the Python and Java templates.
+      - "443:443"
+    environment:
+      STATUS: running
+      # R3 switches the default to solace once the broker is in compose.
+      INGEST_TRANSPORT: noop
+      RUST_LOG: info
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsk https://localhost/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s

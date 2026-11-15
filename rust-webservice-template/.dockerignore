@@ -1,0 +1,9 @@
+target/
+lcov.info
+.env
+.envrc
+# The image mints its own cert (see Dockerfile); never ship a dev key in the context.
+certs/*.pem
+tests/performance/
+*.md
+.git/

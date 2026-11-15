@@ -22,5 +22,16 @@ pub fn build_router(state: AppState) -> Router<AppState> {
             StreamableHttpServerConfig::default().disable_allowed_hosts(),
         );
 
-    Router::new().fallback_service(service)
+    // Served at both `/mcp` and `/mcp/` (Python's canonical endpoint:
+    // FastMCP `streamable_http_path="/"` mounted at `/mcp`). Both routes share
+    // this one service (cloned), hence one session manager, so a session made
+    // on either path works on the other. `route_service` (not
+    // `fallback_service`) makes them matched routes, so the metrics middleware
+    // labels them `handler="/mcp"` and `handler="/mcp/"` instead of "none".
+    // axum's `nest` cannot express the trailing-slash path, so the paths are
+    // absolute and `app::router` merges this router. rmcp still sees every
+    // method (GET/POST/DELETE, its own 405 otherwise).
+    Router::new()
+        .route_service("/mcp", service.clone())
+        .route_service("/mcp/", service)
 }

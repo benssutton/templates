@@ -21,17 +21,11 @@ impl McpHandler {
 
 #[tool_router(router = tool_router)]
 impl McpHandler {
-    /// Returns the health service status string.
+    /// Mirrors the `status` field of the REST health surface
+    /// (Python mcp_routers/tools.py `get_health_status`).
     #[tool(description = "Get the health status of the service")]
-    async fn get_health_service_tool(&self) -> String {
-        self.state.health_service.get_status()
-    }
-
-    /// Returns the shape of the data as a JSON string.
-    #[tool(description = "Get the shape of the data (rows and columns)")]
-    async fn get_data_service_tool(&self) -> String {
-        let shape = self.state.data_service.get_shape();
-        serde_json::to_string(&shape).unwrap_or_else(|e| format!("error: {e}"))
+    async fn get_health_status(&self) -> String {
+        self.state.health.status().status
     }
 }
 

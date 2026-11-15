@@ -1,2 +1,5 @@
 /target/
 lcov.info
+.env
+# Dev TLS material is minted locally / in the image, never committed.
+certs/*.pem

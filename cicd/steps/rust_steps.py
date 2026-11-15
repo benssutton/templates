@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from cicd.common import ROOT, run
 from cicd.services import Service
+from cicd.steps import images
 
 
 def _dir(s: Service):
@@ -32,9 +33,29 @@ def coverage(s: Service) -> None:
         _dir(s))
 
 
-STEPS = {"fmt": fmt, "fmt-check": fmt_check, "lint": lint, "test": test, "coverage": coverage}
+def build_image(s: Service) -> None:
+    images.build(s)
+
+
+def scan_image(s: Service) -> None:
+    images.scan(s)
+
+
+def k6_smoke(s: Service) -> None:
+    images.k6(s, "smoke.js")
+
+
+def k6_load(s: Service) -> None:
+    images.k6(s, "load.js")
+
+
+STEPS = {
+    "fmt": fmt, "fmt-check": fmt_check, "lint": lint, "test": test, "coverage": coverage,
+    "build-image": build_image, "scan-image": scan_image,
+    "k6-smoke": k6_smoke, "k6-load": k6_load,
+}
 SETS = {
     "fast": ["fmt-check", "lint"],
     "check": ["fmt-check", "lint", "test"],
-    "ci": ["fmt-check", "lint", "test", "coverage"],
+    "ci": ["fmt-check", "lint", "test", "coverage", "build-image", "scan-image", "k6-smoke"],
 }

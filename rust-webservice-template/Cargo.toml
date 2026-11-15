@@ -1,7 +1,8 @@
 [package]
-name    = "rust-template"
+name = "rust-template"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.88"
 
 [lib]
 name = "rust_template"
@@ -12,19 +13,34 @@ name = "rust-template"
 path = "src/main.rs"
 
 [dependencies]
-axum               = "0.8"
-tokio              = { version = "1", features = ["full"] }
-serde              = { version = "1", features = ["derive"] }
-serde_json         = "1"
-envy               = "0.4"
-polars             = { version = "0.55", features = ["ipc_streaming"] }
-rmcp               = { version = "2", features = ["server", "transport-streamable-http-server"] }
-utoipa             = { version = "6", features = ["axum_extras"] }
-utoipa-swagger-ui  = { version = "10", features = ["axum"] }
-tracing            = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "=1.0.102"
+async-trait = "=0.1.89"
+axum = "=0.8.9"
+# no-provider: we install rustls' ring provider ourselves (see server::install_crypto_provider).
+axum-server = { version = "=0.8.0", features = ["tls-rustls-no-provider"] }
+chrono = { version = "=0.4.44", default-features = false, features = ["clock", "serde", "std"] }
+dotenvy = "=0.15.7"
+envy = "=0.4.2"
+fastrand = "=2.5.0"
+metrics = "=0.24.6"
+# default features pull an HTTP listener + push gateway (and aws-lc-rs); we only render.
+metrics-exporter-prometheus = { version = "=0.18.3", default-features = false }
+rmcp = { version = "=2.2.0", features = ["server", "transport-streamable-http-server"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+secrecy = { version = "=0.10.3", features = ["serde"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.150"
+sysinfo = "=0.39.6"
+thiserror = "=2.0.18"
+tokio = { version = "=1.52.3", features = ["full"] }
+tokio-util = "=0.7.18"
+tower-http = { version = "=0.6.11", features = ["cors", "limit"] }
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
+utoipa = { version = "=6.0.0", features = ["axum_extras", "chrono"] }
+utoipa-swagger-ui = { version = "=10.0.2", features = ["axum"] }
+uuid = { version = "=1.23.2", features = ["v4"] }
 
 [dev-dependencies]
-tower          = { version = "0.5", features = ["util"] }
-http-body-util = "0.1"
-axum-test      = "20"
+rcgen = "=0.14.10"
+reqwest = { version = "=0.13.4", default-features = false, features = ["json", "http2", "rustls-no-provider"] }
