@@ -19,18 +19,18 @@ persistence/
   analyticsstore/clickhouse/      clickhouse-jdbc repo with @Query (data)
   cachestore/redis/               Jedis factory (cache, RedisJSON)
   streamstore/                    Simplified append-only LsmStore
-ingestion/                        BatchConsumer (flight/solace/noop), ArrowDecoder
+ingestion/                        BatchConsumer (solace/noop), Delivery, ArrowDecoder
 mcp/                              MCP JSON-RPC endpoint at /mcp (get_health_status tool)
-flightserver/                     Standalone Arrow Flight server for docker-compose
+publisher/                        ArrowBatches + ExampleSolacePublisher (docker-compose demo data)
 src/main/resources/db/            SQL DDL (postgres-init.sql, clickhouse-init.sql) — single source of truth
-src/test/.../support/             IntegrationSupport: shared singleton Testcontainers (PG+CH+Redis)
+src/test/.../support/             IntegrationSupport (PG+CH+Redis) + SolaceSupport (one broker per JVM) + Semp
 tests/performance/                k6 scripts (reused from the Python template)
 ```
 
 ## Stack
 - Micronaut 5 + Netty, Java 25, Maven, virtual threads (`@ExecuteOn(TaskExecutors.BLOCKING)`)
 - Micronaut Data JDBC (Postgres, pgvector image), clickhouse-jdbc, Jedis + RedisJSON
-- Apache Arrow + Arrow Flight / Solace ingestion
+- Apache Arrow + Solace Guaranteed messaging ingestion
 - Micronaut Serialization, Jakarta Validation, Micrometer/Prometheus, OpenAPI
 - JUnit 5 + Micronaut Test + Testcontainers; k6; GitLab CI; JaCoCo gate
 
@@ -39,7 +39,8 @@ tests/performance/                k6 scripts (reused from the Python template)
 - **Health probe registry.** Each store implements `DependencyHealthProbe`; `HealthService` injects `List<DependencyHealthProbe>` — new stores self-register. Ingest health flows through `IngestHealthProvider` (real `StreamIngestService` or a default).
 - **Schema on startup.** `SchemaInitializer` / `ClickHouseSchemaInitializer` run the shared `db/*.sql` on `StartupEvent` (the lifespan analogue); the injected `DataSource` is unwrapped via `DelegatingDataSource.unwrapDataSource(...)`.
 - **Correlation ID** rides Micronaut `PropagatedContext` (`MdcPropagationContext`) into MDC on the virtual-thread handler. **Server-Timing** boundaries live on a request attribute, appended by `Timed` and rendered by `ServerTimingFilter`.
-- **Resilience.** `Retry.connectWithBackoff`; `StartupSmoke` fail-fast on `StartupEvent` (disabled under the test env); ingest thread with backoff + consecutive-failure/disconnect → `System.exit(3)`.
+- **Settle after write.** `SolaceBatchConsumer` binds a self-provisioned durable exclusive queue (`CREATE_ON_START`, topic subscription attached) with client ack and hands one `Delivery` per message to `StreamIngestService`, which decides and settles each exactly once: ACCEPT after the store write; FAIL on a store error (broker redelivers; a jittered, doubling settlement backoff of 1-60 s prevents a hot loop); REJECT for oversized (`max-batch-bytes`), malformed or unmergeable batches (never redelivered). Auto-created queues have unlimited redelivery and no DMQ; production queues should set both. Default transport is `solace`; `INGEST_TRANSPORT=noop` is the opt-out for HTTP-only ingest.
+- **Resilience.** `Retry.connectWithBackoff`; `StartupSmoke` fail-fast on `StartupEvent` (disabled under the test env). The ingest loop retries transport failures with jittered exponential backoff; SDK lifecycle listeners drive `ConnectionState`. 5 consecutive failures, or the disconnect watchdog (`max-disconnect-seconds`), call the shutdown hook, which runs `System.exit(3)` on a separate non-blocking thread. Graceful shutdown relies on `@Bean(preDestroy = "close")` in `StreamIngestBeans`, because Micronaut 5 doesn't infer `close()` on factory beans.
 
 ## Deliberate divergences from the Python template
 1. **Native DI** (no hand-rolled container).
@@ -49,9 +50,11 @@ tests/performance/                k6 scripts (reused from the Python template)
 5. **MCP via a JSON-RPC `@Controller`** (the SDK's transports are servlet/SSE-oriented; a thin Netty controller speaks the same protocol for the single tool).
 
 ## Environment gotchas (see also docs/superpowers/specs + plans)
-- The Micronaut 5.0.2 BOM pins `testcontainers` to a non-existent 2.0.5 → overridden to 1.21.3; and gRPC to 1.80.0 which breaks Arrow Flight 18.1.0 → pinned to 1.69.0.
-- Arrow needs `--add-opens=java.base/java.nio=ALL-UNNAMED` (in surefire argLine + Docker `JAVA_TOOL_OPTIONS`).
+- The Micronaut 5.0.2 BOM pins `testcontainers` to a non-existent 2.0.5 → overridden to 1.21.3.
+- Arrow vector needs `--add-opens=java.base/java.nio=ALL-UNNAMED` (in surefire argLine + Docker `JAVA_TOOL_OPTIONS`).
 - On Windows + Docker Desktop, the `windows-docker` Maven profile pins `DOCKER_HOST` for Testcontainers; inactive on Linux/CI.
+- Tests run the embedded server on a random port (`src/test/resources/application-test.yml`, `micronaut.server.port: -1`) because Solace SEMP uses 8080.
+- Micronaut 5.0.2 races `getParallelBeans()` against a fast context close (NPE on an untracked thread, surfaced by Awaitility in whichever test is mid-await); `ConfigDtoSerdeTest` disables eager beans to dodge it — fixed upstream in platform 5.2.0+ (micronaut-core#13010).
 
 ## Database investigation
 Run the relevant test — each spins fresh Testcontainers: `./mvnw test -Dtest=ConfigControllerTest` (Postgres), `-Dtest=DataControllerTest` (ClickHouse), `-Dtest=CacheControllerTest` (Redis). Never reuse a developer's running container.

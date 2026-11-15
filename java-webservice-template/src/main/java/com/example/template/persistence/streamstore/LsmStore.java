@@ -16,7 +16,7 @@ import java.util.List;
  * publishes a new immutable snapshot via the {@code volatile} reference, so a
  * reader always sees a consistent list.
  */
-public final class LsmStore {
+public class LsmStore {
 
     public record QueryResult(List<LsmRow> rows, long total) {}
 

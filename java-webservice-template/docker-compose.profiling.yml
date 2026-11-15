@@ -1,10 +1,9 @@
 name: java-template
 services:
   app:
+    environment:
+      INGEST_TRANSPORT: noop   # no stream source: HTTP ingest is the sole LSM writer
     cap_add:
       - SYS_ADMIN     # async-profiler perf events
     security_opt:
       - seccomp:unconfined
-  flight:
-    environment:
-      FLIGHT_INTERVAL_MS: "3600000"  # idle stream so HTTP is the sole LSM writer

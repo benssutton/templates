@@ -19,5 +19,5 @@ redis:
 
 template:
   ingest:
-    flight:
-      host: flight
+    solace:
+      host: solace

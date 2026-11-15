@@ -52,14 +52,10 @@ template:
   mcp-name: "java-template"
   mcp-instructions: "Tools for this template application."
   ingest:
-    transport: ${INGEST_TRANSPORT:flight}   # flight | solace | noop
+    transport: ${INGEST_TRANSPORT:solace}   # solace | noop
     max-batch-bytes: 16777216
     max-disconnect-seconds: 60
     staleness-threshold-seconds: 0
-    flight:
-      host: ${FLIGHT_HOST:localhost}
-      port: ${FLIGHT_PORT:8815}
-      ticket: ${FLIGHT_TICKET:items}
     solace:
       host: ${SOLACE_HOST:localhost}
       port: ${SOLACE_PORT:55555}
@@ -67,6 +63,7 @@ template:
       username: ${SOLACE_USERNAME:admin}
       password: ${SOLACE_PASSWORD:admin}
       topic: ${SOLACE_TOPIC:ingest/batches}
+      queue: ${SOLACE_QUEUE:java-template/ingest}   # durable exclusive; one per replica
 
 datasources:
   default:
