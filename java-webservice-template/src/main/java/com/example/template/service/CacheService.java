@@ -2,16 +2,16 @@ package com.example.template.service;
 
 import com.example.template.dto.CacheEntry;
 import jakarta.inject.Singleton;
-import redis.clients.jedis.JedisPooled;
+import redis.clients.jedis.RedisClient;
 import redis.clients.jedis.json.Path2;
 
 /** Redis cache over RedisJSON (mirrors Python services/cache.py). */
 @Singleton
 public class CacheService {
 
-    private final JedisPooled jedis;
+    private final RedisClient jedis;
 
-    public CacheService(JedisPooled jedis) {
+    public CacheService(RedisClient jedis) {
         this.jedis = jedis;
     }
 

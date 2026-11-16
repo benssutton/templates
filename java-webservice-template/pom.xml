@@ -10,7 +10,7 @@
   <parent>
     <groupId>io.micronaut.platform</groupId>
     <artifactId>micronaut-parent</artifactId>
-    <version>5.0.2</version>
+    <version>5.2.5</version>
   </parent>
 
   <properties>
@@ -18,10 +18,10 @@
     <jdk.version>25</jdk.version>
     <release.version>25</release.version>
     <maven.compiler.release>25</maven.compiler.release>
-    <micronaut.version>5.0.2</micronaut.version>
+    <micronaut.version>5.2.5</micronaut.version>
     <!-- Override the platform BOM's testcontainers.version (2.0.5), which is not
          published to Maven Central; only the 1.x line exists. -->
-    <testcontainers.version>1.21.3</testcontainers.version>
+    <testcontainers.version>1.21.4</testcontainers.version>
     <!-- Security bumps over the 5.0.2 platform BOM's pins (drop once the BOM catches up):
          micrometer 1.16.5 -> 1.16.6 fixes CVE-2026-40983 / CVE-2026-40984;
          postgres driver 42.7.11 -> 42.7.12 fixes CVE-2026-54291. -->
@@ -127,7 +127,7 @@
     <dependency>
       <groupId>redis.clients</groupId>
       <artifactId>jedis</artifactId>
-      <version>5.2.0</version>
+      <version>8.0.2</version>
       <scope>compile</scope>
     </dependency>
 
@@ -148,7 +148,7 @@
     <dependency>
       <groupId>com.solace</groupId>
       <artifactId>solace-messaging-client</artifactId>
-      <version>1.10.0</version>
+      <version>1.10.1</version>
       <scope>compile</scope>
     </dependency>
 
@@ -200,7 +200,7 @@
     <dependency>
       <groupId>org.awaitility</groupId>
       <artifactId>awaitility</artifactId>
-      <version>4.2.2</version>
+      <version>4.3.0</version>
       <scope>test</scope>
     </dependency>
 
@@ -345,7 +345,7 @@
       <plugin>
         <groupId>org.jacoco</groupId>
         <artifactId>jacoco-maven-plugin</artifactId>
-        <version>0.8.13</version>
+        <version>0.8.16</version>
         <executions>
           <execution>
             <id>prepare</id>

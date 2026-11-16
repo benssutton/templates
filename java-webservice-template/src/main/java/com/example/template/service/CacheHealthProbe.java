@@ -5,16 +5,16 @@ import com.example.template.health.DependencyHealthProbe;
 import jakarta.inject.Singleton;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import redis.clients.jedis.JedisPooled;
+import redis.clients.jedis.RedisClient;
 
 /** Redis dependency probe (mirrors Python CacheService.health_check). */
 @Singleton
 public class CacheHealthProbe implements DependencyHealthProbe {
 
     private static final Logger LOG = LoggerFactory.getLogger(CacheHealthProbe.class);
-    private final JedisPooled jedis;
+    private final RedisClient jedis;
 
-    public CacheHealthProbe(JedisPooled jedis) {
+    public CacheHealthProbe(RedisClient jedis) {
         this.jedis = jedis;
     }
 
