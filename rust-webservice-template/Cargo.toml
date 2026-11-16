@@ -23,7 +23,7 @@ harness = false
 [dependencies]
 anyhow = "=1.0.104"
 # Atomically swapped LSM snapshot (readers never block the single writer).
-arc-swap = "=1.9.4"
+arc-swap = "=1.9.5"
 # LSM store and the Arrow IPC wire format. The compute (sort/take/filter/
 # concat/cmp) and row kernels are always built; `ipc` adds the stream codec.
 arrow = { version = "=60.1.0", default-features = false, features = ["ipc"] }
