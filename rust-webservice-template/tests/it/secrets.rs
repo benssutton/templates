@@ -29,10 +29,11 @@ async fn store_passwords_never_appear_in_debug_output_or_live_responses() {
         let status = response.status();
         let headers = format!("{:?}", response.headers());
         let text = response.text().await.unwrap();
-        for secret in [PG_PASSWORD, CH_PASSWORD] {
+        // Name the leaked setting, never print its value (CodeQL rust/cleartext-logging).
+        for (name, secret) in [("PG_PASSWORD", PG_PASSWORD), ("CH_PASSWORD", CH_PASSWORD)] {
             assert!(
                 !text.contains(secret) && !headers.contains(secret),
-                "{path} ({status}) leaks the store password `{secret}`"
+                "{path} ({status}) leaks the store password {name}"
             );
         }
     }
