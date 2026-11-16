@@ -102,8 +102,27 @@ docker compose up -d db clickhouse redis
 INGEST_TRANSPORT=noop docker compose up -d --no-deps app
 ```
 
-To serve HTTPS on the host (`cargo run --bin rust-template`), first run
-`certs/generate_self_signed_cert.sh`, which writes `certs/key.pem` and `certs/cert.pem`.
+### HTTPS certificates
+The app serves HTTPS whenever `SSL_CERTFILE` and `SSL_KEYFILE` are set. They
+default to `./certs/cert.pem` and `./certs/key.pem`.
+- **Docker image / compose:** nothing to do. The image build mints its own
+  self-signed certificate (see the [Dockerfile](Dockerfile)), so
+  `docker compose up --build` always gets a fresh one.
+- **On the host (`cargo run --bin rust-template`):** the certificates are
+  gitignored (`certs/*.pem`), so a fresh clone has none. Create them, or
+  replace expired ones (they are valid for 365 days), from this directory:
+  ```bash
+  bash certs/generate_self_signed_cert.sh          # writes certs/key.pem + certs/cert.pem
+  bash certs/generate_self_signed_cert.sh /tmp/c   # or into another directory
+  ```
+  The script needs `openssl` on the PATH; Git Bash on Windows ships it.
+  It overwrites existing files. The certificate is for development only:
+  CN `localhost`, SANs `localhost`, `app` (the compose service name k6 uses)
+  and `127.0.0.1`, RSA 4096.
+- **Check a certificate:** `openssl x509 -in certs/cert.pem -noout -subject -enddate -ext subjectAltName`.
+- Clients must skip verification for a self-signed certificate (`curl -k`,
+  k6 `K6_INSECURE_SKIP_TLS_VERIFY`).
+
 Plain HTTP on the host for local development:
 `SERVER_PORT=8000 SSL_CERTFILE= SSL_KEYFILE= INGEST_TRANSPORT=noop cargo run --bin rust-template`,
 with the store settings in `.env` pointing at reachable stores (compose does
