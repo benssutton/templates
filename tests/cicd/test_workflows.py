@@ -50,8 +50,26 @@ def test_external_actions_pinned_to_sha(path: Path) -> None:
 def test_status_job_gates_on_required_jobs() -> None:
     status = load(WORKFLOWS / "ci.yml")["jobs"]["status"]
     assert status["name"] == "Pipeline Status"
-    assert "rust" not in status["needs"]
-    assert {"changes", "pipeline-tests", "python", "java", "security"} <= set(status["needs"])
+    assert {"changes", "pipeline-tests", "python", "java", "rust", "security"} <= set(status["needs"])
+
+
+def test_ready_services_gate_the_status_and_can_fail() -> None:
+    """A ready service is in status.needs and its job has no continue-on-error
+    (a job with continue-on-error reports success to `needs`, so gating it
+    would gate nothing). A wip service is the opposite."""
+    from cicd import services
+
+    needs = set(load(WORKFLOWS / "ci.yml")["jobs"]["status"]["needs"])
+    for svc in services.SERVICES:
+        wf = load(WORKFLOWS / f"service-{svc.name}.yml")
+        jobs = list(wf["jobs"].values())
+        if svc.ready:
+            assert svc.name in needs, f"{svc.name} is ready but not in status.needs"
+            assert not any(j.get("continue-on-error") for j in jobs), \
+                f"service-{svc.name}.yml: a ready service's job must be able to fail"
+            assert "wip" not in wf["name"].lower(), f"service-{svc.name}.yml is still named wip"
+        else:
+            assert svc.name not in needs, f"{svc.name} is wip but gates status"
 
 
 def test_ci_triggers_exact() -> None:

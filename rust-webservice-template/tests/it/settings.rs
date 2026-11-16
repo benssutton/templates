@@ -294,3 +294,40 @@ fn malformed_json_list_shows_the_value() {
     let msg = err.to_string();
     assert!(msg.contains("[a"), "{msg}");
 }
+
+#[test]
+fn mcp_allowed_hosts_defaults_to_localhost_only() {
+    let s = Settings::default();
+    assert_eq!(s.mcp_allowed_hosts, vec!["localhost".to_string()]);
+    assert_eq!(s.mcp_name, "rust-template");
+    assert_eq!(s.mcp_instructions, "Tools for this template application.");
+}
+
+#[test]
+fn mcp_allowed_hosts_accepts_json_and_comma_separated() {
+    let json = Settings::from_vars(vars(&[(
+        "MCP_ALLOWED_HOSTS",
+        r#"["localhost", "app", "api.example.com:8443"]"#,
+    )]))
+    .unwrap();
+    assert_eq!(
+        json.mcp_allowed_hosts,
+        vec!["localhost", "app", "api.example.com:8443"]
+    );
+    let csv =
+        Settings::from_vars(vars(&[("MCP_ALLOWED_HOSTS", "localhost,127.0.0.1,app")])).unwrap();
+    assert_eq!(csv.mcp_allowed_hosts, vec!["localhost", "127.0.0.1", "app"]);
+}
+
+#[test]
+fn empty_mcp_allowed_hosts_is_rejected() {
+    // rmcp treats an empty allow-list as "any host": refuse it rather than
+    // silently disabling DNS-rebinding protection.
+    for empty in ["", " , ", "[]"] {
+        let err = Settings::from_vars(vars(&[("MCP_ALLOWED_HOSTS", empty)])).unwrap_err();
+        assert!(
+            err.to_string().contains("mcp_allowed_hosts"),
+            "{empty:?}: {err}"
+        );
+    }
+}

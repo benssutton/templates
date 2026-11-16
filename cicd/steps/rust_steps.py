@@ -1,4 +1,4 @@
-"""Steps for the Rust (axum) service. Registered `ready=False`: never blocks Pipeline Status."""
+"""Steps for the Rust (axum) service. Registered `ready=True`: its `ci` set gates Pipeline Status."""
 
 from __future__ import annotations
 

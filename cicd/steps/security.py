@@ -78,12 +78,23 @@ def osv() -> None:
     docker_run(tools.OSV, osv_args(sboms, osv_targets()))
 
 
+def require_git_history(root: Path | None = None) -> None:
+    """gitleaks and semgrep read /src/.git. In a git worktree .git is a file pointing at a
+    host path the container can't see, so gitleaks scans 0 commits and passes silently."""
+    root = root or ROOT
+    if (root / ".git").is_file():
+        raise StepFailed(f"{root} is a git worktree (.git is a file), so the scanner container "
+                         "can't read its history; run `security` from the main checkout or a clone")
+
+
 def gitleaks() -> None:
+    require_git_history()
     docker_run(tools.GITLEAKS, ["detect", "--source", "/src", "--config", "/src/.gitleaks.toml",
                                 "--redact", "--no-banner"])
 
 
 def semgrep() -> None:
+    require_git_history()
     args = ["semgrep", "scan", "--config", "p/default", "--error", "--metrics=off",
             "--exclude", "target", "--exclude", "node_modules", "--exclude", ".claude"]
     d = os.environ.get("CICD_SARIF_DIR")

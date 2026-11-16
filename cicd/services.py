@@ -20,7 +20,7 @@ SERVICES: tuple[Service, ...] = (
             "python-template_default", "templates-python"),
     Service("java", "java-webservice-template", "java", True,
             "java-template_default", "templates-java"),
-    Service("rust", "rust-webservice-template", "rust", False,
+    Service("rust", "rust-webservice-template", "rust", True,
             "rust-template_default", "templates-rust"),
 )
 

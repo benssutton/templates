@@ -40,3 +40,10 @@ def test_sonar_unknown_service_fails_cleanly():
     assert out.returncode == 1
     assert out.stderr.startswith("error:")
     assert "Traceback" not in out.stderr
+
+
+def test_list_marks_every_service_ready():
+    out = cli("list")
+    assert out.returncode == 0
+    rows = [line.split() for line in out.stdout.splitlines() if line.strip()]
+    assert {r[0]: r[-1] for r in rows} == {"python": "ready", "java": "ready", "rust": "ready"}

@@ -1,5 +1,5 @@
 use rmcp::handler::server::router::tool::ToolRouter;
-use rmcp::model::ServerInfo;
+use rmcp::model::{Implementation, ServerCapabilities, ServerInfo};
 use rmcp::{tool, tool_handler, tool_router, ServerHandler};
 
 use crate::state::AppState;
@@ -31,7 +31,15 @@ impl McpHandler {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for McpHandler {
+    /// Python's `FastMCP(name=settings.mcp_name, instructions=settings.mcp_instructions)`.
+    /// The rmcp types are #[non_exhaustive], so they are built with constructors.
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::default()
+        let settings = &self.state.settings;
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new(
+                settings.mcp_name.clone(),
+                settings.app_version.clone(),
+            ))
+            .with_instructions(settings.mcp_instructions.clone())
     }
 }

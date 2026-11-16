@@ -21,7 +21,7 @@ name = "lsm"
 harness = false
 
 [dependencies]
-anyhow = "=1.0.102"
+anyhow = "=1.0.103"
 # Atomically swapped LSM snapshot (readers never block the single writer).
 arc-swap = "=1.9.3"
 # LSM store and the Arrow IPC wire format. The compute (sort/take/filter/
@@ -59,7 +59,7 @@ serde_json = "=1.0.150"
 sqlx = { version = "=0.9.0", default-features = false, features = ["runtime-tokio", "postgres"] }
 sysinfo = "=0.39.6"
 thiserror = "=2.0.18"
-tokio = { version = "=1.52.3", features = ["full"] }
+tokio = { version = "=1.53.3", features = ["full"] }
 tokio-util = "=0.7.18"
 tower-http = { version = "=0.6.11", features = ["cors", "limit"] }
 tracing = "=0.1.44"
@@ -81,4 +81,4 @@ reqwest = { version = "=0.13.4", default-features = false, features = ["json", "
 testcontainers = { version = "=0.27.3", default-features = false }
 testcontainers-modules = { version = "=0.15.0", default-features = false, features = ["postgres", "redis"] }
 # Paused-clock tests for the ingest backoff, watchdog and consecutive-failure paths.
-tokio = { version = "=1.52.3", features = ["full", "test-util"] }
+tokio = { version = "=1.53.3", features = ["full", "test-util"] }

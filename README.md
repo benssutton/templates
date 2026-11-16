@@ -51,6 +51,12 @@ The Python Webservice under python-webservice-template is ready for use.
 The Java Webservice under java-webservice-template is ready for use — a Micronaut
 (Java 25) mirror of the Python template with the same endpoints and feature set.
 
+The Rust Webservice under rust-webservice-template is ready for use — an axum
+mirror of the Python template with the same endpoints, settings and resilience
+behaviour. Its LSM stream store runs on arrow-rs compute kernels (with a criterion
+benchmark), and Solace is consumed over AMQP 1.0. See its README for the
+deliberate divergences.
+
 Other templates that might show in this repo are still works-in-progress.
 
 # Pipeline
@@ -70,7 +76,7 @@ Step sets: **fast** (format + lint, seconds) < **check** (+ tests/coverage) < **
 
 **Change detection** has one source of truth: `cicd/services.py` + `cicd/changed.py`. Changes under a service directory run that service; changes to `run_CICD.py`, `cicd/`, `.github/`, scanner configs or `requirements-dev.txt` run all; markdown/docs-only changes run no service jobs (CI still starts, so `Pipeline Status` reports and passes).
 
-**GitHub**: `ci.yml` runs on every push to main, every pull request (no `paths-ignore`) and manual dispatch (input `services`: `changed`|`all`); the `pipeline-tests` job always runs `tests/cicd`. If the push base is unknown (force-push) it diffs against `HEAD~1`, and with no usable base it runs all services. There are no scheduled workflows; Dependabot (monthly, all ecosystems) is the only recurring automation. The `Pipeline Status` job is the single required check for branch protection (Settings > Branches > require status check `Pipeline Status`). Rust is wip: it runs but never blocks; set `ready=True` in `cicd/services.py` and add `rust` to `status.needs` when it is ready.
+**GitHub**: `ci.yml` runs on every push to main, every pull request (no `paths-ignore`) and manual dispatch (input `services`: `changed`|`all`); the `pipeline-tests` job always runs `tests/cicd`. If the push base is unknown (force-push) it diffs against `HEAD~1`, and with no usable base it runs all services. There are no scheduled workflows; Dependabot (monthly, all ecosystems) is the only recurring automation. The `Pipeline Status` job is the single required check for branch protection (Settings > Branches > require status check `Pipeline Status`). Python, Java and Rust are all `ready=True` and gate `Pipeline Status`. A new service starts as `ready=False` (it runs but never blocks, and its job has `continue-on-error: true`). To promote it, set `ready=True` in `cicd/services.py`, add it to `status.needs` in `ci.yml` and remove `continue-on-error` from its workflow; `tests/cicd/test_workflows.py` checks that all three are done together.
 
 **Local hooks**: `.pre-commit-config.yaml` runs gitleaks on commit and `changed fast` on push (`pre-commit install --install-hooks && pre-commit install --hook-type pre-push`).
 
@@ -90,7 +96,7 @@ The per-service `.gitlab-ci.yml` files were retired; their jobs map as follows.
 
 ## Known limitations
 
-**Baselined findings.** The first scan's findings are suppressed with time-boxed entries: `.trivyignore` (`exp:`), `osv-scanner.toml` (`ignoreUntil`) and two `# nosemgrep` comments in the service Dockerfiles. All expire on **2026-12-14**, after which the pipeline fails until the follow-up dependency/base-image bump PR lands: jackson, netty, guava, postgresql, micrometer, httpcore5, black, cryptography, Debian base-image CVEs, and a non-root `USER` in both service Dockerfiles. The Rust template crates are WIP.
+**Baselined findings.** The first scan's findings are suppressed with time-boxed entries: `.trivyignore` (`exp:`), `osv-scanner.toml` (`ignoreUntil`) and two `# nosemgrep` comments in the service Dockerfiles. Most expire on **2026-12-14**, after which the pipeline fails until the follow-up dependency/base-image bump PR lands: jackson, netty, guava, postgresql, micrometer, httpcore5, black, cryptography, Debian base-image CVEs, astral-tokio-tar, and a non-root `USER` in both service Dockerfiles. The not-compiled rmcp advisories and the filelock false positives (`osv-scanner.toml`) expire on **2027-02-14** instead. The Rust crates.io entries were re-triaged when Rust was promoted; each names the crate that pulls it in.
 
 **Scanner coverage.**
 
@@ -99,9 +105,8 @@ The per-service `.gitlab-ci.yml` files were retired; their jobs map as follows.
 | OSV | Maven is scanned via a CycloneDX SBOM generated in Docker |
 | OSV / Trivy | the Python service's runtime `requirements.txt` uses ranges and is not scanned (follow-up: lock file) |
 | Trivy | cannot see BOM-managed Maven versions |
+| gitleaks / semgrep | need the repo's `.git` directory: in a git worktree (`.git` is a file) they fail fast, so run `security` from the main checkout or a clone |
 
 **Local SonarQube** shares its Docker Compose project name (`sonar`) and volumes with turbo-parakeet's `sonar/compose.yml`: one local SonarQube serves both repos. See sonar/README.md for token setup.
-
-**Rust** is `ready=False` (wip): it runs but never blocks. Parity work is in progress (R1 foundations, R2 stores and R3 streaming done; promotion follows).
 
 **Not verifiable until the first GitHub run:** CodeQL for Rust, `upload-sarif` (needs code scanning enabled on the repo), and the Docker steps on ubuntu runners. Manual step: require `Pipeline Status` in branch protection.

@@ -83,3 +83,18 @@ def test_trivy_fs_never_resolves_poms_against_maven_central(monkeypatch):
     [(image, args, mounts)] = calls
     assert image == tools.TRIVY and args[0] == "fs" and "--offline-scan" in args
     assert "/root/.m2" not in (mounts or {}).values()  # same result with a cold or warm cache
+
+
+@pytest.mark.parametrize("step", ["gitleaks", "semgrep"])
+def test_history_scanners_refuse_a_git_worktree(monkeypatch, tmp_path, step):
+    # A worktree's .git is a file; the container can't follow it, so gitleaks would scan 0 commits.
+    (tmp_path / ".git").write_text("gitdir: C:/elsewhere/.git/worktrees/x\n")
+    monkeypatch.setattr(security, "ROOT", tmp_path)
+    monkeypatch.setattr(security, "docker_run", lambda *a, **k: pytest.fail("scanner ran"))
+    with pytest.raises(security.StepFailed, match="main checkout or a clone"):
+        security.STEPS[step]()
+
+
+def test_history_scanners_accept_a_git_directory(tmp_path):
+    (tmp_path / ".git").mkdir()
+    security.require_git_history(tmp_path)

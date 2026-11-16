@@ -11,6 +11,12 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
+# Profiling builds (docker-compose.profiling.yml) pass
+# RUSTFLAGS="-C force-frame-pointers=yes" so perf can walk whole stacks.
+# Empty, the default, is the normal release build. Set before `cargo chef cook`
+# so the dependency layer is built with the same flags.
+ARG RUSTFLAGS=""
+ENV RUSTFLAGS=${RUSTFLAGS}
 COPY --from=planner /build/recipe.json recipe.json
 RUN cargo chef cook --release --locked --recipe-path recipe.json
 COPY . .

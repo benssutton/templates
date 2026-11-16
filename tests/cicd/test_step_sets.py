@@ -27,7 +27,7 @@ def test_rust_ci_builds_scans_and_smokes():
     assert {"build-image", "scan-image", "k6-smoke", "k6-load"} <= set(rust_steps.STEPS)
     rust = services.get("rust")
     assert rust.compose_network == "rust-template_default"
-    assert rust.ready is False  # promoted in R4
+    assert rust.ready is True  # promoted in R4 (Rust parity close-out)
 
 
 @pytest.mark.parametrize("step", ["test", "coverage"])

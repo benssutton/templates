@@ -1,13 +1,12 @@
-name: Rust service (wip)
+name: Rust service
 on:
   workflow_call:
 permissions:
   contents: read
 jobs:
   rust:
-    name: Rust (non-blocking)
+    name: Rust (fmt + clippy + test + coverage + image + k6 smoke)
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

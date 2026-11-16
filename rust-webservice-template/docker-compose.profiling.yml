@@ -1,10 +1,26 @@
 # Profiling override. Use alongside the base file:
-#   docker compose -f docker-compose.yml -f docker-compose.profiling.yml up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.profiling.yml up -d --build --wait
 #
-# INGEST_TRANSPORT=noop: no stream source at all, so HTTP ingest is the sole
-# LSM writer during the ingest profile (single-writer contract). R4 adds
-# SYS_PTRACE for cargo flamegraph / perf (Layer 2).
+# - Layer 2 (PERF_PROFILING_RUNBOOK.md): Linux perf samples the app.
+#   SYS_PTRACE lets perf attach to the app process (as in the Python overlay);
+#   SYS_ADMIN + seccomp:unconfined let perf_event_open past Docker's default
+#   seccomp profile (as in the Java overlay for async-profiler).
+# - The app image is rebuilt with frame pointers, so `perf --call-graph fp`
+#   sees whole stacks. A later plain `docker compose up --build` rebuilds it
+#   without them.
+# - INGEST_TRANSPORT=noop: no stream source at all, so HTTP ingest is the sole
+#   LSM writer during the ingest profile (single-writer contract); see
+#   tests/performance/profile_ingest.js.
 services:
   app:
+    build:
+      context: .
+      args:
+        RUSTFLAGS: "-C force-frame-pointers=yes"
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
     environment:
       INGEST_TRANSPORT: noop

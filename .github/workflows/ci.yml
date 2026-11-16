@@ -98,12 +98,12 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest tests/cicd -q
 
-  # The only check required by branch protection. Skipped jobs count as success; Rust (wip) never blocks.
+  # The only check required by branch protection. Skipped jobs count as success.
   status:
     name: Pipeline Status
     runs-on: ubuntu-latest
     if: always()
-    needs: [changes, pipeline-tests, python, java, security]
+    needs: [changes, pipeline-tests, python, java, rust, security]
     steps:
       - name: Fail if any required job failed or was cancelled
         env:

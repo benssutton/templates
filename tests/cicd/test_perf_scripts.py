@@ -1,0 +1,58 @@
+"""The Rust k6 suite is Python's, byte for byte.
+
+Spec (rust parity §2): the Python k6 scripts must run unchanged against Rust
+apart from BASE_URL (passed with -e by cicd/steps/images.py) and the compose
+network (cicd/services.py). If a Python script changes, copy it to Rust in the
+same change, or this test fails.
+"""
+
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+PYTHON = ROOT / "python-webservice-template" / "tests" / "performance"
+RUST = ROOT / "rust-webservice-template" / "tests" / "performance"
+
+SHARED = [
+    "Dockerfile",
+    "lib/checks.js",
+    "lib/serverTiming.js",
+    "lib/thresholds.js",
+    "smoke.js",
+    "load.js",
+    "stress.js",
+    "solace_cache.js",
+    "profile_reads.js",
+    "profile_ingest.js",
+    "ingest_http.js",
+    "data/rows_params.json",
+    "data/ingest_batch.ipc",
+]
+
+
+@pytest.mark.parametrize("name", SHARED)
+def test_rust_k6_file_is_pythons(name: str) -> None:
+    rust, python = RUST / name, PYTHON / name
+    assert python.is_file(), f"reference file vanished: {python.relative_to(ROOT)}"
+    assert rust.is_file(), f"missing {rust.relative_to(ROOT)} (copy it from Python)"
+    assert rust.read_bytes() == python.read_bytes(), f"{name} differs from Python's copy"
+
+
+def test_every_python_k6_script_is_shared_or_deliberately_skipped() -> None:
+    # Python-only by design: py-spy (Rust: profile/run_perf.sh), the SMF demo
+    # publisher (Rust: the demo-publisher binary), the ClickHouse seed (Rust:
+    # scripts/clickhouse-seed.sh) and the Python fixture generator.
+    python_only = {
+        "profile/run_pyspy.sh",
+        "publishers/solace_publisher.py",
+        "data/clickhouse-seed.sh",
+        "data/generate_ingest_batch.py",
+    }
+    found = {
+        p.relative_to(PYTHON).as_posix()
+        for p in PYTHON.rglob("*")
+        if p.is_file() and "__pycache__" not in p.parts and "artifacts" not in p.parts
+    }
+    unaccounted = found - set(SHARED) - python_only
+    assert not unaccounted, f"new Python k6 files to copy to Rust or list as Python-only: {unaccounted}"

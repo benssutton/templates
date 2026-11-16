@@ -11,15 +11,18 @@ use crate::state::AppState;
 use tools::McpHandler;
 
 pub fn build_router(state: AppState) -> Router<AppState> {
+    // SECURITY: DNS-rebinding protection. rmcp checks the Host header of every
+    // /mcp request against `mcp_allowed_hosts` and answers 403 otherwise.
+    // Default ["localhost"]; deployments list their public host names
+    // (compose adds 127.0.0.1 and app). Settings::validate() refuses an empty
+    // list, which rmcp would treat as "allow every host".
+    let config = StreamableHttpServerConfig::default()
+        .with_allowed_hosts(state.settings.mcp_allowed_hosts.clone());
     let service: StreamableHttpService<McpHandler, LocalSessionManager> =
         StreamableHttpService::new(
             move || Ok(McpHandler::new(state.clone())),
             Arc::new(LocalSessionManager::default()),
-            // SECURITY: disable_allowed_hosts() bypasses DNS-rebinding protection.
-            // In production, replace with:
-            //   StreamableHttpServerConfig::default()
-            //       .with_allowed_hosts(vec![std::env::var("HOST").unwrap_or("localhost".into())])
-            StreamableHttpServerConfig::default().disable_allowed_hosts(),
+            config,
         );
 
     // Served at both `/mcp` and `/mcp/` (Python's canonical endpoint:

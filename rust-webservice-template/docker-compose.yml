@@ -3,8 +3,10 @@ name: rust-template
 # The app, its three stores, and the Solace broker (default transport) with a
 # demo publisher. Store and broker ports are not published (the app reaches
 # them on the compose network), so this stack can run next to the Python and
-# Java stacks. HTTP-only ingest without a broker:
-#   INGEST_TRANSPORT=noop docker compose up app db clickhouse redis
+# Java stacks. HTTP-only ingest without a broker (`app` depends on a healthy
+# `solace`, so skip that dependency with --no-deps):
+#   docker compose up -d db clickhouse redis
+#   INGEST_TRANSPORT=noop docker compose up -d --no-deps app
 services:
   db:
     image: pgvector/pgvector:0.8.4-pg18
@@ -120,6 +122,10 @@ services:
       STATUS: running
       INGEST_TRANSPORT: ${INGEST_TRANSPORT:-solace}
       RUST_LOG: info
+      # /mcp Host allow-list: the published port (localhost, 127.0.0.1) and the
+      # compose service name (app), as other containers (k6: BASE_URL=https://app)
+      # address it.
+      MCP_ALLOWED_HOSTS: localhost,127.0.0.1,app
       POSTGRES_URL: postgresql://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-appdb}
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"

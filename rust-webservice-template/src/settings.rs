@@ -55,6 +55,11 @@ pub struct Settings {
 
     pub mcp_name: String,
     pub mcp_instructions: String,
+    /// `Host` header values the /mcp endpoint accepts (DNS-rebinding
+    /// protection). An entry without a port matches any port. Must not be
+    /// empty: rmcp treats an empty list as "allow every host".
+    #[serde(deserialize_with = "string_list")]
+    pub mcp_allowed_hosts: Vec<String>,
 
     pub postgres_url: SecretString,
     pub postgres_pool_min_size: u32,
@@ -151,6 +156,7 @@ impl Default for Settings {
             ssl_certfile: "./certs/cert.pem".into(),
             mcp_name: "rust-template".into(),
             mcp_instructions: "Tools for this template application.".into(),
+            mcp_allowed_hosts: vec!["localhost".into()],
             postgres_url: SecretString::from("postgresql://appuser:password@localhost:5432/appdb"),
             postgres_pool_min_size: 2,
             postgres_pool_max_size: 10,
@@ -287,6 +293,12 @@ impl Settings {
             || self.solace_semp_url.starts_with("https://"))
         {
             problems.push("solace_semp_url must start with http:// or https://".into());
+        }
+        if self.mcp_allowed_hosts.is_empty() {
+            problems.push(
+                "mcp_allowed_hosts must name at least one host (an empty list would disable the /mcp DNS-rebinding protection)"
+                    .into(),
+            );
         }
         if problems.is_empty() {
             Ok(())

@@ -3,3 +3,5 @@ lcov.info
 .env
 # Dev TLS material is minted locally / in the image, never committed.
 certs/*.pem
+# Performance profiling artifacts: generated locally by run_perf.sh, never committed
+tests/performance/profile/artifacts/

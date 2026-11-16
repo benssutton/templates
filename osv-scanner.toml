@@ -217,131 +217,24 @@ reason = "black 26.1 in python-webservice-template/requirements-dev.txt; baselin
 
 
 # ---- crates.io (rust-webservice-template/Cargo.lock) ----
+# Re-triaged at Rust promotion 2026-11-16 against the R1-R4 lockfile: anyhow, tokio,
+# crossbeam-epoch and h2 were bumped to fixed releases; the zstd, rustix, quinn-udp,
+# quick-xml and bincode entries were removed (those versions are no longer locked).
 [[IgnoredVulns]]
-id = "RUSTSEC-2026-0190"
+id = "RUSTSEC-2026-0440"
 ignoreUntil = 2026-12-14
-reason = "anyhow 1.0.102 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
+reason = "astral-tokio-tar 0.6.4 in rust-webservice-template/Cargo.lock via testcontainers 0.27.3 (dev-dependency; cargo tree -i astral-tokio-tar); unmaintained notice, not a vulnerability, and no fixed release as of 2026-11-16 (testcontainers 0.28.0 still requires ^0.6.1); compiled only into the integration-test binary, never into the shipped service; re-triaged at Rust promotion 2026-11-16; fix in follow-up dependency-bump PR"
 
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0204"
-ignoreUntil = 2026-12-14
-reason = "crossbeam-epoch 0.9.18 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0258"
-ignoreUntil = 2026-12-14
-reason = "h2 0.4.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0538"
-ignoreUntil = 2026-12-14
-reason = "quinn-udp 0.5.14 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0486"
-ignoreUntil = 2026-12-14
-reason = "rustix 1.1.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0386"
-ignoreUntil = 2026-12-14
-reason = "tokio 1.52.3 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0391"
-ignoreUntil = 2026-12-14
-reason = "zstd 0.13.3 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0395"
-ignoreUntil = 2026-12-14
-reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0396"
-ignoreUntil = 2026-12-14
-reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0397"
-ignoreUntil = 2026-12-14
-reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0398"
-ignoreUntil = 2026-12-14
-reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0399"
-ignoreUntil = 2026-12-14
-reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0400"
-ignoreUntil = 2026-12-14
-reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0401"
-ignoreUntil = 2026-12-14
-reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0402"
-ignoreUntil = 2026-12-14
-reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0403"
-ignoreUntil = 2026-12-14
-reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0404"
-ignoreUntil = 2026-12-14
-reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0405"
-ignoreUntil = 2026-12-14
-reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0406"
-ignoreUntil = 2026-12-14
-reason = "zstd-safe 7.2.4 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0410"
-ignoreUntil = 2026-12-14
-reason = "zstd-sys 2.0.16+zstd.1.5.7 in rust-webservice-template/Cargo.lock; baselined 2026-11-14; rust template is work-in-progress"
-
-# Not-compiled / not-reachable code paths (verified with cargo tree); reviewed 2026-11-14.
+# Not-compiled / not-reachable code paths (verified with cargo tree); reviewed 2026-11-14; Rust entries re-checked at Rust promotion 2026-11-16.
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0457"
 ignoreUntil = 2027-02-14
-reason = "rmcp 2.2.0 OAuth client SSRF; rust-template enables only rmcp server + transport-streamable-http-server features (cargo tree -e features -i rmcp: no auth/client features), so the vulnerable client code is not compiled. Fix is rmcp 3.7+ (major: sessionless MCP 2026-07-28 migration) - follow-up; review 2027-02-14"
+reason = "rmcp 2.2.0 OAuth client SSRF; rust-webservice-template enables only rmcp server + transport-streamable-http-server features (cargo tree -e features -i rmcp, re-checked 2026-11-16 after R1-R4: server, server-side-http, transport-streamable-http-server[-session], macros and their defaults; no auth, client or reqwest features), so the vulnerable OAuth client code is not compiled. Fix is rmcp 3.7+ (major: sessionless MCP 2026-07-28 migration) - follow-up; review 2027-02-14"
 
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0462"
 ignoreUntil = 2027-02-14
-reason = "rmcp 2.2.0 unbounded body buffering in Streamable HTTP *clients* (reqwest/unix-socket); only server features enabled, client transports not compiled. Fix is rmcp 3.9+ (major migration) - follow-up; review 2027-02-14"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0194"
-ignoreUntil = 2027-02-14
-reason = "quick-xml 0.39.4 locked only via object_store 0.13.2, an optional polars-io cloud dependency not enabled; cargo tree --target all -e all -i quick-xml is empty (not compiled); object_store pins ^0.39; review 2027-02-14"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0195"
-ignoreUntil = 2027-02-14
-reason = "quick-xml 0.39.4 locked only via object_store 0.13.2, an optional polars-io cloud dependency not enabled; cargo tree --target all -e all -i quick-xml is empty (not compiled); object_store pins ^0.39; review 2027-02-14"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2025-0141"
-ignoreUntil = 2027-02-14
-reason = "bincode 2.0.1 unmaintained notice (no vulnerability, no fix); locked only as optional dep of polars-utils 0.55.2, feature not enabled; cargo tree -i bincode is empty; review 2027-02-14"
+reason = "rmcp 2.2.0 unbounded body buffering in Streamable HTTP *clients* (transport-streamable-http-client-reqwest / -unix-socket); rust-webservice-template enables only server features (cargo tree -e features -i rmcp, re-checked 2026-11-16: no client transports), so the client code is not compiled; the server's own request bodies are capped by tower-http's limit layer. Fix is rmcp 3.9+ (major migration) - follow-up; review 2027-02-14"
 
 [[IgnoredVulns]]
 id = "GHSA-69hj-f68j-2879"
