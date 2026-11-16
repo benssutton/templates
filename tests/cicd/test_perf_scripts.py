@@ -36,7 +36,14 @@ def test_rust_k6_file_is_pythons(name: str) -> None:
     rust, python = RUST / name, PYTHON / name
     assert python.is_file(), f"reference file vanished: {python.relative_to(ROOT)}"
     assert rust.is_file(), f"missing {rust.relative_to(ROOT)} (copy it from Python)"
-    assert rust.read_bytes() == python.read_bytes(), f"{name} differs from Python's copy"
+    # Compare as git stores them: a Windows checkout with core.autocrlf gives
+    # Python's copy CRLF on disk while Rust's .gitattributes pins LF. Binary
+    # fixtures (.ipc) are compared exactly.
+    rust_bytes, python_bytes = rust.read_bytes(), python.read_bytes()
+    if not name.endswith(".ipc"):
+        rust_bytes = rust_bytes.replace(b"\r\n", b"\n")
+        python_bytes = python_bytes.replace(b"\r\n", b"\n")
+    assert rust_bytes == python_bytes, f"{name} differs from Python's copy"
 
 
 def test_every_python_k6_script_is_shared_or_deliberately_skipped() -> None:
