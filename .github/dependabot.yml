@@ -14,6 +14,12 @@ updates:
     open-pull-requests-limit: 2
     cooldown: { default-days: 7 }
     groups: { java: { patterns: ["*"], update-types: [minor, patch] } }
+    # Dependabot runs the Maven wrapper updater on its own JDK 21, which cannot load the
+    # JDK 25 micronaut-maven-plugin extension, so these two fail (misconfigured_tooling).
+    # Bump .mvn/wrapper/maven-wrapper.properties by hand.
+    ignore:
+      - { dependency-name: "org.apache.maven:apache-maven" }
+      - { dependency-name: "org.apache.maven.wrapper:maven-wrapper" }
 
   - package-ecosystem: cargo
     directory: /rust-webservice-template
