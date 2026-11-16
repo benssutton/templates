@@ -56,7 +56,6 @@ async fn closed_port_fails_after_the_retry_budget() {
         .err()
         .expect("must fail");
     let elapsed = started.elapsed();
-    eprintln!("redis closed-port elapsed: {elapsed:?}");
     assert!(
         format!("{err:#}").contains("connecting to Redis"),
         "{err:#}"

@@ -59,7 +59,6 @@ async fn closed_port_fails_after_the_retry_budget() {
     let started = Instant::now();
     let err = ClickHouseStore::connect(&settings).await.unwrap_err();
     let elapsed = started.elapsed();
-    eprintln!("clickhouse closed-port elapsed: {elapsed:?}");
     assert!(
         format!("{err:#}").contains("ClickHouse smoke test"),
         "{err:#}"

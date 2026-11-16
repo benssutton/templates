@@ -115,6 +115,9 @@ services:
 
   app:
     build: .
+    # Drain grace (10 s) plus consumer teardown and task joins outlast
+    # Docker's default 10 s before SIGKILL.
+    stop_grace_period: 30s
     ports:
       # HTTPS on the default port, like the Python and Java templates.
       - "443:443"

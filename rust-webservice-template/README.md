@@ -206,6 +206,10 @@ mirrors the Python structure and naming. Deliberate divergences:
     publisher's batches reach the AMQP consumer.
 18. **Process stats on Windows.** `/health/status` reports `num_threads` and
     `open_files` as 0 (sysinfo limits). Linux and Docker report real values.
+19. **Shutdown order.** Shutdown stops the ingest loop first, drains HTTP,
+    then closes the AMQP link and the stores; the spec's order is consumer,
+    drain, pools. The effect is equivalent: no new deliveries start, and
+    unsettled deliveries are redelivered.
 
 ## Performance profiling
 See [PERF_PROFILING_RUNBOOK.md](PERF_PROFILING_RUNBOOK.md): Layer 1 (k6 +
