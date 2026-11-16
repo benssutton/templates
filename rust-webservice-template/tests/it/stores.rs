@@ -73,3 +73,50 @@ async fn stopping_the_app_closes_the_postgres_pool() {
     app.stop().await.expect("clean shutdown");
     assert!(pool.is_closed());
 }
+
+use rust_template::app::create_app;
+use rust_template::settings::IngestTransport;
+
+/// Python main.py lifespan: the consumer for INGEST_TRANSPORT is entered and
+/// StreamIngestService starts; App::close stops it before the pools close.
+#[tokio::test]
+async fn create_app_starts_ingest_with_the_noop_consumer_and_close_stops_it() {
+    let app = TestApp::spawn(app_settings().await).await;
+    let ingest = app.state.ingest.clone();
+    assert!(ingest.is_running());
+    let (_, body) = app.get_json("/health/ready").await;
+    let check = body["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "ingest")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        (check["transport"].as_str(), check["thread_alive"].as_bool()),
+        (Some("noop"), Some(true))
+    );
+    app.stop().await.expect("clean shutdown");
+    assert!(!ingest.is_running());
+}
+
+/// Fail fast (spec §2): an unreachable broker aborts startup after
+/// connect_max_attempts, and the already-connected stores are closed.
+#[tokio::test]
+async fn an_unreachable_broker_makes_create_app_fail() {
+    let closed = Endpoint::closed();
+    let settings = Settings {
+        ingest_transport: IngestTransport::Solace,
+        solace_host: closed.host.clone(),
+        solace_port: closed.port,
+        connect_max_attempts: 2,
+        connect_base_delay: 0.01,
+        connect_max_delay: 0.05,
+        ..app_settings().await
+    };
+    let err = create_app(settings).await.err().expect("must fail");
+    assert!(
+        format!("{err:#}").to_lowercase().contains("solace"),
+        "{err:#}"
+    );
+}

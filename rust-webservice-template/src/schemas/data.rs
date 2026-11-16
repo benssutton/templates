@@ -21,6 +21,12 @@ pub struct DataRowsResponse {
     pub limit: u32,
 }
 
+/// `POST /data/ingest` 202 body (Python returns `{"accepted": True}`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+pub struct IngestAccepted {
+    pub accepted: bool,
+}
+
 /// `?limit=`: FastAPI's `Query(default=10, ge=1, le=100)`.
 #[derive(Debug, Clone, Copy, Default, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]

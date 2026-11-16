@@ -14,7 +14,7 @@ FROM chef AS builder
 COPY --from=planner /build/recipe.json recipe.json
 RUN cargo chef cook --release --locked --recipe-path recipe.json
 COPY . .
-RUN cargo build --release --locked --bin rust-template
+RUN cargo build --release --locked --bins
 # Self-signed dev cert for HTTPS on 443 (openssl ships with the rust image).
 RUN bash certs/generate_self_signed_cert.sh /build/certs
 
@@ -25,6 +25,7 @@ RUN apt-get update \
 RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin app
 WORKDIR /app
 COPY --from=builder /build/target/release/rust-template /app/rust-template
+COPY --from=builder /build/target/release/demo-publisher /app/demo-publisher
 COPY --from=builder --chown=10001:10001 /build/certs/key.pem /build/certs/cert.pem /app/certs/
 # Non-root can bind 443: Docker sets net.ipv4.ip_unprivileged_port_start=0
 # inside containers (Docker >= 20.10).

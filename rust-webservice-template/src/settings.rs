@@ -121,6 +121,8 @@ pub struct Settings {
     pub solace_host: String,
     pub solace_port: u16,
     pub solace_vpn: String,
+    /// Empty selects SASL ANONYMOUS; otherwise SASL PLAIN with
+    /// `solace_username` / `solace_password`.
     pub solace_username: String,
     pub solace_password: SecretString,
     pub solace_topic: String,
@@ -128,6 +130,11 @@ pub struct Settings {
     /// the LSM store is a per-instance cache, and an exclusive queue delivers
     /// to one consumer only.
     pub solace_queue: String,
+    /// Variant (b): SEMP v2 base URL used at startup to provision
+    /// `solace_queue` and its `solace_topic` subscription (idempotent).
+    pub solace_semp_url: String,
+    pub solace_semp_username: String,
+    pub solace_semp_password: SecretString,
 }
 
 impl Default for Settings {
@@ -173,12 +180,20 @@ impl Default for Settings {
             cors_allow_headers: vec!["*".into()],
             cors_allow_credentials: false,
             solace_host: "localhost".into(),
-            solace_port: 55555,
+            // AMQP 1.0 plain-text listener (Deviation 3). The VPN is chosen by
+            // this port, so `solace_vpn` is only used in SEMP paths.
+            solace_port: 5672,
             solace_vpn: "default".into(),
-            solace_username: "admin".into(),
-            solace_password: SecretString::from("admin"),
+            // Empty = SASL ANONYMOUS, the only AMQP mechanism an auth-`none`
+            // VPN offers; set a username to use SASL PLAIN. Divergence:
+            // Python defaults to admin/admin over SMF.
+            solace_username: String::new(),
+            solace_password: SecretString::from(""),
             solace_topic: "ingest/batches".into(),
             solace_queue: "rust-template/ingest".into(),
+            solace_semp_url: "http://localhost:8080".into(),
+            solace_semp_username: "admin".into(),
+            solace_semp_password: SecretString::from("admin"),
         }
     }
 }
@@ -267,6 +282,11 @@ impl Settings {
         }
         if HeaderName::from_bytes(self.correlation_id_header.as_bytes()).is_err() {
             problems.push("correlation_id_header must be a valid HTTP header name".into());
+        }
+        if !(self.solace_semp_url.starts_with("http://")
+            || self.solace_semp_url.starts_with("https://"))
+        {
+            problems.push("solace_semp_url must start with http:// or https://".into());
         }
         if problems.is_empty() {
             Ok(())

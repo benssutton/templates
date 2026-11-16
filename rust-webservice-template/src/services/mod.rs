@@ -5,3 +5,4 @@ pub mod config;
 pub mod data;
 pub mod health;
 pub mod metrics;
+pub mod stream_ingest;

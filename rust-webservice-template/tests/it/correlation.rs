@@ -3,7 +3,7 @@ use crate::support::{app_settings, logs, test_settings, TestApp};
 use axum::{http::HeaderName, middleware::from_fn_with_state, routing::get, Router};
 use rust_template::app::{router, App};
 use rust_template::core::correlation;
-use rust_template::health::ingest::NoopIngestHealth;
+use rust_template::ingestion::noop::NoopBatchConsumer;
 use rust_template::persistence::Stores;
 use rust_template::settings::Settings;
 use rust_template::state::AppState;
@@ -125,7 +125,7 @@ async fn probe_failure_logs_carry_the_correlation_id() {
         settings,
         stores,
         vec![probe("redis", Err("refused"), 0)],
-        Arc::new(NoopIngestHealth),
+        Arc::new(NoopBatchConsumer::new()),
     )
     .unwrap();
     let app = TestApp::serve(App {

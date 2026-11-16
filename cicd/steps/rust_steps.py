@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import sys
+
 from cicd.common import ROOT, run
 from cicd.services import Service
 from cicd.steps import images
@@ -9,6 +12,12 @@ from cicd.steps import images
 
 def _dir(s: Service):
     return ROOT / s.path
+
+
+def _test_env() -> dict[str, str]:
+    # tests/it/smf_interop.rs publishes over SMF with Python's Solace SDK;
+    # the interpreter running the pipeline has it (p315 locally, CI installs it).
+    return {**os.environ, "SMF_PYTHON": os.environ.get("SMF_PYTHON", sys.executable)}
 
 
 def fmt_check(s: Service) -> None:
@@ -24,13 +33,13 @@ def lint(s: Service) -> None:
 
 
 def test(s: Service) -> None:
-    run(["cargo", "test", "--all-targets"], _dir(s))
+    run(["cargo", "test", "--all-targets"], _dir(s), env=_test_env())
 
 
 def coverage(s: Service) -> None:
     # Requires `cargo install cargo-llvm-cov` and the llvm-tools-preview component.
     run(["cargo", "llvm-cov", "--fail-under-lines", "90", "--lcov", "--output-path", "lcov.info"],
-        _dir(s))
+        _dir(s), env=_test_env())
 
 
 def build_image(s: Service) -> None:

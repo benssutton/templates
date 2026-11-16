@@ -73,6 +73,16 @@ impl MetricsService {
         });
     }
 
+    /// One settled delivery. `outcome`: "accepted" | "failed" | "rejected".
+    pub fn record_settlement(&self, outcome: &'static str) {
+        self.with(|| counter!("ingest_deliveries_total", "outcome" => outcome).increment(1));
+    }
+
+    /// Rows written to the LSM store, by either ingest path.
+    pub fn record_ingested_rows(&self, rows: u64) {
+        self.with(|| counter!("ingest_rows_total").increment(rows));
+    }
+
     /// Python's size Summaries (no quantiles) render only `_count` and `_sum`;
     /// the `metrics` crate has no summary type, so emit two counters.
     pub fn record_sizes(&self, handler: &str, request_bytes: u64, response_bytes: u64) {

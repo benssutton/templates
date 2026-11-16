@@ -5,6 +5,7 @@ pub mod app;
 pub mod core;
 pub mod error;
 pub mod health;
+pub mod ingestion;
 pub mod mcp;
 pub mod openapi;
 pub mod persistence;

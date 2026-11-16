@@ -2,8 +2,12 @@
 //! connect), `app_settings` (wired to the shared containers in `containers`),
 //! `TestApp` (an isolated app served on an ephemeral port) and `poll_ready`.
 
+pub mod batches;
 pub mod containers;
+pub mod gated_store;
 pub mod logs;
+pub mod semp;
+pub mod solace;
 
 use rust_template::app::{create_app, App};
 use rust_template::server::{self, Tls};

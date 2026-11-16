@@ -14,6 +14,9 @@ pub enum AppError {
     /// 404; the payload names what was missing ("Key" -> "Key not found").
     #[error("{0} not found")]
     NotFound(String),
+    /// 400; the message is safe to return (Python: an undecodable IPC body).
+    #[error("{0}")]
+    BadRequest(String),
     /// 413
     #[error("Payload Too Large")]
     PayloadTooLarge,
@@ -32,6 +35,7 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, detail) = match &self {
             AppError::NotFound(_) => (StatusCode::NOT_FOUND, self.to_string()),
+            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             AppError::PayloadTooLarge => (StatusCode::PAYLOAD_TOO_LARGE, self.to_string()),
             AppError::Unprocessable(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg.clone()),
             AppError::Unavailable(msg) => {
@@ -68,6 +72,10 @@ mod tests {
         assert_eq!(
             status_and_detail(AppError::NotFound("Key".into())).await,
             (StatusCode::NOT_FOUND, "Key not found".into())
+        );
+        assert_eq!(
+            status_and_detail(AppError::BadRequest("not arrow".into())).await,
+            (StatusCode::BAD_REQUEST, "not arrow".into())
         );
         assert_eq!(
             status_and_detail(AppError::PayloadTooLarge).await,

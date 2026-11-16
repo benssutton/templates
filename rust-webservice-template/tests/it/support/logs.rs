@@ -9,12 +9,14 @@
 //! Tests find their own lines by a unique id (`lines_containing`), so other
 //! tests' output in the buffer is harmless.
 //!
-//! R3's per-test `capture()` will call `ensure_installed()` first and then
-//! `set_default` its own buffer. Nothing else in the `it` binary may install a
-//! global subscriber.
+//! `capture()` (Python's `caplog`) is the per-test alternative: it calls
+//! `ensure_installed()` first, so no callsite is ever cached as "never", then
+//! `set_default`s a subscriber writing to its own buffer for the current
+//! thread. Nothing else in the `it` binary may install a global subscriber.
 
 use std::io;
 use std::sync::{Arc, Mutex, OnceLock};
+use tracing::subscriber::DefaultGuard;
 
 #[derive(Clone, Default)]
 struct LogBuffer(Arc<Mutex<Vec<u8>>>);
@@ -66,4 +68,47 @@ pub fn lines_containing(id: &str) -> Vec<String> {
         .filter(|l| l.contains(id))
         .map(str::to_owned)
         .collect()
+}
+
+/// One test's captured output (see `capture`).
+#[derive(Clone, Default)]
+pub struct Logs(LogBuffer);
+
+impl Logs {
+    pub fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0 .0.lock().unwrap_or_else(|e| e.into_inner())).into_owned()
+    }
+
+    pub fn contains(&self, needle: &str) -> bool {
+        self.text().contains(needle)
+    }
+
+    /// The first line containing every fragment.
+    pub fn line_with(&self, fragments: &[&str]) -> Option<String> {
+        self.text()
+            .lines()
+            .find(|l| fragments.iter().all(|f| l.contains(f)))
+            .map(str::to_owned)
+    }
+}
+
+/// Capture every DEBUG+ line emitted on this thread until the guard is
+/// dropped. Lines include the span context, e.g.
+/// `request{correlation_id=...}: ...`. `set_default` is thread-local: a plain
+/// `#[tokio::test]` runs the test, the served app and every task they spawn
+/// on one current-thread runtime, so the guard sees all of them and nothing
+/// from tests on other threads. Work moved to the blocking pool
+/// (`spawn_blocking`) is not captured; it still reaches the global buffer.
+/// While the guard lives, this thread's events go only to this buffer, not
+/// to `captured_logs()`.
+pub fn capture() -> (Logs, DefaultGuard) {
+    ensure_installed();
+    let logs = Logs::default();
+    let sink = logs.0.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(move || sink.clone())
+        .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
+        .finish();
+    (logs, tracing::subscriber::set_default(subscriber))
 }

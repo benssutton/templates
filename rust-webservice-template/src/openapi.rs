@@ -1,7 +1,7 @@
 use crate::routers::{cache, config, data, health, metrics, root};
 use crate::schemas::cache::{CacheEntry, CacheSetRequest};
 use crate::schemas::config::{ConfigEntry, ConfigSetRequest};
-use crate::schemas::data::{DataRowResponse, DataRowsResponse};
+use crate::schemas::data::{DataRowResponse, DataRowsResponse, IngestAccepted};
 use crate::schemas::health::{
     AppInfo, CheckResult, DetailedStatusResponse, HostStats, IngestHealth, LivenessResponse,
     ProbeResult, ProcessStats, ReadinessResponse, RequestInfo, SystemSnapshot, UptimeInfo,
@@ -20,6 +20,8 @@ use utoipa::OpenApi;
         config::get_config,
         config::set_config,
         data::get_data,
+        data::get_cached_data,
+        data::ingest_batch,
         cache::set_cache,
         cache::get_cache,
     ),
@@ -41,6 +43,7 @@ use utoipa::OpenApi;
         ConfigEntry,
         DataRowResponse,
         DataRowsResponse,
+        IngestAccepted,
         CacheSetRequest,
         CacheEntry,
     )),
@@ -86,6 +89,18 @@ mod tests {
             "\"/data\"",
             "\"/cache/\"",
             "\"/cache/{key}\"",
+        ] {
+            assert!(json.contains(path), "missing {path}");
+        }
+    }
+
+    #[test]
+    fn document_serialises_with_every_r3_path() {
+        let json = ApiDoc::openapi().to_pretty_json().unwrap();
+        for path in [
+            "\"/data/cache\"",
+            "\"/data/ingest\"",
+            "application/vnd.apache.arrow.stream",
         ] {
             assert!(json.contains(path), "missing {path}");
         }

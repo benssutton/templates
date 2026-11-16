@@ -7,12 +7,16 @@ use crate::core::shutdown::Shutdown;
 use crate::health::ingest::IngestHealthProvider;
 use crate::health::probe::HealthProbe;
 use crate::health::registry::ProbeRegistry;
+use crate::ingestion::BatchConsumer;
+use crate::persistence::stream_store::lsm::LsmStore;
+use crate::persistence::stream_store::StreamStore;
 use crate::persistence::Stores;
 use crate::services::cache::CacheService;
 use crate::services::config::ConfigService;
 use crate::services::data::DataService;
 use crate::services::health::HealthService;
 use crate::services::metrics::MetricsService;
+use crate::services::stream_ingest::StreamIngestService;
 use crate::settings::Settings;
 use std::sync::Arc;
 
@@ -22,7 +26,8 @@ pub struct AppState {
     pub last_request: LastRequest,
     /// `create_app` registers the three store probes (`Stores::probes`).
     pub probes: ProbeRegistry,
-    /// `NoopIngestHealth` until R3.
+    /// The ingest service, seen through the health seam (`HealthService`
+    /// and `/metrics` read it).
     pub ingest_health: Arc<dyn IngestHealthProvider>,
     pub health: Arc<HealthService>,
     /// `None` when `metrics_enabled = false`.
@@ -33,33 +38,47 @@ pub struct AppState {
     pub config: Arc<ConfigService>,
     pub data: Arc<DataService>,
     pub cache: Arc<CacheService>,
+    /// LSM + consumer task; `App::close` closes it before the stores.
+    pub ingest: Arc<StreamIngestService>,
 }
 
 impl AppState {
     /// Validates `settings` first, so an `AppState` always holds valid config.
     /// `probes` is separate from `stores` so tests can register their own
-    /// probes (`create_app` passes `stores.probes()`).
+    /// probes (`create_app` passes `stores.probes()`). Starts the ingest task
+    /// (needs a tokio runtime) on a fresh `LsmStore`, reading from `consumer`;
+    /// every fallible step runs before that, so an `Err` leaves no task behind.
     pub fn new(
         settings: Settings,
         stores: Stores,
         probes: Vec<Arc<dyn HealthProbe>>,
-        ingest_health: Arc<dyn IngestHealthProvider>,
+        consumer: Arc<dyn BatchConsumer>,
     ) -> anyhow::Result<Self> {
         settings.validate()?;
         let settings = Arc::new(settings);
         let last_request = LastRequest::new();
         let probes = ProbeRegistry::new(probes);
+        let metrics = if settings.metrics_enabled {
+            Some(Arc::new(MetricsService::new(&settings)?))
+        } else {
+            None
+        };
+        let shutdown = Shutdown::new();
+        let store: Arc<dyn StreamStore> = Arc::new(LsmStore::from_settings(&settings));
+        let ingest = StreamIngestService::start(
+            settings.clone(),
+            consumer,
+            store,
+            shutdown.clone(),
+            metrics.clone(),
+        );
+        let ingest_health: Arc<dyn IngestHealthProvider> = ingest.clone();
         let health = Arc::new(HealthService::new(
             settings.clone(),
             last_request.clone(),
             probes.clone(),
             ingest_health.clone(),
         ));
-        let metrics = if settings.metrics_enabled {
-            Some(Arc::new(MetricsService::new(&settings)?))
-        } else {
-            None
-        };
         let config = Arc::new(ConfigService::new(stores.postgres.pool().clone()));
         let data = Arc::new(DataService::new(stores.clickhouse.client().clone()));
         let cache = Arc::new(CacheService::new(stores.redis.connection()));
@@ -70,11 +89,12 @@ impl AppState {
             ingest_health,
             health,
             metrics,
-            shutdown: Shutdown::new(),
+            shutdown,
             stores,
             config,
             data,
             cache,
+            ingest,
         })
     }
 }

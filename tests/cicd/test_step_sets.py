@@ -28,3 +28,22 @@ def test_rust_ci_builds_scans_and_smokes():
     rust = services.get("rust")
     assert rust.compose_network == "rust-template_default"
     assert rust.ready is False  # promoted in R4
+
+
+@pytest.mark.parametrize("step", ["test", "coverage"])
+def test_rust_test_steps_pass_smf_python(monkeypatch, step):
+    # tests/it/smf_interop.rs needs SMF_PYTHON; default is the pipeline's interpreter.
+    import sys
+
+    from cicd import services
+
+    calls = []
+    monkeypatch.setattr(rust_steps, "run", lambda cmd, cwd, env=None: calls.append(env))
+    monkeypatch.delenv("SMF_PYTHON", raising=False)
+    rust_steps.STEPS[step](services.get("rust"))
+    assert calls[0]["SMF_PYTHON"] == sys.executable
+    assert "PATH" in calls[0]  # the rest of the environment is kept
+
+    monkeypatch.setenv("SMF_PYTHON", "/opt/other/python")
+    rust_steps.STEPS[step](services.get("rust"))
+    assert calls[1]["SMF_PYTHON"] == "/opt/other/python"

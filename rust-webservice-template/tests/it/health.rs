@@ -1,7 +1,7 @@
 use crate::probes::probe;
 use crate::support::{app_settings, TestApp};
 use rust_template::app::{router, App};
-use rust_template::health::ingest::NoopIngestHealth;
+use rust_template::ingestion::noop::NoopBatchConsumer;
 use rust_template::persistence::Stores;
 use rust_template::state::AppState;
 use std::sync::Arc;
@@ -76,7 +76,7 @@ async fn readiness_is_503_when_a_probe_fails_and_never_leaks_detail() {
             probe("postgres", Ok(()), 0),
             probe("redis", Err("redis://:hunter2@localhost:6379 refused"), 0),
         ],
-        Arc::new(NoopIngestHealth),
+        Arc::new(NoopBatchConsumer::new()),
     )
     .unwrap();
     let app = TestApp::serve(App {

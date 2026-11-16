@@ -1,9 +1,10 @@
 name: rust-template
 
-# R2: the app and its three stores. The store ports are not published (the
-# app reaches them on the compose network), so this stack can run next to the
-# Python and Java stacks. R3 adds solace (+ solace-init if the AMQP spike
-# requires SEMP provisioning) and a demo publisher.
+# The app, its three stores, and the Solace broker (default transport) with a
+# demo publisher. Store and broker ports are not published (the app reaches
+# them on the compose network), so this stack can run next to the Python and
+# Java stacks. HTTP-only ingest without a broker:
+#   INGEST_TRANSPORT=noop docker compose up app db clickhouse redis
 services:
   db:
     image: pgvector/pgvector:0.8.4-pg18
@@ -43,6 +44,73 @@ services:
       timeout: 5s
       retries: 10
 
+  # Default-dev credentials only: change for anything beyond a local stack.
+  solace:
+    image: solace/solace-pubsub-standard:10.26.10
+    environment:
+      username_admin_globalaccesslevel: admin
+      username_admin_password: admin
+      # Minimum scaling tier (~1 GiB) so the broker fits a dev-sized Docker VM.
+      system_scaling_maxconnectioncount: "100"
+    # Solace POST hard requirement: nofile hard limit >= 1048576.
+    shm_size: "1g"
+    ulimits:
+      core: -1
+      nofile:
+        soft: 1048576
+        hard: 1048576
+    # The guaranteed-messaging health check returns 200 once the broker is active.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5550/health-check/guaranteed-active || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+
+  # Variant (b): idempotent SEMP setup, so the queue exists (and spools the
+  # demo publisher's batches) before the app binds it. The broker image has
+  # curl and sh, so no extra image is pulled.
+  solace-init:
+    image: solace/solace-pubsub-standard:10.26.10
+    entrypoint: ["/bin/sh", "/solace-init.sh"]
+    volumes:
+      - ./scripts/solace-init.sh:/solace-init.sh:ro
+    environment:
+      SEMP_URL: http://solace:8080
+      SEMP_USERNAME: admin
+      SEMP_PASSWORD: admin
+      SOLACE_VPN: default
+      SOLACE_QUEUE: rust-template/ingest
+      SOLACE_TOPIC: ingest/batches
+      # AMQP plain text is enabled on the default VPN out of the box (spike Q1).
+      ENABLE_AMQP: "false"
+      PROVISION_QUEUE: "true"
+    depends_on:
+      solace:
+        condition: service_healthy
+    restart: "no"
+
+  solace-publisher:
+    build: .
+    command: ["/app/demo-publisher"]
+    init: true
+    # As in Python's stack: a publish error ends the process, so restart it.
+    restart: on-failure
+    environment:
+      RUST_LOG: info
+      SOLACE_HOST: solace
+      SOLACE_PORT: "5672"
+      # SASL rule: empty = ANONYMOUS (the only AMQP mechanism on this VPN).
+      SOLACE_USERNAME: ""
+      SOLACE_PASSWORD: ""
+      SOLACE_TOPIC: ingest/batches
+      PUBLISH_INTERVAL: "0.1"
+    depends_on:
+      solace:
+        condition: service_healthy
+      solace-init:
+        condition: service_completed_successfully
+
   app:
     build: .
     ports:
@@ -50,8 +118,7 @@ services:
       - "443:443"
     environment:
       STATUS: running
-      # R3 switches the default to solace once the broker is in compose.
-      INGEST_TRANSPORT: noop
+      INGEST_TRANSPORT: ${INGEST_TRANSPORT:-solace}
       RUST_LOG: info
       POSTGRES_URL: postgresql://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-appdb}
       CLICKHOUSE_HOST: clickhouse
@@ -59,6 +126,19 @@ services:
       CLICKHOUSE_USER: default
       CLICKHOUSE_PASSWORD: clickhouse
       REDIS_URL: redis://redis:6379/0
+      SOLACE_HOST: solace
+      SOLACE_PORT: "5672"
+      SOLACE_VPN: default
+      # SASL rule: empty = ANONYMOUS (the only AMQP mechanism on this VPN).
+      SOLACE_USERNAME: ""
+      SOLACE_PASSWORD: ""
+      SOLACE_TOPIC: ingest/batches
+      # One queue per replica: the LSM store is a per-instance cache.
+      SOLACE_QUEUE: rust-template/ingest
+      # Variant (b): startup provisioning through SEMP.
+      SOLACE_SEMP_URL: http://solace:8080
+      SOLACE_SEMP_USERNAME: admin
+      SOLACE_SEMP_PASSWORD: admin
     depends_on:
       db:
         condition: service_healthy
@@ -66,6 +146,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      solace:
+        condition: service_healthy
+      solace-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "curl -fsk https://localhost/health/live || exit 1"]
       interval: 5s

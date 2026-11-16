@@ -1,0 +1,10 @@
+# Profiling override. Use alongside the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.profiling.yml up -d --build
+#
+# INGEST_TRANSPORT=noop: no stream source at all, so HTTP ingest is the sole
+# LSM writer during the ingest profile (single-writer contract). R4 adds
+# SYS_PTRACE for cargo flamegraph / perf (Layer 2).
+services:
+  app:
+    environment:
+      INGEST_TRANSPORT: noop

@@ -46,12 +46,19 @@ fn defaults_match_python_except_service_identity() {
     assert_eq!(s.correlation_id_header, "X-Request-ID");
     assert_eq!(s.cors_allow_origins, vec!["*".to_string()]);
     assert!(!s.cors_allow_credentials);
-    assert_eq!(
-        (s.solace_host.as_str(), s.solace_port),
-        ("localhost", 55555)
-    );
+    // Deviation 3: AMQP 1.0 plain text, not SMF (55555).
+    assert_eq!((s.solace_host.as_str(), s.solace_port), ("localhost", 5672));
+    // SASL rule (Task 0): an empty username selects SASL ANONYMOUS, the only
+    // mechanism an auth-`none` VPN offers over AMQP. Python defaults to
+    // admin/admin, which SMF accepts on such a VPN but AMQP does not.
+    assert_eq!(s.solace_username, "");
+    assert_eq!(s.solace_password.expose_secret(), "");
     assert_eq!(s.solace_topic, "ingest/batches");
     assert_eq!(s.solace_queue, "rust-template/ingest");
+    // Variant (b): SEMP provisioning at startup (not in Python).
+    assert_eq!(s.solace_semp_url, "http://localhost:8080");
+    assert_eq!(s.solace_semp_username, "admin");
+    assert_eq!(s.solace_semp_password.expose_secret(), "admin");
     assert!(s.validate().is_ok());
 }
 
@@ -133,6 +140,7 @@ fn numeric_bounds_are_enforced() {
             "bad header",
             "correlation_id_header",
         ),
+        ("SOLACE_SEMP_URL", "solace:8080", "solace_semp_url"),
     ] {
         let err = Settings::from_vars(vars(&[(key, value)])).unwrap_err();
         assert!(err.to_string().contains(needle), "{key}={value}: {err}");
@@ -155,6 +163,7 @@ fn secrets_are_redacted_in_debug_output() {
         clickhouse_password: SecretString::from("ch-sentinel-42"),
         redis_url: SecretString::from("redis://:redis-sentinel-42@r:6379/0"),
         solace_password: SecretString::from("solace-sentinel-42"),
+        solace_semp_password: SecretString::from("semp-sentinel-42"),
         ..Settings::default()
     };
     let debug = format!("{s:?}");
@@ -163,6 +172,7 @@ fn secrets_are_redacted_in_debug_output() {
         "ch-sentinel-42",
         "redis-sentinel-42",
         "solace-sentinel-42",
+        "semp-sentinel-42",
     ] {
         assert!(
             !debug.contains(sentinel),
@@ -172,17 +182,19 @@ fn secrets_are_redacted_in_debug_output() {
     assert!(debug.contains("REDACTED"));
 }
 
-const SECRET_VARS: [(&str, &str); 4] = [
+const SECRET_VARS: [(&str, &str); 5] = [
     ("POSTGRES_URL", "postgresql://u:pg-sentinel-42@db/x"),
     ("CLICKHOUSE_PASSWORD", "ch-sentinel-42"),
     ("REDIS_URL", "redis://:redis-sentinel-42@r:6379/0"),
     ("SOLACE_PASSWORD", "solace-sentinel-42"),
+    ("SOLACE_SEMP_PASSWORD", "semp-sentinel-42"),
 ];
-const SENTINELS: [&str; 4] = [
+const SENTINELS: [&str; 5] = [
     "pg-sentinel-42",
     "ch-sentinel-42",
     "redis-sentinel-42",
     "solace-sentinel-42",
+    "semp-sentinel-42",
 ];
 
 fn assert_no_sentinel(err: &impl std::fmt::Debug, display: &str) {
@@ -214,6 +226,7 @@ fn secrets_stay_out_of_errors() {
         clickhouse_password: SecretString::from(SECRET_VARS[1].1),
         redis_url: SecretString::from(SECRET_VARS[2].1),
         solace_password: SecretString::from(SECRET_VARS[3].1),
+        solace_semp_password: SecretString::from(SECRET_VARS[4].1),
         connect_max_attempts: 0,
         ..Settings::default()
     };

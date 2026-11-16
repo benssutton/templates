@@ -4,6 +4,7 @@
 
 pub mod analytics_store;
 pub mod cache_store;
+pub mod stream_store;
 pub mod transaction_store;
 
 use crate::health::probe::HealthProbe;

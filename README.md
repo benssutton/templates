@@ -102,6 +102,6 @@ The per-service `.gitlab-ci.yml` files were retired; their jobs map as follows.
 
 **Local SonarQube** shares its Docker Compose project name (`sonar`) and volumes with turbo-parakeet's `sonar/compose.yml`: one local SonarQube serves both repos. See sonar/README.md for token setup.
 
-**Rust** is `ready=False` (wip): it runs but never blocks. Parity work is in progress (R1 foundations and R2 stores done; streaming and promotion follow).
+**Rust** is `ready=False` (wip): it runs but never blocks. Parity work is in progress (R1 foundations, R2 stores and R3 streaming done; promotion follows).
 
 **Not verifiable until the first GitHub run:** CodeQL for Rust, `upload-sarif` (needs code scanning enabled on the repo), and the Docker steps on ubuntu runners. Manual step: require `Pipeline Status` in branch protection.

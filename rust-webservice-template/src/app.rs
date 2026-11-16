@@ -3,7 +3,7 @@
 //! run in one test process.
 
 use crate::core::{boundary_timing, correlation, cors, last_request, request_limits};
-use crate::health::ingest::NoopIngestHealth;
+use crate::ingestion;
 use crate::mcp;
 use crate::openapi::ApiDoc;
 use crate::persistence::Stores;
@@ -17,7 +17,6 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use std::sync::Arc;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -27,28 +26,39 @@ pub struct App {
 }
 
 impl App {
-    /// Final step of the ordered shutdown, called by `server::serve` after
-    /// in-flight HTTP has drained: close the store pools. R3 closes the
-    /// consumer when `Shutdown` fires, before the drain completes.
+    /// Final step of the ordered shutdown (spec §2: close the consumer ->
+    /// drain in-flight HTTP -> close the pools). The consumer's loop was
+    /// already stopped when `Shutdown` fired (the ingest stop token is its
+    /// child); `server::serve` has drained HTTP, so close the consumer and
+    /// join the ingest task, then close the stores.
     pub async fn close(&self) {
         self.state.shutdown.trigger("app closed");
+        self.state.ingest.close().await;
         self.state.stores.close().await;
     }
 }
 
-/// Build the app. Fails (and `main` exits non-zero) on invalid settings,
-/// or when a store cannot be reached and smoke-tested within the retry
+/// Build the app. Fails (and `main` exits non-zero) on invalid settings, or
+/// when a store or the ingest transport cannot be reached within the retry
 /// budget (`connect_max_attempts`).
 pub async fn create_app(settings: Settings) -> anyhow::Result<App> {
-    // Invalid config fails before any retry budget is spent on the stores.
+    // Invalid config fails before any retry budget is spent.
     settings.validate()?;
     let stores = Stores::connect(&settings).await?;
+    // From here on, a failure must close what is already connected (the
+    // Postgres pool and the broker link would otherwise leak).
+    let consumer = match ingestion::connect(&settings).await {
+        Ok(consumer) => consumer,
+        Err(err) => {
+            stores.close().await;
+            return Err(err);
+        }
+    };
     let probes = stores.probes();
-    // Until `AppState` owns the stores, a failure here must close them
-    // (the Postgres pool would otherwise leak).
-    let state = match AppState::new(settings, stores.clone(), probes, Arc::new(NoopIngestHealth)) {
+    let state = match AppState::new(settings, stores.clone(), probes, consumer.clone()) {
         Ok(state) => state,
         Err(err) => {
+            consumer.close().await;
             stores.close().await;
             return Err(err);
         }
@@ -99,6 +109,8 @@ pub fn router(state: AppState) -> Router {
         .route("/config", get(config::get_config).post(config::set_config))
         .route("/config/", get(config::get_config).post(config::set_config))
         .route("/data", get(data::get_data))
+        .route("/data/cache", get(data::get_cached_data))
+        .route("/data/ingest", post(data::ingest_batch))
         .route("/cache", post(cache::set_cache))
         .route("/cache/", post(cache::set_cache))
         .route("/cache/{key}", get(cache::get_cache))
