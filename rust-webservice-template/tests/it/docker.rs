@@ -1,4 +1,4 @@
-//! Spec §8 risk "Testcontainers on Windows / Docker Desktop" (moved from R1):
+//! Testcontainers on Windows / Docker Desktop:
 //! containers start, their mapped ports accept connections, the shared ones
 //! are shared, work across test runtimes, and dedicated ones are removed.
 

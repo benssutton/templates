@@ -71,7 +71,7 @@ async fn metrics_disabled_means_no_endpoint() {
     assert_eq!(app.get("/metrics").await.status(), 404);
 }
 
-/// R2 routes are labelled with their templates too: `/config` (not
+/// Store routes are labelled with their templates too: `/config` (not
 /// `/config/`, which is its own route) and `/cache/{key}` (never the key).
 #[tokio::test]
 async fn r2_routes_are_labelled_with_their_templates() {

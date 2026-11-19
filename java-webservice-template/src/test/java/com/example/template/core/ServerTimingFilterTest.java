@@ -1,5 +1,7 @@
 package com.example.template.core;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.example.template.support.IntegrationSupport;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpResponse;
@@ -12,8 +14,6 @@ import io.micronaut.scheduling.annotation.ExecuteOn;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
-
-import static org.assertj.core.api.Assertions.assertThat;
 
 @MicronautTest
 class ServerTimingFilterTest extends IntegrationSupport {
@@ -36,7 +36,8 @@ class ServerTimingFilterTest extends IntegrationSupport {
 
     @Test
     void emitsServerTimingHeaderWithBoundaryAndTotal() {
-        HttpResponse<String> resp = client.toBlocking().exchange(HttpRequest.GET("/__sttest"), String.class);
+        HttpResponse<String> resp =
+                client.toBlocking().exchange(HttpRequest.GET("/__sttest"), String.class);
         String st = resp.getHeaders().get("Server-Timing");
         assertThat(st).contains("db_query;dur=").contains("total;dur=");
     }

@@ -9,7 +9,7 @@ async fn swagger_ui_is_served() {
 }
 
 #[tokio::test]
-async fn openapi_lists_the_r1_paths() {
+async fn openapi_lists_the_service_paths() {
     let app = TestApp::spawn(app_settings().await).await;
     let (status, doc) = app.get_json("/api-doc/openapi.json").await;
     assert_eq!(status, 200);
@@ -19,13 +19,12 @@ async fn openapi_lists_the_r1_paths() {
         "/health/ready",
         "/health/status",
         "/metrics",
+        "/mcp",
+        "/data/cache",
+        "/data/ingest",
     ] {
         assert!(doc["paths"].get(path).is_some(), "missing {path}");
     }
-    assert!(
-        doc["paths"].get("/data/shape").is_none(),
-        "/data/shape must be removed"
-    );
     assert!(doc["components"]["schemas"]
         .get("DetailedStatusResponse")
         .is_some());
@@ -51,16 +50,19 @@ async fn openapi_passes_through_the_middleware_stack() {
 }
 
 #[tokio::test]
-async fn openapi_lists_the_r2_paths() {
+async fn openapi_lists_methods_parameters_and_schemas() {
     let app = TestApp::spawn(app_settings().await).await;
     let (status, doc) = app.get_json("/api-doc/openapi.json").await;
     assert_eq!(status, 200);
     for (path, method) in [
-        ("/config/", "get"),
-        ("/config/", "post"),
+        ("/config", "get"),
+        ("/config", "post"),
         ("/data", "get"),
-        ("/cache/", "post"),
+        ("/cache", "post"),
         ("/cache/{key}", "get"),
+        ("/mcp", "post"),
+        ("/mcp", "get"),
+        ("/mcp", "delete"),
     ] {
         assert!(
             doc["paths"][path].get(method).is_some(),
@@ -77,10 +79,34 @@ async fn openapi_lists_the_r2_paths() {
         "DataRowResponse",
         "CacheSetRequest",
         "CacheEntry",
+        "ErrorResponse",
     ] {
         assert!(
             doc["components"]["schemas"].get(schema).is_some(),
             "missing schema {schema}"
         );
     }
+}
+
+/// Error responses are documented with the shared error body, and the
+/// title and version come from settings.
+#[tokio::test]
+async fn openapi_documents_errors_and_takes_identity_from_settings() {
+    let app = TestApp::spawn(rust_template::settings::Settings {
+        app_title: "Docs IT".into(),
+        app_version: "3.2.1".into(),
+        ..app_settings().await
+    })
+    .await;
+    let (_, doc) = app.get_json("/api-doc/openapi.json").await;
+    assert_eq!(doc["info"]["title"], "Docs IT");
+    assert_eq!(doc["info"]["version"], "3.2.1");
+    let unavailable = &doc["paths"]["/data"]["get"]["responses"]["503"];
+    let schema = unavailable["content"]["application/json"]["schema"]["$ref"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(schema.ends_with("/ErrorResponse"), "{unavailable}");
+    assert!(doc["paths"]["/data/ingest"]["post"]["responses"]
+        .get("413")
+        .is_some());
 }

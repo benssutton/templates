@@ -2,7 +2,7 @@ import asyncpg
 
 
 async def test_pgvector_extension_is_installed(test_client, postgres_container):
-    """The lifespan runs postgres-init.sql on startup; after that the `vector`
+    """The lifespan applies migrations/postgres on startup; after that the `vector`
     extension must exist. Guards against a revert to a non-pgvector image
     (CREATE EXTENSION would fail there and abort startup)."""
     pg = postgres_container

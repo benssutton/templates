@@ -1,4 +1,4 @@
-//! Streaming ingest transports (Python `ingestion/`). A `BatchConsumer`
+//! Streaming ingest transports. A `BatchConsumer`
 //! yields one `Delivery` per broker message; `StreamIngestService` settles
 //! each delivery exactly once, AFTER the LSM write:
 //!
@@ -14,6 +14,7 @@
 
 pub mod ipc;
 pub mod noop;
+#[cfg(feature = "solace")]
 pub mod solace;
 
 use crate::settings::{IngestTransport, Settings};
@@ -21,8 +22,7 @@ use arrow::array::RecordBatch;
 use serde::Serialize;
 use std::sync::Arc;
 
-/// Python's `ConnectionState` (lowercase string values).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ConnectionState {
     Connected,
@@ -31,6 +31,8 @@ pub enum ConnectionState {
 }
 
 impl ConnectionState {
+    pub const ALL: [Self; 3] = [Self::Connected, Self::Reconnecting, Self::Down];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Connected => "connected",
@@ -40,8 +42,30 @@ impl ConnectionState {
     }
 }
 
-/// Broker settlement for one delivery. Each method consumes the box, so a
-/// delivery is settled at most once (Deviation 2). An error is logged by the
+/// How a delivery is settled with the broker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Settlement {
+    /// Removed from the queue.
+    Accept,
+    /// Redelivered (the broker counts the failure).
+    Fail,
+    /// Removed and never redelivered (to the DMQ if one is configured).
+    Reject,
+}
+
+impl Settlement {
+    /// `ingest_deliveries_total{outcome=...}` label.
+    pub fn metric_label(self) -> &'static str {
+        match self {
+            Self::Accept => "accepted",
+            Self::Fail => "failed",
+            Self::Reject => "rejected",
+        }
+    }
+}
+
+/// Broker settlement for one delivery. Each method consumes the box, so the
+/// compiler guarantees a delivery is settled at most once. An error is logged by the
 /// caller and never followed by a second settlement: the broker still holds
 /// the unsettled message and redelivers it.
 ///
@@ -64,8 +88,8 @@ pub struct Delivery {
     pub settle: Box<dyn Settle>,
 }
 
-/// A streaming transport. Every method takes `&self` (Deviation 1): the
-/// ingest task awaits `next_delivery` while `close` (from `App::close`) and
+/// A streaming transport. Every method takes `&self`, so one
+/// `Arc<dyn BatchConsumer>` is shared: the ingest task awaits `next_delivery` while `close` (from `App::close`) and
 /// `connection_state` (from the health path) run concurrently.
 #[async_trait::async_trait]
 pub trait BatchConsumer: Send + Sync {
@@ -84,20 +108,25 @@ pub trait BatchConsumer: Send + Sync {
 
     /// Count of successful queue binds so far (0 = never bound). A rise
     /// proves the transport works, so the ingest loop resets its
-    /// consecutive-failure count and transport backoff, as Python's
-    /// `on_bound` callback and Java's bind epoch do: without it, healed
+    /// consecutive-failure count and transport backoff, as the sibling
+    /// services' bind callbacks do: without it, healed
     /// interruptions on a quiet queue would add up to a shutdown over time.
     /// Cheap, no I/O.
     fn bound_epoch(&self) -> u64;
 }
 
-/// Python main.py `_CONSUMERS[settings.ingest_transport]`, entered with the
-/// same startup retry budget as the stores (`connect_with_backoff`).
+/// The consumer for `ingest_transport`, connected with the same startup
+/// retry budget as the stores (`connect_with_backoff`).
 pub async fn connect(settings: &Settings) -> anyhow::Result<Arc<dyn BatchConsumer>> {
     match settings.ingest_transport {
         IngestTransport::Noop => Ok(Arc::new(noop::NoopBatchConsumer::new())),
+        #[cfg(feature = "solace")]
         IngestTransport::Solace => Ok(Arc::new(
             solace::SolaceBatchConsumer::connect(settings).await?,
         )),
+        #[cfg(not(feature = "solace"))]
+        IngestTransport::Solace => {
+            anyhow::bail!("INGEST_TRANSPORT=solace needs a build with the `solace` Cargo feature")
+        }
     }
 }

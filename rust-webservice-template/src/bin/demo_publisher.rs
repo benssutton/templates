@@ -1,9 +1,8 @@
-//! Continuous demo publisher for compose (Python
-//! tests/performance/publishers/solace_publisher.py). Settings come from the
+//! Continuous demo publisher for compose. Settings come from the
 //! same env vars as the app (SOLACE_HOST, SOLACE_PORT, SOLACE_USERNAME,
 //! SOLACE_PASSWORD, SOLACE_TOPIC); PUBLISH_INTERVAL is seconds between
-//! publishes (default 0.1). Thin by design (Deviation 10): the publishing
-//! code is `AmqpPublisher`, which the tests cover.
+//! publishes (default 0.1). Thin by design: the publishing code is
+//! `AmqpPublisher`, which the tests cover.
 
 use arrow::array::{ArrayRef, Int64Array, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};

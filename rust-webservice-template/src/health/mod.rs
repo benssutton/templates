@@ -1,5 +1,5 @@
-//! Health seams: dependency probes (R2 stores implement `HealthProbe`) and
-//! ingest health (R3's StreamIngestService implements `IngestHealthProvider`).
+//! Health seams: dependency probes (each store implements `HealthProbe`)
+//! and ingest health (`StreamIngestService` implements `IngestHealthProvider`).
 
 pub mod ingest;
 pub mod probe;

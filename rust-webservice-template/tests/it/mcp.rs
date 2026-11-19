@@ -81,8 +81,8 @@ async fn post(
     )
 }
 
-/// A successful JSON-RPC exchange on `path` (`/mcp` or Python's canonical
-/// `/mcp/`), addressed to `localhost`.
+/// A successful JSON-RPC exchange on `path`,
+/// addressed to `localhost`.
 async fn rpc_at(
     app: &TestApp,
     path: &str,
@@ -114,8 +114,19 @@ async fn initialize(app: &TestApp) -> String {
     initialize_at(app, "/mcp").await.0
 }
 
+async fn call_tool(app: &TestApp, session: &str, name: &str, arguments: Value) -> Value {
+    let (_, call) = rpc(
+        app,
+        Some(session),
+        &json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                "params": {"name": name, "arguments": arguments}}),
+    )
+    .await;
+    call
+}
+
 #[tokio::test]
-async fn tool_list_is_exactly_get_health_status() {
+async fn the_tools_mirror_the_rest_read_endpoints() {
     let app = TestApp::spawn(app_settings().await).await;
     let session = initialize(&app).await;
     let (_, list) = rpc(
@@ -124,32 +135,97 @@ async fn tool_list_is_exactly_get_health_status() {
         &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
     )
     .await;
-    let names: Vec<&str> = list["result"]["tools"]
+    let mut names: Vec<&str> = list["result"]["tools"]
         .as_array()
         .expect("tools array")
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["get_health_status"]);
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        [
+            "get_cache",
+            "get_cached_data",
+            "get_config",
+            "get_data",
+            "get_health_status"
+        ]
+    );
+}
+
+/// The tool returns the same structured status as `GET /health/status`.
+#[tokio::test]
+async fn get_health_status_returns_the_detailed_status() {
+    let app = TestApp::spawn(app_settings().await).await;
+    let session = initialize(&app).await;
+    let call = call_tool(&app, &session, "get_health_status", json!({})).await;
+    assert!(call.get("error").is_none(), "{call}");
+    let status = &call["result"]["structuredContent"];
+    assert_eq!(status["app"]["status"], "testing", "{call}");
+    let deps: Vec<&str> = status["dependencies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(deps, ["postgres", "clickhouse", "redis"]);
+    assert_eq!(status["ingest"]["transport"], "noop");
 }
 
 #[tokio::test]
-async fn get_health_status_mirrors_the_rest_status_field() {
+async fn the_data_config_and_cache_tools_call_the_same_services() {
     let app = TestApp::spawn(app_settings().await).await;
+    let key = format!("mcp-{}", uuid::Uuid::new_v4().simple());
+    let (status, _) = app
+        .post_json("/cache", &json!({"key": key, "value": {"n": 1}}))
+        .await;
+    assert_eq!(status, 201);
     let session = initialize(&app).await;
-    let (_, call) = rpc(
+
+    let data = call_tool(&app, &session, "get_data", json!({"limit": 2})).await;
+    let page = &data["result"]["structuredContent"];
+    assert_eq!(page["total"], 3, "{data}");
+    assert_eq!(page["limit"], 2, "{data}");
+    let ids: Vec<u64> = page["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_u64().unwrap())
+        .collect();
+    let mut sorted = ids.clone();
+    sorted.sort_unstable();
+    assert_eq!(ids, sorted, "ordered by id: {data}");
+
+    let cached = call_tool(&app, &session, "get_cached_data", json!({})).await;
+    assert_eq!(
+        cached["result"]["structuredContent"]["limit"], 10,
+        "{cached}"
+    );
+
+    let config = call_tool(&app, &session, "get_config", json!({})).await;
+    assert!(
+        config["result"]["structuredContent"]["entries"].is_array(),
+        "{config}"
+    );
+
+    let entry = call_tool(&app, &session, "get_cache", json!({"key": key})).await;
+    assert_eq!(
+        entry["result"]["structuredContent"]["value"],
+        json!({"n": 1}),
+        "{entry}"
+    );
+
+    let missing = call_tool(
         &app,
-        Some(&session),
-        &json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-                "params": {"name": "get_health_status", "arguments": {}}}),
+        &session,
+        "get_cache",
+        json!({"key": "no-such-key-mcp"}),
     )
     .await;
-    assert!(call.get("error").is_none(), "{call}");
-    assert_ne!(call["result"]["isError"], json!(true), "{call}");
-    let content = call["result"]["content"].as_array().expect("content");
-    assert_eq!(content.len(), 1);
-    assert_eq!(content[0]["type"], "text");
-    assert_eq!(content[0]["text"], "testing"); // HealthService::status().status
+    assert!(missing.get("error").is_some(), "{missing}");
+    let bad_limit = call_tool(&app, &session, "get_data", json!({"limit": 0})).await;
+    assert!(bad_limit.get("error").is_some(), "{bad_limit}");
 }
 
 #[tokio::test]
@@ -175,8 +251,8 @@ async fn server_info_comes_from_the_mcp_settings() {
     );
 }
 
-/// DNS-rebinding protection: a Host outside the allow-list gets rmcp's 403 on
-/// both mounts, before any session exists.
+/// DNS-rebinding protection: a Host outside the allow-list is 403, with the
+/// contract's JSON body, before any session exists.
 #[tokio::test]
 async fn a_host_outside_the_default_allow_list_is_forbidden() {
     let app = TestApp::spawn(app_settings().await).await;
@@ -185,10 +261,50 @@ async fn a_host_outside_the_default_allow_list_is_forbidden() {
         ("/mcp/", host_header(&app, "evil.example")),
         ("/mcp", "evil.example".to_owned()),
     ] {
-        let (status, session, text, _) = post(&app, path, &host, None, &initialize_body()).await;
+        let (status, session, text, content_type) =
+            post(&app, path, &host, None, &initialize_body()).await;
         assert_eq!(status, 403, "{path} Host: {host}: {text}");
-        assert!(text.contains("Host header is not allowed"), "{text}");
+        assert_eq!(content_type, "application/json");
+        let body: Value = serde_json::from_str(&text).unwrap();
+        assert!(
+            body["detail"]
+                .as_str()
+                .unwrap()
+                .contains("Host header is not allowed"),
+            "{text}"
+        );
         assert!(session.is_none(), "no session for a forbidden host");
+    }
+}
+
+/// A browser on another site is refused even when the Host is allowed; an
+/// Origin on an allowed host (any port) is accepted.
+#[tokio::test]
+async fn an_origin_outside_the_allow_list_is_forbidden() {
+    let app = TestApp::spawn(app_settings().await).await;
+    for (origin, expected) in [
+        ("https://evil.example", 403),
+        ("http://localhost:3000", 200),
+        ("https://localhost", 200),
+    ] {
+        let r = app
+            .client()
+            .post(app.url("/mcp"))
+            .header("host", localhost(&app))
+            .header("origin", origin)
+            .header("accept", ACCEPT)
+            .json(&initialize_body())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), expected, "{origin}");
+        if expected == 403 {
+            let body: Value = r.json().await.unwrap();
+            assert!(
+                body["detail"].as_str().unwrap().contains("Origin"),
+                "{body}"
+            );
+        }
     }
 }
 
@@ -204,8 +320,8 @@ async fn the_default_allow_list_admits_localhost_on_any_port() {
     }
 }
 
-/// Compose's list (`localhost,127.0.0.1,app`): k6 and other containers reach
-/// the app as `https://app`, so `Host: app` must be admitted.
+/// Compose's list (`localhost,127.0.0.1,app`): other containers reach the
+/// app as `https://app:8443`, so `Host: app` must be admitted.
 #[tokio::test]
 async fn a_widened_allow_list_admits_the_listed_hosts() {
     let settings = Settings {
@@ -245,15 +361,15 @@ async fn the_allow_list_guards_only_mcp() {
     assert_eq!(body["status"], "alive");
 }
 
-/// MCP's streamable HTTP owns GET/POST/DELETE on /mcp: the app's JSON 404/405
-/// fallbacks must not intercept them, and /mcp must still pass through the
-/// middleware stack (correlation ID; metrics labelled with the mount path).
+/// MCP's streamable HTTP owns GET/POST/DELETE on /mcp, and /mcp still
+/// passes through the middleware stack (request id, JSON error bodies,
+/// metrics labelled with the route).
 #[tokio::test]
 async fn mcp_methods_reach_rmcp_through_the_middleware_stack() {
     let app = TestApp::spawn(app_settings().await).await;
     let session = initialize(&app).await;
 
-    // GET without a session: rmcp's own 400, not the JSON 404/405 fallback.
+    // GET without a session: rmcp's own 400, as a JSON error body.
     let r = app
         .client()
         .get(app.url("/mcp"))
@@ -265,6 +381,7 @@ async fn mcp_methods_reach_rmcp_through_the_middleware_stack() {
         .unwrap();
     assert_eq!(r.status(), 400);
     assert_eq!(r.headers()["x-request-id"], "mcp-trace");
+    assert!(r.json::<Value>().await.unwrap()["detail"].is_string());
 
     // DELETE with the session: rmcp closes it.
     let r = app
@@ -288,34 +405,11 @@ async fn mcp_methods_reach_rmcp_through_the_middleware_stack() {
     assert!(!text.contains(r#"handler="none""#), "{text}");
 }
 
-/// Python's canonical endpoint is `/mcp/` (FastMCP `streamable_http_path="/"`
-/// mounted at `/mcp`); Rust serves both, sharing one session manager.
+/// `/mcp/` is normalised to `/mcp`: one route, one session manager.
 #[tokio::test]
-async fn trailing_slash_endpoint_serves_the_full_flow() {
+async fn the_trailing_slash_form_reaches_the_same_endpoint() {
     let app = TestApp::spawn(app_settings().await).await;
     let (session, _) = initialize_at(&app, "/mcp/").await;
-    let (_, list) = rpc_at(
-        &app,
-        "/mcp/",
-        Some(&session),
-        &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    )
-    .await;
-    assert_eq!(
-        list["result"]["tools"][0]["name"], "get_health_status",
-        "{list}"
-    );
-    let (_, call) = rpc_at(
-        &app,
-        "/mcp/",
-        Some(&session),
-        &json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-                "params": {"name": "get_health_status", "arguments": {}}}),
-    )
-    .await;
-    assert_eq!(call["result"]["content"][0]["text"], "testing", "{call}");
-
-    // Same session manager: a session from /mcp/ is valid on /mcp.
     let (_, again) = rpc(
         &app,
         Some(&session),
@@ -323,11 +417,36 @@ async fn trailing_slash_endpoint_serves_the_full_flow() {
     )
     .await;
     assert!(again.get("result").is_some(), "{again}");
+}
 
-    let text = app.get("/metrics").await.text().await.unwrap();
+/// An open SSE stream ends when the app shuts down, so it cannot hold the
+/// HTTP drain open for the whole grace period.
+#[tokio::test]
+async fn shutdown_ends_open_event_streams_promptly() {
+    let app = TestApp::spawn(app_settings().await).await;
+    let session = initialize(&app).await;
+    let mut stream = app
+        .client()
+        .get(app.url("/mcp"))
+        .header("host", localhost(&app))
+        .header("accept", "text/event-stream")
+        .header("mcp-session-id", &session)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stream.status(), 200);
+    let started = std::time::Instant::now();
+    let stopped = tokio::spawn(app.stop());
+    // Read until the server ends the stream.
+    while let Ok(Some(_)) = stream.chunk().await {}
+    tokio::time::timeout(std::time::Duration::from_secs(5), stopped)
+        .await
+        .expect("the server drained within 5 s")
+        .unwrap()
+        .unwrap();
     assert!(
-        text.lines()
-            .any(|l| l.starts_with(r#"http_requests_total{method="POST",handler="/mcp/","#)),
-        "{text}"
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
     );
 }

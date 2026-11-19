@@ -7,24 +7,25 @@ import io.micronaut.http.annotation.Get;
 import io.micronaut.http.annotation.Produces;
 import io.micronaut.scheduling.TaskExecutors;
 import io.micronaut.scheduling.annotation.ExecuteOn;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
-/** Serves the Prometheus scrape at /metrics (mirrors the Python /metrics endpoint). */
+/** Serves the Prometheus scrape at /metrics (the built-in /prometheus endpoint is disabled). */
 @Controller("/metrics")
 @ExecuteOn(TaskExecutors.BLOCKING)
+@Tag(name = "observability")
 public class MetricsController {
 
     private final PrometheusMeterRegistry registry;
-    private final MetricsBinder binder;
 
-    public MetricsController(PrometheusMeterRegistry registry, MetricsBinder binder) {
+    public MetricsController(PrometheusMeterRegistry registry) {
         this.registry = registry;
-        this.binder = binder;
     }
 
     @Get
     @Produces(MediaType.TEXT_PLAIN)
+    @Operation(summary = "Prometheus metrics in the text exposition format")
     public String scrape() {
-        binder.refresh();
         return registry.scrape();
     }
 }

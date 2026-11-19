@@ -237,6 +237,16 @@ ignoreUntil = 2027-02-14
 reason = "rmcp 2.2.0 unbounded body buffering in Streamable HTTP *clients* (transport-streamable-http-client-reqwest / -unix-socket); rust-webservice-template enables only server features (cargo tree -e features -i rmcp, re-checked 2026-11-16: no client transports), so the client code is not compiled; the server's own request bodies are capped by tower-http's limit layer. Fix is rmcp 3.9+ (major migration) - follow-up; review 2027-02-14"
 
 [[IgnoredVulns]]
+id = "RUSTSEC-2026-0543"
+ignoreUntil = 2027-02-14
+reason = "chrono 0.4.45 in rust-webservice-template/Cargo.lock: unmaintained notice, not a vulnerability, no fixed release. Required by arrow, rmcp and schemars, none of which offers a replacement yet. Same decision as rust-webservice-template/deny.toml; re-check at the next dependency bump; review 2027-02-14"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0459"
+ignoreUntil = 2027-02-14
+reason = "libsqlite3-sys 0.37.0 is in rust-webservice-template/Cargo.lock only through sqlx-sqlite, which Cargo always locks for sqlx's weak optional dependencies (rust-lang/cargo#10801) but never compiles here: sqlx is built with default-features = false and only the postgres feature, and `cargo tree -i libsqlite3-sys --target all -e all --all-features` prints nothing (checked 2026-11-19). cargo-deny, which reads the build graph, does not report it. Review 2027-02-14"
+
+[[IgnoredVulns]]
 id = "GHSA-69hj-f68j-2879"
 ignoreUntil = 2027-02-14
 reason = "filelock 3.19.1 is a false positive from OSV v2.7 resolving root requirements-dev.txt without environment markers: virtualenv pins filelock==3.19.1 only for python_version<\"3.10\"; on Python >=3.10 it requires filelock>=3.24.2,<5 and pip installs filelock 4.2.x (patched). Repo tooling runs on 3.13/3.15. Re-check when OSV honours markers; review 2027-02-14"

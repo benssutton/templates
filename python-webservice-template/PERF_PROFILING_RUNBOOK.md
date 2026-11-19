@@ -26,11 +26,11 @@ docker build -t perf-scripts ./tests/performance
 ```bash
 # Reads (ClickHouse + LSM cache):
 docker compose up -d --build
-docker run --rm --network python-template_default -e BASE_URL=https://app -e VUS=10 -e DURATION=60s perf-scripts run /scripts/profile_reads.js
+docker run --rm --network python-template_default -e BASE_URL=https://app:8443 -e VUS=10 -e DURATION=60s perf-scripts run /scripts/profile_reads.js
 
 # Ingest (Arrow decode + LSM write) — profiling override sets `INGEST_TRANSPORT=noop`, so HTTP is the sole writer:
 docker compose -f docker-compose.yml -f docker-compose.profiling.yml up -d --build
-docker run --rm --network python-template_default -e BASE_URL=https://app -e VUS=4 -e DURATION=60s perf-scripts run /scripts/profile_ingest.js
+docker run --rm --network python-template_default -e BASE_URL=https://app:8443 -e VUS=4 -e DURATION=60s perf-scripts run /scripts/profile_ingest.js
 ```
 
 The attribution table prints to the console. To also persist `attribution.json`
@@ -59,7 +59,7 @@ docker compose -f docker-compose.yml -f docker-compose.profiling.yml up -d --bui
 Shell 1 — drive load (140s covers both 60s py-spy passes):
 
 ```bash
-docker run --rm --network python-template_default -e BASE_URL=https://app -e VUS=10 -e DURATION=140s perf-scripts run /scripts/profile_reads.js
+docker run --rm --network python-template_default -e BASE_URL=https://app:8443 -e VUS=10 -e DURATION=140s perf-scripts run /scripts/profile_reads.js
 ```
 
 Shell 2 — sample the app while the load above runs:

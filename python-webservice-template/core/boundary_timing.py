@@ -2,7 +2,7 @@
 W3C Server-Timing response header.
 
 ServerTimingMiddleware installs a fresh sample list on a ContextVar at the start
-of each HTTP request; core.correlation.timed() (once wired) appends (label, milliseconds) to
+of each HTTP request; core.correlation.timed() appends (label, milliseconds) to
 that list as each instrumented boundary completes. On the response's
 `http.response.start` the middleware renders the samples — plus a synthetic
 `total` for the whole handler — into a Server-Timing header.

@@ -1,11 +1,31 @@
 """ASGI middleware enforcing a maximum inbound request body size.
 
-Counts bytes as they stream from the client and aborts with 413 once the limit
-is crossed — works even when Content-Length is absent (chunked uploads). Applied
+Counts bytes as they stream from the client and aborts the read with 413 the
+moment the limit is crossed, so an oversized body is never buffered in full and
+never reaches the handler, even without Content-Length (chunked uploads).
+Mirrors tower-http's RequestBodyLimitLayer in the Rust template. Applied
 app-wide so every current and future POST route inherits the policy.
 """
 
+import json
+
+from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+_DETAIL = "Payload Too Large"
+_BODY = json.dumps({"detail": _DETAIL}).encode()
+
+
+class _BodyTooLarge(HTTPException):
+    """Raised from receive() to unwind the handler mid-read.
+
+    An HTTPException on purpose: FastAPI's body parsing re-raises HTTPException but
+    turns any other error into 400, and the app's exception handler renders it as
+    413 {"detail": ...}.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(status_code=413, detail=_DETAIL)
 
 
 class MaxBodySizeMiddleware:
@@ -31,6 +51,8 @@ class MaxBodySizeMiddleware:
 
         received = 0
         too_large = False
+        response_started = False
+        rejected = False
 
         async def counting_receive() -> Message:
             nonlocal received, too_large
@@ -39,26 +61,33 @@ class MaxBodySizeMiddleware:
                 received += len(message.get("body", b""))
                 if received > self.max_bytes:
                     too_large = True
+                    raise _BodyTooLarge
             return message
 
-        started = False
-
-        async def guarded_send(message: Message) -> None:
-            # When Content-Length is absent (chunked upload), the route handler
-            # fully reads all chunks via counting_receive before calling send.
-            # The 413 is therefore returned AFTER the handler has processed the
-            # full body — trading wasted CPU for correct protocol semantics.
-            # The Content-Length fast-path above avoids this cost for standard clients.
-            nonlocal started
-            if too_large and not started:
-                await self._reject(send)
-                started = True
+        async def tracking_send(message: Message) -> None:
+            nonlocal response_started, rejected
+            # A handler may swallow the exception and answer itself (the MCP SDK
+            # answers 500): replace that response with the 413 while we still can.
+            if too_large and not response_started:
+                if not rejected:
+                    rejected = True
+                    await self._reject(send)
                 return
-            if started:
+            if rejected:
                 return
+            if message["type"] == "http.response.start":
+                response_started = True
             await send(message)
 
-        await self.app(scope, counting_receive, guarded_send)
+        try:
+            await self.app(scope, counting_receive, tracking_send)
+        except _BodyTooLarge:
+            # A handler that streams a response before reading its whole body has
+            # already sent headers; the connection can only be dropped then.
+            if response_started:
+                raise
+            if not rejected:
+                await self._reject(send)
 
     @staticmethod
     async def _reject(send: Send) -> None:
@@ -66,7 +95,10 @@ class MaxBodySizeMiddleware:
             {
                 "type": "http.response.start",
                 "status": 413,
-                "headers": [(b"content-type", b"text/plain; charset=utf-8")],
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(_BODY)).encode()),
+                ],
             }
         )
-        await send({"type": "http.response.body", "body": b"Payload Too Large"})
+        await send({"type": "http.response.body", "body": _BODY})

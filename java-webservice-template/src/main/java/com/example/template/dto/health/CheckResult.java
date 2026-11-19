@@ -1,10 +1,19 @@
 package com.example.template.dto.health;
 
+import com.example.template.ingestion.ConnectionState;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.serde.annotation.Serdeable;
-
 import java.time.Instant;
 
+/** One readiness check: a dependency (latency, error) or the ingest transport (the rest). */
 @Serdeable
-public record CheckResult(String name, String status, Double latencyMs, String transport,
-                          String connectionState, Boolean threadAlive, Instant lastBatchAt,
-                          Double secondsSinceLastBatch, String error) {}
+public record CheckResult(
+        String name,
+        ProbeStatus status,
+        @Nullable Double latencyMs,
+        @Nullable String transport,
+        @Nullable ConnectionState connectionState,
+        @Nullable Boolean threadAlive,
+        @Nullable Instant lastBatchAt,
+        @Nullable Double secondsSinceLastBatch,
+        @Nullable String error) {}

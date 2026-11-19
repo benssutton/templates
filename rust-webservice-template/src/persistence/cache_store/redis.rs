@@ -1,20 +1,13 @@
-//! Cache store: Redis with the RedisJSON module (Python
-//! `persistence/cache_store/redis/redis_client.py`).
-//! `::redis` is the crate; this module shares its name.
+//! Cache store: Redis with the RedisJSON module. `::redis` is the crate;
+//! this module shares its name.
 
-use crate::core::retry::{connect_with_backoff, Backoff};
+use crate::core::retry::{connect_with_backoff, seconds, Backoff};
 use crate::health::probe::{HealthProbe, ProbeError};
 use crate::settings::Settings;
 use ::redis::aio::{ConnectionManager, ConnectionManagerConfig};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use secrecy::ExposeSecret;
-use std::time::Duration;
-
-/// Per connection attempt (startup and the manager's own reconnects).
-const CONNECTION_TIMEOUT: Duration = Duration::from_secs(2);
-/// Per command, so a hung server fails a request instead of blocking it.
-const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A smoke-tested, self-reconnecting connection. Cheap to clone: clones
 /// share one multiplexed connection.
@@ -45,10 +38,13 @@ async fn open(settings: &Settings) -> anyhow::Result<ConnectionManager> {
     // retried a refused port inside each attempt (~4 s each), defeating the
     // backoff; 0 makes the initial connect fail promptly. After startup the
     // manager still reconnects, once per failed command.
+    // The connection timeout bounds every connect (startup and the
+    // manager's own reconnects); the response timeout bounds every command,
+    // so a hung server fails a request instead of blocking it.
     let config = ConnectionManagerConfig::new()
         .set_number_of_retries(0)
-        .set_connection_timeout(Some(CONNECTION_TIMEOUT))
-        .set_response_timeout(Some(RESPONSE_TIMEOUT));
+        .set_connection_timeout(Some(seconds(settings.redis_connection_timeout_seconds)))
+        .set_response_timeout(Some(seconds(settings.redis_response_timeout_seconds)));
     let mut connection = ConnectionManager::new_with_config(client, config)
         .await
         .map_err(|e| anyhow!("connecting to Redis: {e}"))?;
@@ -77,7 +73,7 @@ async fn assert_json_module(connection: &mut ConnectionManager) -> anyhow::Resul
                  Original error: {e}"
             )
         })?;
-    // Spec §5: a JSON.SET / JSON.GET round trip, not just a write.
+    // A JSON.SET / JSON.GET round trip, not just a write.
     let read_back: Option<String> = ::redis::cmd("JSON.GET")
         .arg(&probe_key)
         .query_async(connection)

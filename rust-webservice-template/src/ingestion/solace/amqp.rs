@@ -1,6 +1,6 @@
-//! fe2o3-amqp plumbing for Solace (spec §6). Every fe2o3 call here is
-//! [SPIKE-VERIFY]: it is the call R1 Part S compiled and ran against
-//! solace-pubsub-standard 10.26.10 (findings note, "fe2o3-amqp API notes").
+//! fe2o3-amqp plumbing for Solace. Every fe2o3 call here was checked
+//! against a live solace-pubsub-standard 10.26.10 broker; re-check the
+//! behaviour notes below against a broker after an upgrade.
 
 use crate::settings::Settings;
 use anyhow::Context;
@@ -13,13 +13,14 @@ use fe2o3_amqp::{Connection, Receiver, Session};
 use secrecy::{ExposeSecret, SecretString};
 use std::time::Duration;
 
-/// [SPIKE D6] Q5: the local AMQP idle timeout. Mandatory: without it, recv
+/// The local AMQP idle timeout. Mandatory: without it, recv
 /// and attach block forever on a frozen broker. With it, the dead peer tears
 /// the connection down after ~5 s and `Receiver::recv` fails with
 /// `LinkStateError(SessionStopped(ConnectionStopped(Closed)))` (not a
 /// top-level `IdleTimeoutElapsed`). Also sent to the broker in Open.
 pub const IDLE_TIMEOUT_MS: u32 = 5_000;
-/// [SPIKE D3] Publish address for a topic ("Publishing to a topic over AMQP").
+/// Publish address for a topic: Solace routes `topic://<name>` to topic
+/// subscribers (a bare name would address a queue).
 pub const TOPIC_ADDRESS_PREFIX: &str = "topic://";
 /// TCP connect + SASL + Open + Begin, per attempt.
 pub const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -30,8 +31,8 @@ pub const TEARDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 /// One disposition (accept / modify / reject), receiver lock included.
 pub const SETTLE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Where and as whom to connect. AMQP picks the message VPN by listen port
-/// (Deviation 3).
+/// Where and as whom to connect. AMQP picks the message VPN by listen port,
+/// so there is no VPN field.
 #[derive(Debug, Clone)]
 pub struct AmqpTarget {
     pub host: String,
@@ -59,16 +60,16 @@ pub fn topic_address(topic: &str) -> String {
     format!("{TOPIC_ADDRESS_PREFIX}{topic}")
 }
 
-/// Unique per connection (Deviation 9): `rust-template_ingest-1a2b3c4d`.
+/// Unique per connection (`rust-template_ingest-1a2b3c4d`): after a network
+/// partition the broker may still hold the stale connection's container id.
 pub fn container_id(base: &str) -> String {
     let suffix = uuid::Uuid::new_v4().simple().to_string();
     format!("{}-{}", base.replace('/', "_"), &suffix[..8])
 }
 
-/// SASL rule (Task 0): an empty username selects ANONYMOUS, the only
+/// SASL rule: an empty username selects ANONYMOUS, the only
 /// mechanism an auth-`none` VPN offers over AMQP; otherwise PLAIN. fe2o3 takes
-/// one profile up front and cannot fall back. Divergence: Python and Java
-/// always send username/password over SMF.
+/// one profile up front and cannot fall back.
 ///
 /// The returned profile holds the password in clear: never log it.
 pub fn sasl_profile(target: &AmqpTarget) -> SaslProfile {
@@ -95,7 +96,7 @@ pub async fn open(
             .idle_time_out(IDLE_TIMEOUT_MS)
             .open(url.as_str())
             .await
-            // D10: `OpenError`'s Display hides the reason ("Not implemented");
+            // `OpenError`'s Display hides the reason ("Not implemented");
             // Debug carries it (e.g. `"PLAIN" is not supported`).
             .map_err(|e| anyhow::anyhow!("AMQP open {url}: {e:?}"))?;
         match Session::begin(&mut connection).await {
@@ -133,9 +134,9 @@ pub async fn teardown(mut connection: ConnectionHandle<()>, mut session: Session
     let _ = tokio::time::timeout(TEARDOWN_TIMEOUT, connection.close()).await;
 }
 
-/// [SPIKE D4] Q3: an SMF binary attachment arrives as ONE `data` section;
+/// An SMF binary attachment arrives as ONE `data` section;
 /// several sections are concatenated. An `amqp-value` holding binary is
-/// accepted too (the Q3 workaround). Anything else has no payload.
+/// accepted too. Anything else has no payload.
 pub fn payload_bytes(body: &Body<Value>) -> Option<Vec<u8>> {
     match body {
         Body::Data(_) => {
@@ -150,7 +151,7 @@ pub fn payload_bytes(body: &Body<Value>) -> Option<Vec<u8>> {
     }
 }
 
-/// [SPIKE D5] Q4: how the broker marks a redelivery. `modified{delivery_failed}`
+/// How the broker marks a redelivery. `modified{delivery_failed}`
 /// increments `delivery-count`. Never `first_acquirer` (always false on Solace).
 pub fn redelivered(header: Option<&Header>) -> bool {
     header.is_some_and(|h| h.delivery_count > 0)

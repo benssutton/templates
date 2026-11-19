@@ -1,3 +1,4 @@
+import pytest
 from httpx import AsyncClient
 
 from persistence.cache_store.redis.redis_client import RedisClient
@@ -30,6 +31,19 @@ async def test_post_cache_with_ttl(test_client: AsyncClient):
     assert body["value"] == "soon"
     assert body["ttl_seconds"] is not None
     assert 0 < body["ttl_seconds"] <= 60
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"key": "k", "value": 1, "ttl_seconds": 0},  # EXPIRE 0 would delete the key
+        {"key": "k", "value": 1, "ttl_seconds": -1},
+        {"key": "", "value": 1},
+    ],
+)
+async def test_post_cache_rejects_invalid_key_or_ttl(test_client: AsyncClient, payload):
+    response = await test_client.post("/cache/", json=payload)
+    assert response.status_code == 422
 
 
 async def test_get_cache_returns_entry(test_client: AsyncClient):

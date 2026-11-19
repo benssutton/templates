@@ -40,10 +40,19 @@ def test_pip_maven_cargo_cover_manifests():
     assert "/rust-webservice-template" in _dirs("cargo")
 
 
+SERVICES = ("python-webservice-template", "java-webservice-template", "rust-webservice-template")
+
+
 def test_docker_covers_service_dockerfiles():
-    for svc in ("python-webservice-template", "java-webservice-template"):
+    for svc in SERVICES:
         assert (ROOT / svc / "Dockerfile").is_file()
         assert f"/{svc}" in _dirs("docker")
+
+
+def test_docker_compose_covers_service_compose_files():
+    for svc in SERVICES:
+        assert (ROOT / svc / "docker-compose.yml").is_file()
+        assert f"/{svc}" in _dirs("docker-compose")
 
 
 def test_github_actions_covered():

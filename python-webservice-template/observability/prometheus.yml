@@ -4,10 +4,10 @@ global:
 scrape_configs:
   - job_name: python-template
     metrics_path: /metrics
-    # The app serves HTTPS on 443 with a self-signed dev cert, so scrape over
+    # The app serves HTTPS on 8443 in its container with a self-signed dev cert, so scrape over
     # https and skip verification.
     scheme: https
     tls_config:
       insecure_skip_verify: true
     static_configs:
-      - targets: ["app:443"]
+      - targets: ["app:8443"]

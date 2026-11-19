@@ -1,13 +1,45 @@
+from collections.abc import Iterator
+
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     CollectorRegistry,
     Gauge,
     Info,
+    PlatformCollector,
+    ProcessCollector,
     generate_latest,
 )
+from prometheus_client.core import CounterMetricFamily, Metric
+from prometheus_client.registry import Collector
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from services.stream_ingest import StreamIngestService
 from settings import Settings
+
+
+class _IngestCounters(Collector):
+    """Reads the ingest service's monotonic counts at scrape time, so they are
+    true Prometheus counters without the service depending on prometheus_client."""
+
+    def __init__(self) -> None:
+        self.ingest: StreamIngestService | None = None
+
+    def collect(self) -> Iterator[Metric]:
+        rows = CounterMetricFamily(
+            "ingest_rows_ingested", "Rows written to the stream store"
+        )
+        outcomes = CounterMetricFamily(
+            "ingest_outcomes",
+            "Ingest messages (Solace) or requests (HTTP) by outcome",
+            labels=["outcome"],
+        )
+        if self.ingest is not None:
+            rows_total, counts = self.ingest.counts()
+            rows.add_metric([], rows_total)
+            for outcome, count in counts.items():
+                outcomes.add_metric([outcome], count)
+        yield rows
+        yield outcomes
 
 
 class MetricsService:
@@ -18,6 +50,11 @@ class MetricsService:
         self._settings = settings
         self.registry = CollectorRegistry()
         self._instrumentator = Instrumentator(registry=self.registry)
+        # The standard process_* / python_* series (process ones on Linux only).
+        ProcessCollector(registry=self.registry)
+        PlatformCollector(registry=self.registry)
+        self._ingest_counters = _IngestCounters()
+        self.registry.register(self._ingest_counters)
 
         self.app_info = Info("app", "Application info", registry=self.registry)
         self.app_info.info(
@@ -48,26 +85,26 @@ class MetricsService:
             "Seconds since last ingested batch",
             registry=self.registry,
         )
-        self.ingest_rows = Gauge(
-            "ingest_rows_ingested", "Total rows ingested", registry=self.registry
-        )
 
+        # app_ prefix: process_* belongs to prometheus_client's ProcessCollector.
         self.proc_cpu = Gauge(
-            "process_cpu_percent", "Process CPU percent", registry=self.registry
+            "app_process_cpu_percent", "Process CPU percent", registry=self.registry
         )
         self.proc_mem = Gauge(
-            "process_memory_rss_bytes",
+            "app_process_memory_rss_bytes",
             "Process resident memory bytes",
             registry=self.registry,
         )
         self.proc_threads = Gauge(
-            "process_num_threads", "Process thread count", registry=self.registry
+            "app_process_num_threads", "Process thread count", registry=self.registry
         )
         self.proc_fds = Gauge(
-            "process_open_files", "Process open file count", registry=self.registry
+            "app_process_open_files", "Process open file count", registry=self.registry
         )
         self.proc_uptime = Gauge(
-            "process_uptime_seconds", "Process uptime seconds", registry=self.registry
+            "app_process_uptime_seconds",
+            "Process uptime seconds",
+            registry=self.registry,
         )
 
         self.sys_cpu = Gauge(
@@ -97,6 +134,10 @@ class MetricsService:
     def instrument(self, app) -> None:
         self._instrumentator.instrument(app)
 
+    def bind_ingest(self, ingest: StreamIngestService) -> None:
+        """Called by the lifespan once the ingest service exists."""
+        self._ingest_counters.ingest = ingest
+
     async def refresh(self, health_service) -> None:
         status = await health_service.detailed_status()
 
@@ -111,7 +152,6 @@ class MetricsService:
             )
         secs = ingest.seconds_since_last_batch
         self.ingest_secs.set(secs if secs is not None else float("nan"))
-        self.ingest_rows.set(ingest.rows_ingested_total)
 
         proc = status.system.process
         host = status.system.host

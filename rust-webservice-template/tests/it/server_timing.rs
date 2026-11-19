@@ -1,7 +1,7 @@
 use crate::support::{app_settings, TestApp};
 
 /// /health/live has no instrumented boundaries, so only `total` appears.
-/// (Boundary samples like clickhouse_select arrive with R2's stores.)
+/// (Store boundaries such as clickhouse_select are covered by the store tests.)
 #[tokio::test]
 async fn request_without_boundaries_has_only_total() {
     let app = TestApp::spawn(app_settings().await).await;

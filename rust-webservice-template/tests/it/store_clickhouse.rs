@@ -68,3 +68,30 @@ async fn closed_port_fails_after_the_retry_budget() {
     // would add its own timeout (5 s) per attempt and blow this bound.
     assert!(elapsed < Duration::from_secs(6), "took {elapsed:?}");
 }
+
+/// A fresh server needs no init script: the migrations create `items` and
+/// record their version, and a second run applies nothing again.
+#[tokio::test]
+async fn migrations_create_the_schema_on_a_fresh_server_once() {
+    let ch = containers::clickhouse_server().await;
+    let closed = Endpoint::closed();
+    let store = ClickHouseStore::connect(&settings_for(&closed, &ch.endpoint, &closed))
+        .await
+        .expect("connect");
+    store.migrate().await.expect("first run");
+    store.migrate().await.expect("second run");
+    let rows: u64 = store
+        .client()
+        .query("SELECT count() FROM items")
+        .fetch_one()
+        .await
+        .expect("items exists");
+    assert_eq!(rows, 0);
+    let recorded: u64 = store
+        .client()
+        .query("SELECT count() FROM schema_migrations WHERE version = 1")
+        .fetch_one()
+        .await
+        .unwrap();
+    assert_eq!(recorded, 1, "version 1 is applied once");
+}

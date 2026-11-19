@@ -49,7 +49,9 @@ async def test_delays_are_positive_and_increasing():
     attempts instead of mocking it. This is safe because the backoff formula
     guarantees attempt 2's delay range ([2*base, 2.5*base)) never overlaps
     attempt 1's ([base, 1.25*base)), so "increasing" holds regardless of
-    jitter -- no flakiness from real randomness or real timing.
+    jitter. The base delay is 100 ms because sleeps overshoot by tens of ms on
+    Windows (~15.6 ms timer ticks, more under load); with a 10 ms base that noise
+    exceeded the gap between attempts and the comparison flaked.
     """
     timestamps: list[float] = []
     calls = 0
@@ -62,7 +64,7 @@ async def test_delays_are_positive_and_increasing():
             raise ConnectionError("not yet")
         return "ok"
 
-    await connect_with_backoff(connect, label="test", max_attempts=5, base_delay=0.01)
+    await connect_with_backoff(connect, label="test", max_attempts=5, base_delay=0.1)
 
     deltas = [b - a for a, b in zip(timestamps, timestamps[1:])]
     assert len(deltas) == 3

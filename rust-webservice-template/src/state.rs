@@ -1,7 +1,8 @@
-//! Per-app state (spec §3 "State"). Built once per `create_app`; cloned
-//! cheaply into handlers. The start `Instant` lives in `HealthService`
-//! (it owns uptime).
+//! Per-app state, built once per `create_app` and cloned cheaply into
+//! handlers. Services are concrete structs in `Arc`; traits exist only at
+//! real seams (probes, ingest health, the consumer, the stream store).
 
+use crate::core::auth::Authenticator;
 use crate::core::last_request::LastRequest;
 use crate::core::shutdown::Shutdown;
 use crate::health::ingest::IngestHealthProvider;
@@ -24,11 +25,6 @@ use std::sync::Arc;
 pub struct AppState {
     pub settings: Arc<Settings>,
     pub last_request: LastRequest,
-    /// `create_app` registers the three store probes (`Stores::probes`).
-    pub probes: ProbeRegistry,
-    /// The ingest service, seen through the health seam (`HealthService`
-    /// and `/metrics` read it).
-    pub ingest_health: Arc<dyn IngestHealthProvider>,
     pub health: Arc<HealthService>,
     /// `None` when `metrics_enabled = false`.
     pub metrics: Option<Arc<MetricsService>>,
@@ -40,29 +36,30 @@ pub struct AppState {
     pub cache: Arc<CacheService>,
     /// LSM + consumer task; `App::close` closes it before the stores.
     pub ingest: Arc<StreamIngestService>,
+    /// `None` when `auth_enabled = false`.
+    pub auth: Option<Arc<Authenticator>>,
 }
 
 impl AppState {
-    /// Validates `settings` first, so an `AppState` always holds valid config.
+    /// `settings` must already be valid (`create_app` checks them).
     /// `probes` is separate from `stores` so tests can register their own
-    /// probes (`create_app` passes `stores.probes()`). Starts the ingest task
-    /// (needs a tokio runtime) on a fresh `LsmStore`, reading from `consumer`;
-    /// every fallible step runs before that, so an `Err` leaves no task behind.
+    /// (`create_app` passes `stores.probes()`). Starts the ingest task (needs
+    /// a tokio runtime) on a fresh `LsmStore`, reading from `consumer`; every
+    /// fallible step runs before that, so an `Err` leaves no task behind.
     pub fn new(
         settings: Settings,
         stores: Stores,
         probes: Vec<Arc<dyn HealthProbe>>,
         consumer: Arc<dyn BatchConsumer>,
     ) -> anyhow::Result<Self> {
-        settings.validate()?;
         let settings = Arc::new(settings);
         let last_request = LastRequest::new();
-        let probes = ProbeRegistry::new(probes);
         let metrics = if settings.metrics_enabled {
             Some(Arc::new(MetricsService::new(&settings)?))
         } else {
             None
         };
+        let auth = Authenticator::from_settings(&settings)?;
         let shutdown = Shutdown::new();
         let store: Arc<dyn StreamStore> = Arc::new(LsmStore::from_settings(&settings));
         let ingest = StreamIngestService::start(
@@ -76,17 +73,18 @@ impl AppState {
         let health = Arc::new(HealthService::new(
             settings.clone(),
             last_request.clone(),
-            probes.clone(),
-            ingest_health.clone(),
+            ProbeRegistry::new(probes),
+            ingest_health,
         ));
         let config = Arc::new(ConfigService::new(stores.postgres.pool().clone()));
-        let data = Arc::new(DataService::new(stores.clickhouse.client().clone()));
+        let data = Arc::new(DataService::new(
+            stores.clickhouse.client().clone(),
+            stores.clickhouse.query_timeout(),
+        ));
         let cache = Arc::new(CacheService::new(stores.redis.connection()));
         Ok(Self {
             settings,
             last_request,
-            probes,
-            ingest_health,
             health,
             metrics,
             shutdown,
@@ -94,6 +92,7 @@ impl AppState {
             config,
             data,
             cache,
+            auth,
             ingest,
         })
     }

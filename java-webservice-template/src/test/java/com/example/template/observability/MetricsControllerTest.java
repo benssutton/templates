@@ -1,14 +1,16 @@
 package com.example.template.observability;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
+
 import com.example.template.support.IntegrationSupport;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.client.HttpClient;
 import io.micronaut.http.client.annotation.Client;
+import io.micronaut.http.client.exceptions.HttpClientResponseException;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
-
-import static org.assertj.core.api.Assertions.assertThat;
 
 @MicronautTest
 class MetricsControllerTest extends IntegrationSupport {
@@ -22,5 +24,21 @@ class MetricsControllerTest extends IntegrationSupport {
         String body = client.toBlocking().retrieve(HttpRequest.GET("/metrics"));
         assertThat(body).contains("dependency_up");
         assertThat(body).contains("jvm_memory_used_bytes"); // standard Micrometer binder
+        // Totals are counters; settlements are split by outcome.
+        assertThat(body).contains("# TYPE ingest_rows_ingested_total counter");
+        assertThat(body).contains("ingest_settlements_total{outcome=\"accept\"}");
+        assertThat(body).contains("ingest_settlements_total{outcome=\"reject\"}");
+        assertThat(body).contains("# TYPE lsm_rows_evicted_total counter");
+        assertThat(body).contains("dependency_up{name=\"postgres\"} 1.0");
+    }
+
+    /** /metrics is the one Prometheus endpoint; the built-in /prometheus duplicate is off. */
+    @Test
+    void builtInPrometheusEndpointIsDisabled() {
+        HttpClientResponseException e =
+                catchThrowableOfType(
+                        HttpClientResponseException.class,
+                        () -> client.toBlocking().retrieve(HttpRequest.GET("/prometheus")));
+        assertThat(e.code()).isEqualTo(404);
     }
 }

@@ -5,12 +5,21 @@ __pycache__/
 .venv/
 venv/
 /data/
-# Ship the cert-generator script but not the dev key/cert — the image mints its
-# own via `RUN python certs/generate_self_signed_cert.py` (see Dockerfile).
+# TLS material is mounted at runtime, never copied into the image.
 certs/*.pem
+# Tests, coverage and tooling state stay out of the production image.
+tests/
 .coverage
+.coverage.*
+coverage.xml
+htmlcov/
 .pytest_cache/
+.ruff_cache/
+.claude/
+.vscode/
 .git/
-docs/
-performance/
 *.md
+*.ipynb
+docker-compose*.yml
+observability/
+sonar-project.properties

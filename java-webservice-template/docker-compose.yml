@@ -12,17 +12,19 @@ services:
       timeout: 3s
       retries: 10
   clickhouse:
-    image: clickhouse/clickhouse-server:24.3
+    image: clickhouse/clickhouse-server:26.8.40.7
     environment:
       CLICKHOUSE_PASSWORD: clickhouse   # clickhouse-jdbc rejects an empty password; set an explicit one
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
-      - ./src/main/resources/db/clickhouse-init.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      # Demo seed data for k6. The seed creates the table it fills with the same DDL as
+      # the app's first ClickHouse migration; the app then records that migration as applied.
+      - ./src/main/resources/db/clickhouse/V1.sql:/docker-entrypoint-initdb.d/01-schema.sql
       - ./scripts/clickhouse-seed.sh:/docker-entrypoint-initdb.d/02-seed.sh
     ulimits:
       nofile: { soft: 262144, hard: 262144 }
   redis:
-    image: redis/redis-stack-server:latest
+    image: redis/redis-stack-server:7.4.0-v8
   solace:
     image: solace/solace-pubsub-standard:10.26.10
     ports:
@@ -33,17 +35,15 @@ services:
       username_admin_password: admin
       # Minimum scaling tier (~1 GiB) so the broker fits a dev-sized Docker VM.
       system_scaling_maxconnectioncount: "100"
-    # Solace POST hard requirement: nofile hard limit >= 1048576 (older
-    # 2448:6592 values trigger a startup ERROR and immediate shutdown).
+    # Solace POST hard requirement: nofile hard limit >= 1048576.
     shm_size: "1g"
     ulimits:
       core: -1
       nofile:
         soft: 1048576
         hard: 1048576
-    # Readiness gate: the guaranteed-messaging health-check port returns 200
-    # once the broker is active. (SEMP on 8080 returns 401 without auth, so it
-    # is not a usable unauthenticated health probe.)
+    # Readiness gate: the guaranteed-messaging health-check port returns 200 once the
+    # broker is active (SEMP on 8080 needs auth, so it is not a usable probe).
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:5550/health-check/guaranteed-active || exit 1"]
       interval: 10s
@@ -51,8 +51,7 @@ services:
       retries: 18
       start_period: 60s
   solace-publisher:
-    image: java-template-app
-    command: ["java", "-cp", "app.jar", "com.example.template.publisher.ExampleSolacePublisher"]
+    build: { context: ., target: publisher }
     # The broker's health check reports active before the message VPN accepts
     # clients, and this demo publisher doesn't retry its connect: restart it.
     restart: on-failure
@@ -62,26 +61,37 @@ services:
       PUBLISH_INTERVAL_MS: "100"
     depends_on:
       solace: { condition: service_healthy }
-      app: { condition: service_started }   # image is built by `app`
+  # One-shot: writes a self-signed dev keystore into a volume the app mounts read-only,
+  # so no key material is baked into the image. Real deployments mount their own.
+  certs:
+    image: eclipse-temurin:25.0.5_8-jre@sha256:945247f9d092703e0c6be92243ef3c51640229e23ab34d353c8dcdc73e6cd4e6
+    volumes:
+      - certs:/certs
+      - ./certs/generate-keystore.sh:/generate-keystore.sh:ro
+    # Runs as root because a new named volume is root-owned; the key is handed to the app user.
+    entrypoint: ["bash", "-c", "test -s /certs/keystore.p12 || (bash /generate-keystore.sh /certs/keystore.p12 && chown 10001:10001 /certs/keystore.p12)"]
   app:
     image: java-template-app
     build: .
     depends_on:
+      certs: { condition: service_completed_successfully }
       postgres: { condition: service_healthy }
       clickhouse: { condition: service_started }
       redis: { condition: service_started }
-      # Even with INGEST_TRANSPORT=noop this starts the broker and waits for it. For a
-      # broker-free run: `docker compose up -d postgres clickhouse redis &&
-      # INGEST_TRANSPORT=noop docker compose up -d --no-deps app`.
+      # The demo streams from Solace, so compose opts in explicitly (the app default is noop).
       solace: { condition: service_healthy }
     ports:
-      - "443:443"
+      - "443:8443"
+    volumes:
+      - certs:/app/certs:ro
     environment:
       MICRONAUT_ENVIRONMENTS: docker
-      INGEST_TRANSPORT: ${INGEST_TRANSPORT:-solace}
+      INGEST_TRANSPORT: solace
+      # /mcp Host allow-list: the published port (localhost, 127.0.0.1) and the
+      # compose service name (app), as other containers address it.
+      MCP_ALLOWED_HOSTS: localhost,127.0.0.1,app
       CLICKHOUSE_PASSWORD: clickhouse
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsk https://localhost/health/live || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 15
+    # Healthcheck comes from the image (HEALTHCHECK in the Dockerfile).
+
+volumes:
+  certs:

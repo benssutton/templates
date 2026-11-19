@@ -9,30 +9,48 @@ import com.example.template.dto.health.DetailedStatusResponse;
 import com.example.template.dto.health.IngestHealth;
 import com.example.template.dto.health.LivenessResponse;
 import com.example.template.dto.health.ProbeResult;
+import com.example.template.dto.health.ProbeStatus;
 import com.example.template.dto.health.ReadinessResponse;
+import com.example.template.dto.health.ReadinessStatus;
 import com.example.template.dto.health.RequestInfo;
 import com.example.template.dto.health.UptimeInfo;
 import com.example.template.health.DependencyHealthProbe;
 import com.example.template.health.IngestHealthProvider;
+import com.example.template.ingestion.ConnectionState;
+import io.micronaut.core.propagation.PropagatedContext;
 import jakarta.inject.Singleton;
-
-import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Singleton
 public class HealthService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(HealthService.class);
+
+    private record Snapshot(List<ProbeResult> results, long takenAtNanos) {}
 
     private final AppSettings settings;
     private final List<DependencyHealthProbe> probes;
     private final IngestHealthProvider ingestProvider;
     private final SystemMetrics systemMetrics;
     private final LastRequestTracker lastRequest;
-    private final long startMillis = System.currentTimeMillis();
+    private Snapshot cached; // guarded by this
 
-    public HealthService(AppSettings settings, List<DependencyHealthProbe> probes,
-                         IngestHealthProvider ingestProvider, SystemMetrics systemMetrics,
-                         LastRequestTracker lastRequest) {
+    public HealthService(
+            AppSettings settings,
+            List<DependencyHealthProbe> probes,
+            IngestHealthProvider ingestProvider,
+            SystemMetrics systemMetrics,
+            LastRequestTracker lastRequest) {
         this.settings = settings;
         this.probes = probes;
         this.ingestProvider = ingestProvider;
@@ -40,52 +58,139 @@ public class HealthService {
         this.lastRequest = lastRequest;
     }
 
-    private double uptimeSeconds() {
-        return Math.round((System.currentTimeMillis() - startMillis) / 10.0) / 100.0;
-    }
-
     public LivenessResponse liveness() {
-        return new LivenessResponse("alive", uptimeSeconds());
+        return new LivenessResponse("alive", systemMetrics.processUptimeSeconds());
     }
 
-    private List<ProbeResult> gather() {
-        List<ProbeResult> results = new ArrayList<>();
-        for (DependencyHealthProbe p : probes) {
-            try {
-                results.add(p.probe());
-            } catch (Exception e) {
-                results.add(ProbeResult.down(p.name(), 0.0, "unavailable"));
-            }
+    /** Names of the registered dependency probes, in probe order. */
+    public List<String> dependencyNames() {
+        return probes.stream().map(DependencyHealthProbe::name).toList();
+    }
+
+    /**
+     * Probe results reused for {@code health-cache-ttl-seconds}, so a frequent {@code /metrics}
+     * scrape or {@code /health/status} poll does not ping every store on each call. Concurrent
+     * callers share one probe round.
+     */
+    public synchronized List<ProbeResult> dependencies() {
+        long ttlNanos = (long) (settings.healthCacheTtlSeconds() * 1_000_000_000L);
+        Snapshot s = cached;
+        if (s == null || System.nanoTime() - s.takenAtNanos() >= ttlNanos) {
+            s = new Snapshot(probeAll(), System.nanoTime());
+            cached = s;
         }
-        return results;
+        return s.results();
     }
 
+    /**
+     * Runs every probe concurrently (one virtual thread each), bounded by {@code
+     * health-check-timeout-seconds}: a blackholed dependency reports down after the timeout instead
+     * of hanging the readiness probe. Results keep probe order.
+     */
+    private List<ProbeResult> probeAll() {
+        long timeoutNanos = (long) (settings.healthCheckTimeoutSeconds() * 1_000_000_000L);
+        // Not try-with-resources: close() would wait for a hung probe to finish.
+        ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
+        // Bare threads start with an empty context: carry the request's propagated
+        // context (correlation id in MDC, ServerRequestContext) into each probe.
+        PropagatedContext context = PropagatedContext.getOrEmpty();
+        try {
+            List<Future<ProbeResult>> futures =
+                    probes.stream()
+                            .map(p -> pool.submit(context.wrap((Callable<ProbeResult>) p::probe)))
+                            .toList();
+            long deadline = System.nanoTime() + timeoutNanos;
+            List<ProbeResult> results = new ArrayList<>(probes.size());
+            for (int i = 0; i < probes.size(); i++) {
+                results.add(await(probes.get(i), futures.get(i), deadline));
+            }
+            cacheLatest(results);
+            return results;
+        } finally {
+            pool.shutdownNow(); // interrupts any probe still running past the deadline
+        }
+    }
+
+    private synchronized void cacheLatest(List<ProbeResult> results) {
+        cached = new Snapshot(results, System.nanoTime());
+    }
+
+    private ProbeResult await(
+            DependencyHealthProbe probe, Future<ProbeResult> future, long deadline) {
+        double latencyMs = 0.0;
+        try {
+            return future.get(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (TimeoutException e) {
+            latencyMs = Math.round(settings.healthCheckTimeoutSeconds() * 1000.0);
+            LOG.error(
+                    "health probe {} timed out after {}s",
+                    probe.name(),
+                    settings.healthCheckTimeoutSeconds());
+        } catch (ExecutionException e) {
+            LOG.error("health probe {} failed", probe.name(), e.getCause());
+        }
+        future.cancel(true);
+        // Never the raw exception: health payloads are unauthenticated (detail is logged).
+        return ProbeResult.down(probe.name(), latencyMs, "unavailable");
+    }
+
+    /** Always probes live: an orchestrator acts on readiness, so it must not be stale. */
     public ReadinessResponse readiness() {
-        List<ProbeResult> deps = gather();
+        List<ProbeResult> deps = probeAll();
         IngestHealth ingest = ingestProvider.currentHealth();
-        String ingestStatus = "connected".equals(ingest.connectionState()) ? "up" : "down";
+        ProbeStatus ingestStatus = ingestUp(ingest) ? ProbeStatus.UP : ProbeStatus.DOWN;
 
         List<CheckResult> checks = new ArrayList<>();
         for (ProbeResult d : deps) {
-            checks.add(new CheckResult(d.name(), d.status(), d.latencyMs(), null, null, null, null, null, d.error()));
+            checks.add(
+                    new CheckResult(
+                            d.name(),
+                            d.status(),
+                            d.latencyMs(),
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            d.error()));
         }
-        checks.add(new CheckResult("ingest", ingestStatus, null, ingest.transport(), ingest.connectionState(),
-            ingest.threadAlive(), ingest.lastBatchAt(), ingest.secondsSinceLastBatch(), null));
+        checks.add(
+                new CheckResult(
+                        "ingest",
+                        ingestStatus,
+                        null,
+                        ingest.transport(),
+                        ingest.connectionState(),
+                        ingest.threadAlive(),
+                        ingest.lastBatchAt(),
+                        ingest.secondsSinceLastBatch(),
+                        null));
 
-        boolean allUp = deps.stream().allMatch(d -> d.status().equals("up")) && ingestStatus.equals("up");
-        return new ReadinessResponse(allUp ? "ready" : "not_ready", checks);
+        boolean allUp = deps.stream().allMatch(ProbeResult::isUp) && ingestStatus == ProbeStatus.UP;
+        return new ReadinessResponse(
+                allUp ? ReadinessStatus.READY : ReadinessStatus.NOT_READY, checks);
+    }
+
+    /**
+     * With the noop transport there is nothing to be connected to, so ingest never blocks
+     * readiness.
+     */
+    private static boolean ingestUp(IngestHealth ingest) {
+        return "noop".equals(ingest.transport())
+                || ingest.connectionState() == ConnectionState.CONNECTED;
     }
 
     public DetailedStatusResponse detailedStatus() {
-        List<ProbeResult> deps = gather();
-        IngestHealth ingest = ingestProvider.currentHealth();
-        double bootSeconds = ManagementFactory.getRuntimeMXBean().getStartTime() / 1000.0;
         return new DetailedStatusResponse(
-            new AppInfo(settings.getAppTitle(), settings.getAppVersion(), settings.getStatus()),
-            new UptimeInfo(uptimeSeconds(), bootSeconds),
-            deps,
-            ingest,
-            new RequestInfo(lastRequest.lastRequestAt()),
-            systemMetrics.snapshot());
+                new AppInfo(settings.appTitle(), settings.appVersion(), settings.status()),
+                new UptimeInfo(
+                        systemMetrics.processUptimeSeconds(),
+                        systemMetrics.systemBootEpochSeconds()),
+                dependencies(),
+                ingestProvider.currentHealth(),
+                new RequestInfo(lastRequest.lastRequestAt()),
+                systemMetrics.snapshot());
     }
 }

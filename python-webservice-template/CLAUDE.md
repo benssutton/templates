@@ -1,142 +1,137 @@
 ﻿# Python Template
 
-A Python FastAPI service with MCP endpoints and Rust extensions, ready for Claude.
+FastAPI service with an MCP mount, wired to Postgres, ClickHouse, Redis and Solace,
+with no business logic. [README.md](README.md) maps the features and the wire
+contract; this file holds what you need to change the code safely.
 
-This application is intended as an illustration and re-usable template of best practices when creating a REST-first webservice using FastAPI. See the following sections in this document for details of those best practices.
+## Commands
 
-## Architecture
-```
-main.py                         FastAPI app entry point; lifespan manages DB connections
-settings.py                     Pydantic BaseSettings config; env vars override defaults
-  certs/                        Self-signed SSL certificates & certificate generation script
-  ingestion/                    Streaming transports behind BatchConsumer: solace/ (Guaranteed), noop/
-  core/                         DI container and dependency getters
-  docs/                         Folder for Claude to store specs and plans.  Not used by the application.
-  mcp_routers/                  MCP tools, resources and prompts
-  persistence/
-    analytics_store/
-      clickhouse/               ClickHouse via clickhouse-connect async client
-    cache_store/
-      redis/                    Redis via redis-py async client
-    stream_store/               In-memory LSM store of record batches
-    transaction_store/          
-      postgres/                 Postgres via asyncpg connection pool
+Repo-root pipeline (p315 interpreter, see root CLAUDE.md):
 
-  routers/                      REST endpoints (health, data, config)
-  schemas/                      Pydantic request/response models
-  scripts/                      SQL DDL for both Postgres and ClickHouse (run at startup / via docker-compose)
-  services/                     All business logic (health, data, config)
-  tests/                        Pytest integration tests + k6 performance tests
-    test_data/                  Binary test fixtures (clickhouse_seed_data.ipc) + fixture generator notebook
-    publishers/                 Reusable dummy publishers used by tests and docker-compose (solace_publisher.py)
-    performance/                k6 performance test scripts
-      lib/                      Shared k6 check helpers and SLO threshold presets
-      data/                     k6 test data (rows_params.json, clickhouse-seed.sh)
+```bash
+python run_CICD.py python fmt          # black + ruff --fix (rewrites files)
+python run_CICD.py python fast         # fmt-check + lint + typecheck (seconds)
+python run_CICD.py python test         # full pytest suite + coverage gate (needs Docker)
 ```
 
-## Stack
-- FastAPI + Pydantic
-- asyncpg — Postgres (pgvector image) transaction store (direct, no ORM)
-- clickhouse-connect[async] — ClickHouse analytics store
-- polars / pyarrow — data shaping and Arrow IPC fixtures
-- pytest + testcontainers — integration tests against real DB containers
-- k6 — performance tests (smoke, load, stress)
-- Docker Compose -- full local stack (Postgres, ClickHouse, app)
-- GitLab CI -- pytest and k6 as quality gates
+From this directory:
+
+```bash
+python -m black . && python -m ruff check .     # format, lint
+python -m pyright                              # typecheck
+pytest tests/test_cache.py::test_post_cache_without_ttl -v   # one test
+```
+
+Never connect to a container a developer may have running; every pytest session
+starts its own (Testcontainers) and destroys them afterwards. Do not use
+`-o faulthandler_timeout` on the p315 interpreter: CPython 3.15's
+`dump_traceback_later` deadlocks between tests; use `py-spy dump --pid` instead.
+
+## Layout
+
+```
+main.py            create_app(settings) + lifespan: connect, migrate, build AppServices
+settings.py        every setting (env / .env override)
+core/              pure-ASGI middleware (body limit, correlation, auth, Server-Timing,
+                   last request), errors, logging, tracing, retry, typed dependencies
+routers/           thin REST endpoints        services/   logic + AppServices dataclass
+schemas/           Pydantic models            mcp_routers/tools.py   MCP tools
+persistence/       store clients, LSM store, migrations runner
+migrations/        NNN_name.sql per store     ingestion/  solace + noop transports
+tests/             pytest (+ support/ helpers, publishers/, performance/ k6)
+```
 
 ## Key Patterns
 
-**App Factory & Dependency Injection**
-- `main.create_app(settings)` builds a fully isolated app: its own `Container`, its own `FastMCP` instance, and its own lifespan. Nothing app-scoped lives at module level except `app = create_app(get_settings())` for uvicorn.
-- This isolation is load-bearing: the MCP session manager can only `run()` once per instance, so any code path that needs a second app (e.g. tests with a different ingest transport) must call `create_app` again — never re-run a lifespan against an existing app.
-- Custom `Container` in `core/container.py` holds singletons, one instance per app, stored on `app.state.container`; `core/dependencies.py` getters resolve it from `request.app.state` and provide `Annotated` type aliases for routes.
-- MCP tools run outside FastAPI's request DI, so `mcp_routers.tools.register(mcp, container)` receives the container explicitly and captures it in tool closures.
-- Singletons that depend on external connections (e.g. `DataService`) are registered in the lifespan *after* health checks pass, not at container initialisation time.
+**App isolation.** `create_app` builds everything per app (services, FastMCP whose
+session manager runs once per instance, lifespan). Nothing app-scoped is
+module-level except `app = create_app(get_settings())`. A second app means a
+second `create_app` call, never a second lifespan on the same app.
 
-**Async**
-- All I/O is async. Synchronous blocking calls (e.g. `Path.read_text()`) are acceptable outside of async context managers.
+**Services and DI.** The lifespan builds a frozen `AppServices` (services/app_services.py)
+once every store is connected and puts it on `app.state.services`. Routes take
+`Annotated` aliases from `core/dependencies.py` (`ConfigServiceDep`, ...). MCP
+tools get a `lambda: app.state.services` and call the same service methods.
+HealthService receives one `ping()` per store; it never imports other services.
 
-**Config**
-- `settings.py` uses Pydantic `BaseSettings` -- env vars override defaults, `.env` is auto-loaded.
+**Middleware is pure ASGI only.** Never add `BaseHTTPMiddleware` /
+`@app.middleware("http")`: it runs `receive()` in a task group, turning the 413
+raised mid-read into an ExceptionGroup (FastAPI then answers 400). Order
+(outermost first): body limit, correlation, CORS, auth (if enabled), Server-Timing,
+last request.
 
-**Persistence -- Postgres**
-- `PostgresClient` in `persistence/transaction_store/postgres/postgres_client.py` mirrors `ClickHouseClient`: async context manager whose `__aenter__` returns a live `asyncpg.Pool`, `__aexit__` closes it.
-- In `main.py` the lifespan wraps startup in `async with PostgresClient(settings) as pg_pool:`. `ConfigService` is registered as a singleton holding the pool.
-- Schema is in `scripts/postgres-init.sql` (DDL only, `CREATE TABLE IF NOT EXISTS`). The lifespan runs it at startup -- idempotent, no migration tooling needed.
-- Services acquire connections per-operation via `async with pool.acquire() as conn:`. No session injection into routes.
+**Errors.** Every error body is `{"detail": ...}`. Raise `HTTPException` in routes;
+driver connection/timeout errors (`core/errors.STORE_UNAVAILABLE_ERRORS`) become
+503 without any code in the service; anything else becomes a generic 500. The
+mounted MCP app's plain-text rejections are rewritten by `JsonErrorBodyMiddleware`.
 
-**Persistence -- ClickHouse**
-- `ClickHouseClient` in `persistence/analytics_store/clickhouse/clickhouse_client.py` is an async context manager class. Use `async with ClickHouseClient(settings) as client:` -- `__aenter__` returns the raw `AsyncClient`, `__aexit__` closes it. No module-level global state.
-- In `main.py` the lifespan wraps startup in `async with ClickHouseClient(settings) as ch_client:` so the connection is guaranteed to close on shutdown whether cleanly or via exception.
+**Stores.** Each client is an async context manager that connects with backoff,
+smoke-tests and (Postgres, ClickHouse) applies migrations in `__aenter__`. All
+timeouts and pool sizes are `Settings` fields. Services acquire connections per
+operation. Redis must have RedisJSON (probed at startup). The pgvector `vector`
+extension is enabled deliberately for future embedding features.
 
-**Routers**
-- Routers implement minimal business logic and call service methods.
-- Each router file exports `TAG` and `TAG_METADATA` constants (name + description). `main.py` assembles `openapi_tags` from these exports -- tag metadata is co-located with the router that owns it, not in `Settings`.
+**Migrations.** Add `migrations/<store>/NNN_name.sql`; never edit an applied file.
+Postgres runs all pending files in one transaction under the advisory lock
+(`SCHEMA_LOCK_ID`, same as Rust). ClickHouse files must be one idempotent
+statement each (no transactions or locks there).
 
-**MCP**
-- MCP tools, resources and prompts implement minimal logic and call service methods.
+**LSM store.** Single logical writer: `ingest()` holds a `threading.Lock` for the
+whole write, so HTTP worker threads and the transport thread can both call it.
+Readers take no lock (atomic snapshot swap). The first accepted batch fixes the
+schema; `validate()` refuses a conflicting one. Tombstones are reclaimed only at
+full compaction.
 
-**Persistence -- LSM Stream Store**
-- `LSMStore` in `persistence/stream_store/lsm_store.py` is a **single-writer** data structure. The ingest consumer thread is the only writer; concurrent calls to `ingest()` produce undefined behaviour.
-- Readers (`query()`) are safe from any thread or coroutine: `_publish()` swaps the snapshot reference atomically, so readers always see a consistent, immutable snapshot.
-- Delete tombstones are reclaimed only during full compaction (when run count reaches `lsm_compaction_runs`). Until then, a tombstone in the memtable or an un-compacted run shadows older versions of the same key.
+**Ingest policy.** `StreamIngestService._write_all` checks every batch (decoded
+size against `max_ingest_batch_bytes`, then `LSMStore.validate`) before writing
+any; HTTP maps refusals to 413/422, Solace to REJECTED. Settlement: ACCEPTED after
+the write, FAILED (redelivered with backoff) when the write raises, REJECTED for
+unreadable, unmergeable or oversized messages. The HTTP body limit
+(`max_request_body_bytes`) is separate and enforced by the outermost middleware.
 
-**Inbound Size Policy**
-- Two independent limits guard against oversized payloads:
-  1. **HTTP body limit** (`max_request_body_bytes`, default 16 MiB): enforced by `core/request_limits.MaxBodySizeMiddleware` — the outermost middleware. Returns 413 before the route handler runs (or after body drain for chunked uploads without `Content-Length`).
-  2. **Decoded batch limit** (`max_ingest_batch_bytes`, default 16 MiB): enforced in `services/stream_ingest._record_ingest` (the Solace outcome is decided in `_decide`, which validates every batch of a message — size plus `LSMStore.validate` — before writing any, so a REJECTED message leaves nothing in the store). A batch that exceeds this after Arrow IPC decoding is logged at ERROR level. Java measures the encoded payload instead (deliberate divergence, see README). HTTP path: the batch is dropped and the request still returns 202 so the caller is not retried. Solace path: the message is REJECTED — never redelivered (to the DMQ if configured).
-- Both limits are `Settings` fields and can be tuned per deployment or per-test without code changes.
+**Solace.** One durable exclusive queue per replica. The SDK reconnects forever;
+a terminal interruption makes `deliveries()` raise, the loop backs off and
+reconnects with a fresh service. A bind or delivery resets the failure count.
+Give-up points: the disconnect watchdog (`ingest_max_disconnect_seconds`) and
+`ingest_max_consecutive_failures`. Broker-side SEMP disables do not cause a
+terminal interruption under forever-retry; the reconnect test drives the
+listener directly.
 
-**Security Posture**
-- All credential-bearing settings (`postgres_url`, `clickhouse_password`, `redis_url`, `solace_password`) use Pydantic `SecretStr`. Their values are never included in `repr()`, `str()`, or log output. Call `.get_secret_value()` only at the call site that actually needs the raw string.
-- Health-probe endpoints (`/health/ready`, `/health/status`) return `error: "unavailable"` for failed dependency checks — never raw exception strings. Full detail is logged server-side at ERROR level.
-- CORS defaults to `cors_allow_origins=["*"]` which is appropriate for local development. Tighten per deployment by setting specific origins; `cors_allow_credentials=True` is rejected by a `@model_validator` when `"*"` is in the origins list.
-- RedisJSON is a required capability of the Redis instance. The startup smoke-test (`RedisClient._assert_json_module`) probes `JSON.SET` and raises `RuntimeError` if the module is absent, preventing silent data-loss at runtime.
+**Security.** Credentials are `SecretStr`; health payloads carry only
+`"unavailable"`/`"timeout"`. The JWT seam (`core/auth.py`) is off by default; when
+on it covers `/mcp` and exempts only `/health/live` and `/health/ready`.
+`/mcp` Host/Origin allow-list comes from `mcp_allowed_hosts`; never rely on
+FastMCP's default.
 
-**Testing**
-- Tests invoke REST endpoints via an async HTTPX test client.
-- Each client fixture builds its own isolated app with `tests/app_client.py::lifespan_test_client(settings)` — the helper calls `main.create_app(settings)`, runs the lifespan in a dedicated task (anyio cancel scopes must enter/exit in one task), and fails fast if startup raises rather than hanging on a readiness event.
-- Because every app is isolated (own container, own MCP), the HTTP-ingest and Solace client fixtures can all run in a single pytest process — "run all tests" works from the IDE.
-- Test behaviour is configured via the `Settings` passed to `create_app` (e.g. `status="testing"`, `ingest_transport`); no monkeypatching, no dependency overrides needed.
-- `test_client` uses the `noop` transport. Anything that streams uses `solace_container` (session-scoped, one broker) plus `solace_names` (a unique topic and queue per test) and the `solace_settings` fixture.
-- Broker-side assertions go through `tests/support/semp.py` (the `semp` helper). Network partitions are simulated with `broker_paused` (`docker pause` of the broker).
-- Broker findings (Task B0, `solace/solace-pubsub-standard:10.26.10`): the default client profile ALLOWS guaranteed endpoint creation, so no init service or SEMP patch is needed; the VPN basic auth type is `none`.
-- Settlement outcomes: ACCEPTED after the store write; FAILED (redelivered, increasing backoff) when the write raises; REJECTED for malformed, unmergeable or oversized batches. Auto-created queues have unlimited max-redelivery and no DMQ; production should configure both. The SDK reconnects forever; if it still reports a terminal interruption, `deliveries()` raises `SolaceServiceInterrupted` (state DOWN), the ingest loop backs off, and the next call reconnects with a fresh `MessagingService` (same backoff as startup, via `connect_with_backoff_sync`). The watchdog (`ingest_max_disconnect_seconds`) and the 5-consecutive-failure limit are the give-up points; a successful bind (`deliveries(on_bound=...)`, called after `receiver.start()`) or a delivery resets the failure count and backoff, so healed interruptions on a quiet queue never add up to a shutdown. Startup still fails fast if the broker is unreachable (Java connects lazily instead). Broker-side SEMP actions (disabling the client username or the VPN) do NOT produce a terminal interruption under forever-retry; the reconnect test drives the listener directly. One queue per replica.
-- Each test session starts fresh testcontainer instances for Postgres, ClickHouse, Redis and Solace; containers are torn down at session end.
-- Postgres schema is created from `scripts/postgres-init.sql` via the `postgres_pool` fixture.
-- ClickHouse schema is created from `scripts/clickhouse-init.sql` (single source of truth shared with docker-compose). Seed data is loaded from `tests/test_data/clickhouse_seed_data.ipc` via `client.insert_arrow()`.
+**Testing.** Tests call real endpoints through `tests/app_client.lifespan_test_client`
+(lifespan in its own task; fails fast if startup raises) against real containers.
+Behaviour is configured through the `Settings` passed to `create_app`: no
+monkeypatching, no dependency overrides. `test_client` is the shared noop app;
+streaming tests use the session broker plus `solace_names` (unique topic and
+queue per test) and `solace_settings`. Outages are simulated with dedicated
+containers (stop / `docker pause`). Tests run sequentially in one event loop.
 
-**Performance Tests**
-- `tests/performance/lib/checks.js` -- shared k6 check helpers (`checkStatus200`, `checkDataCount`, `checkDataRows`).
-- `tests/performance/lib/thresholds.js` -- named SLO presets (`STRICT_SLO`, `NORMAL_SLO`, `RELAXED_SLO`) spread into `options.thresholds`.
-- Three scripts: `smoke.js` (1 VU/30 s, hard CI gate), `load.js` (ramping-vus + constant-vus, hard gate), `stress.js` (ramping-arrival-rate, soft gate).
-- k6 is run via a `tests/performance/Dockerfile` image built in CI -- avoids docker:dind volume-mount issues.
-- The docker-compose project is named `python-template` so the network is always `python-template_default`.
+## Recipes
 
-**Performance Profiling**
-- Two-layer bottleneck triage; see `PERF_PROFILING_RUNBOOK.md`.
-- Layer 1 (every run, report-only): `core/boundary_timing.py` emits a W3C `Server-Timing` response header built from `timed()` boundary samples held in a request-scoped `ContextVar`; `tests/performance/profile_reads.js` and `profile_ingest.js` parse it into a ranked per-endpoint attribution table + `attribution.json`.
-- Layer 2 (on demand): `tests/performance/profile/run_pyspy.sh` attaches py-spy to the app container (needs `docker-compose.profiling.yml` for the `SYS_PTRACE` cap) and emits flamegraphs that classify CPU/GIL- vs I/O-bound contention.
-- Boundary samples are request-scoped, so background work (the streaming ingest thread) never pollutes a request's header and multiple isolated test apps cannot collide.
+**Add an endpoint.** Schema in `schemas/`; method on the service in `services/`;
+route in `routers/<area>.py` using the `...ServiceDep` alias (new router: export
+`TAG`/`TAG_METADATA`, include it and its tag in `main.create_app`); test in
+`tests/test_<area>.py` through `test_client`. Errors: raise `HTTPException`.
 
-**SQL Management**
-- `scripts/postgres-init.sql` -- DDL only (CREATE TABLE IF NOT EXISTS). Run by the app lifespan at startup and by pytest via `postgres_pool` fixture.
-- `scripts/clickhouse-init.sql` -- DDL only (CREATE TABLE). Used by both docker-compose and pytest.
-- `tests/performance/data/clickhouse-seed.sh` -- shell script that bulk-loads the Arrow IPC fixture (`clickhouse_seed_data.ipc`) via `clickhouse-client ... FORMAT Arrow`. Used by docker-compose for performance test data.
-- docker-compose mounts the ClickHouse scripts as `01-schema.sql` and `02-seed.sh` so ClickHouse runs them in order.
+**Add a store.** Client context manager under `persistence/<kind>/<name>/`
+(connect with `connect_with_backoff`, smoke-test, timeouts from new `Settings`
+fields); a service with a `ping()`; enter the client in the lifespan, add the
+service to `AppServices` and its `ping` to the `HealthService` pings; add its
+connection/timeout exception types to `STORE_UNAVAILABLE_ERRORS`; a session
+container fixture in `tests/conftest.py` with the image pinned in
+`tests/support/images.py`; migrations under `migrations/<name>/` if it has a schema.
 
-## Database Investigation
+**Add an MCP tool.** In `mcp_routers/tools.py`, an `@mcp.tool()` that calls the
+same service method as the REST route and returns its response model; extend
+`test_mcp_tools_mirror_rest_endpoints`.
 
-When investigating a Postgres-related issue, always start a fresh container via `testcontainers` by running the relevant pytest test:
+## Performance
 
-```bash
-pytest tests/test_config.py -v -s
-```
-
-When investigating a ClickHouse-related issue, run:
-
-```bash
-pytest tests/test_data.py -v -s
-```
-
-Never connect to any container a developer may have running locally. Never assume an existing container is safe to query or modify. Do not reuse containers between investigations -- each pytest session starts a clean, isolated container that is destroyed when the session ends.
+k6 scripts in `tests/performance/` (`smoke.js` is the CI gate) run against the
+compose stack (`python-template_default` network, `BASE_URL=https://app:8443`).
+Profiling: Server-Timing attribution and py-spy, see PERF_PROFILING_RUNBOOK.md.

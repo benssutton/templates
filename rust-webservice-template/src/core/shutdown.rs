@@ -1,6 +1,6 @@
-//! Process-wide graceful-shutdown trigger (spec §2 "Graceful shutdown").
+//! Process-wide graceful-shutdown trigger.
 //! Shutdown order, owned by `server::serve` and `App::close`:
-//! close the consumer (R3) -> drain in-flight HTTP -> close pools (R2).
+//! stop the consumer -> drain in-flight HTTP -> close the consumer and pools.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -35,7 +35,8 @@ impl Shutdown {
         self.token.cancelled().await;
     }
 
-    /// For components that select on the token directly (R3 ingest task).
+    /// For components that select on the token directly (the ingest task,
+    /// MCP event streams).
     pub fn token(&self) -> CancellationToken {
         self.token.clone()
     }

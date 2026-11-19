@@ -1,4 +1,4 @@
-//! Process and host resource snapshot (Python core/system_metrics.py, psutil).
+//! Process and host resource snapshot (sysinfo).
 //!
 //! CPU percentages are deltas since the previous refresh, so `new()` primes
 //! once (the first reading would otherwise be 0). `num_threads` uses

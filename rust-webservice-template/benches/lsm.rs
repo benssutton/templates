@@ -1,5 +1,5 @@
-//! criterion benchmark for the LSM merge and full-compaction paths (spec
-//! goal 2). Run: `cargo bench --bench lsm`. Under `cargo test --all-targets`
+#![allow(clippy::expect_used)]
+//! criterion benchmark for the LSM merge and full-compaction paths. Run: `cargo bench --bench lsm`. Under `cargo test --all-targets`
 //! criterion runs each benchmark once, as a smoke test.
 
 use arrow::array::{ArrayRef, Int64Array, RecordBatch, StringArray, UInt64Array};

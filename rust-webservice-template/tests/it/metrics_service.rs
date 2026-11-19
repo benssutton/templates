@@ -1,6 +1,6 @@
 use crate::probes::probe;
+use crate::probes::NoopIngestHealth;
 use rust_template::core::last_request::LastRequest;
-use rust_template::health::ingest::NoopIngestHealth;
 use rust_template::health::registry::ProbeRegistry;
 use rust_template::services::health::HealthService;
 use rust_template::services::metrics::MetricsService;
@@ -117,13 +117,31 @@ fn le_values(text: &str, name: &str) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn histograms_use_python_bucket_boundaries() {
+async fn histograms_use_their_configured_bucket_boundaries() {
     let metrics = MetricsService::new(&Settings::default()).unwrap();
     metrics.record_request("GET", "/x", 200, Duration::from_millis(3));
     let text = metrics.render(&health(ProbeRegistry::default())).await;
     assert_eq!(
         le_values(&text, "http_request_duration_seconds"),
-        ["0.1", "0.5", "1", "+Inf"]
+        [
+            "0.005", "0.01", "0.025", "0.05", "0.1", "0.25", "0.5", "1", "2.5", "5", "10", "30",
+            "+Inf"
+        ]
+    );
+    metrics.record_sizes("/x", 10, 2_000);
+    let text = metrics.render(&health(ProbeRegistry::default())).await;
+    assert_eq!(
+        le_values(&text, "http_response_size_bytes"),
+        [
+            "100",
+            "1000",
+            "10000",
+            "100000",
+            "1000000",
+            "10000000",
+            "100000000",
+            "+Inf"
+        ]
     );
     assert_eq!(
         le_values(&text, "http_request_duration_highr_seconds"),

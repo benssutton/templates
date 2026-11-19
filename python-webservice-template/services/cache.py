@@ -1,13 +1,8 @@
-import logging
-import time
 from typing import Any
 
 import redis.asyncio as aioredis
 
 from schemas.cache import CacheEntry
-from schemas.health import ProbeResult
-
-log = logging.getLogger(__name__)
 
 
 class CacheService:
@@ -32,21 +27,5 @@ class CacheService:
         ttl = await self._client.ttl(key)
         return CacheEntry(key=key, value=result, ttl_seconds=ttl if ttl >= 0 else None)
 
-    async def health_check(self) -> ProbeResult:
-
-        start = time.perf_counter()
-        try:
-            await self._client.ping()
-            latency_ms = (time.perf_counter() - start) * 1000
-            return ProbeResult(
-                name="redis", status="up", latency_ms=round(latency_ms, 2)
-            )
-        except Exception as exc:
-            latency_ms = (time.perf_counter() - start) * 1000
-            log.error("redis health check failed: %s", exc)
-            return ProbeResult(
-                name="redis",
-                status="down",
-                latency_ms=round(latency_ms, 2),
-                error="unavailable",
-            )
+    async def ping(self) -> None:
+        await self._client.ping()

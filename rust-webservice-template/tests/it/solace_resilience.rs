@@ -2,7 +2,7 @@
 //! and watchdog) and a denied queue bind, each driving the ingest state
 //! machine and the app's Shutdown.
 //!
-//! The two pause tests hold the write lease (`solace_exclusive`, Deviation 7)
+//! The two pause tests hold the write lease (`solace_exclusive`)
 //! for their whole run, so no other broker test runs while the broker is
 //! frozen; its drop guard unpauses the broker even when a test fails.
 
@@ -19,10 +19,10 @@ use rust_template::settings::Settings;
 use serde_json::Value;
 use std::time::{Duration, Instant};
 
-/// D11: reconnect + re-bind after unpause measured ~0 s (findings Q5);
+/// Reconnect + re-bind after unpause measured ~0 s;
 /// generous headroom.
 const RECONNECT_TIMEOUT: Duration = Duration::from_secs(90);
-/// D6: a frozen broker surfaces after the 5 s idle timeout (~4.9 s measured).
+/// A frozen broker surfaces after the 5 s idle timeout (~4.9 s measured).
 const DETECT_TIMEOUT: Duration = Duration::from_secs(45);
 
 async fn poll_state(app: &TestApp, state: &str, timeout: Duration) {
@@ -162,7 +162,7 @@ async fn a_paused_broker_trips_the_watchdog() {
 
     broker.pause().await;
     let paused_at = Instant::now();
-    // D6: detection ~5 s, + the 2 s threshold, + the 1 s watchdog poll, + headroom.
+    // Detection ~5 s, + the 2 s threshold, + the 1 s watchdog poll, + headroom.
     let tripped =
         tokio::time::timeout(Duration::from_secs(25), app.state.shutdown.triggered()).await;
     let elapsed = paused_at.elapsed();
@@ -191,7 +191,7 @@ async fn a_denied_bind_requests_shutdown_after_five_consecutive_failures() {
     let lease = containers::solace().await;
     let semp = Semp::new(&lease.endpoints.semp_url());
     let names = SolaceNames::new();
-    // Deviation 8: owner-less no-access queue, bound anonymously as `default`.
+    // An owner-less no-access queue, bound anonymously as `default`.
     semp.create_queue(&names.queue, "no-access", None)
         .await
         .unwrap();

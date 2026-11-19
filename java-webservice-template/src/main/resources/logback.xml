@@ -1,10 +1,28 @@
 <configuration>
-  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+  <!-- LOG_FORMAT: json (default; one JSON object per line, MDC correlationId included)
+       or text for local reading. LOG_LEVEL sets the root level (default INFO); per-logger
+       levels also work through Micronaut's logger.levels.* properties. -->
+  <variable name="LOG_FORMAT" value="${LOG_FORMAT:-json}"/>
+  <variable name="LOG_LEVEL" value="${LOG_LEVEL:-INFO}"/>
+
+  <appender name="json" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder class="ch.qos.logback.classic.encoder.JsonEncoder">
+      <withSequenceNumber>false</withSequenceNumber>
+      <withNanoseconds>false</withNanoseconds>
+      <withContext>false</withContext>
+      <withArguments>false</withArguments>
+      <withMessage>false</withMessage>
+      <withFormattedMessage>true</withFormattedMessage>
+    </encoder>
+  </appender>
+
+  <appender name="text" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
       <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{correlationId:-}] [%thread] %logger{36} - %msg%n</pattern>
     </encoder>
   </appender>
-  <root level="INFO">
-    <appender-ref ref="STDOUT"/>
+
+  <root level="${LOG_LEVEL}">
+    <appender-ref ref="${LOG_FORMAT}"/>
   </root>
 </configuration>

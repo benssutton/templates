@@ -47,12 +47,12 @@ async fn an_unreachable_store_aborts_connect() {
 
 use crate::support::TestApp;
 
-/// Python's lifespan: connect, run postgres-init.sql, register the probes.
-/// `create_app` must do the same before it returns.
+/// `create_app` connects the stores, applies the migrations and registers
+/// one probe per store before it returns.
 #[tokio::test]
 async fn create_app_connects_the_stores_and_registers_their_probes() {
     let app = TestApp::spawn(app_settings().await).await;
-    assert_eq!(app.state.probes.len(), 3);
+    assert_eq!(app.state.health.dependencies().await.len(), 3);
     let version: Option<String> =
         sqlx::query_scalar("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
             .fetch_optional(app.state.stores.postgres.pool())
@@ -60,7 +60,7 @@ async fn create_app_connects_the_stores_and_registers_their_probes() {
             .unwrap();
     assert!(
         version.is_some(),
-        "create_app must run scripts/postgres-init.sql"
+        "create_app must apply migrations/postgres"
     );
 }
 
@@ -100,7 +100,7 @@ async fn create_app_starts_ingest_with_the_noop_consumer_and_close_stops_it() {
     assert!(!ingest.is_running());
 }
 
-/// Fail fast (spec §2): an unreachable broker aborts startup after
+/// Fail fast: an unreachable broker aborts startup after
 /// connect_max_attempts, and the already-connected stores are closed.
 #[tokio::test]
 async fn an_unreachable_broker_makes_create_app_fail() {

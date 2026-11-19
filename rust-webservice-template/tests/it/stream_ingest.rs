@@ -4,20 +4,22 @@
 //! implementations: a scripted consumer, recording settlements, a store
 //! whose write always fails, and an LSM store behind a gate.
 
+use crate::probes::NoopIngestHealth;
 use crate::support::batches::{batch_without_id, make_batch};
 use crate::support::gated_store::GatedStore;
 use arrow::array::RecordBatch;
 use rust_template::core::last_request::LastRequest;
 use rust_template::core::shutdown::Shutdown;
-use rust_template::health::ingest::{IngestHealthProvider, NoopIngestHealth};
+
 use rust_template::health::registry::ProbeRegistry;
 use rust_template::ingestion::ipc::batch_bytes;
 use rust_template::ingestion::{BatchConsumer, ConnectionState, Delivery, Settle};
 use rust_template::persistence::stream_store::lsm::LsmStore;
 use rust_template::persistence::stream_store::{QueryResult, StoreError, StreamStore};
+use rust_template::schemas::health::Status;
 use rust_template::services::health::HealthService;
 use rust_template::services::metrics::MetricsService;
-use rust_template::services::stream_ingest::StreamIngestService;
+use rust_template::services::stream_ingest::{IngestError, StreamIngestService};
 use rust_template::settings::{IngestTransport, Settings};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -168,7 +170,7 @@ struct FailingStore;
 
 #[async_trait::async_trait]
 impl StreamStore for FailingStore {
-    async fn ingest(&self, _batch: RecordBatch) -> Result<(), StoreError> {
+    async fn ingest(&self, _batch: RecordBatch) -> Result<u64, StoreError> {
         Err(StoreError::Internal("simulated storage failure".into()))
     }
     fn validate(&self, _batches: &[RecordBatch]) -> Result<(), StoreError> {
@@ -598,10 +600,10 @@ async fn a_dropped_http_ingest_still_records_the_committed_rows() {
     let entered = store.entered.notified();
     let dropped = tokio::time::timeout(
         Duration::from_millis(100),
-        svc.ingest_batch(make_batch(&[
+        svc.ingest(vec![make_batch(&[
             (1, "a", "v1", "upsert"),
             (2, "b", "v1", "upsert"),
-        ])),
+        ])]),
     )
     .await;
     assert!(dropped.is_err(), "the write was still pending at the gate");
@@ -684,13 +686,13 @@ async fn ingest_health_tracks_freshness_after_an_http_ingest() {
         settings(),
     );
     let before = svc.ingest_health();
-    assert_eq!(before.transport, "noop");
-    assert_eq!(before.connection_state, "connected");
+    assert_eq!(before.transport, IngestTransport::Noop);
+    assert_eq!(before.connection_state, ConnectionState::Connected);
     assert!(before.thread_alive);
     assert!(before.last_batch_at.is_none());
     assert_eq!(before.rows_ingested_total, 0);
 
-    svc.ingest_batch(make_batch(&[(1, "a", "v1", "upsert")]))
+    svc.ingest(vec![make_batch(&[(1, "a", "v1", "upsert")])])
         .await
         .unwrap();
     let after = svc.ingest_health();
@@ -701,15 +703,15 @@ async fn ingest_health_tracks_freshness_after_an_http_ingest() {
     svc.close().await;
 }
 
-/// The JSON shape of Python's `IngestHealth` (schemas/health.py).
+/// The JSON shape of `IngestHealth` in the shared contract, plus `store`.
 #[tokio::test]
-async fn ingest_health_serialises_with_python_field_names() {
+async fn ingest_health_serialises_with_the_contract_field_names() {
     let (svc, _) = start(
         ScriptedConsumer::new(Vec::new(), ConnectionState::Connected),
         lsm(),
         settings(),
     );
-    svc.ingest_batch(make_batch(&[(1, "a", "v1", "upsert")]))
+    svc.ingest(vec![make_batch(&[(1, "a", "v1", "upsert")])])
         .await
         .unwrap();
     let json = serde_json::to_value(svc.ingest_health()).unwrap();
@@ -728,11 +730,12 @@ async fn ingest_health_serialises_with_python_field_names() {
             "rows_ingested_total",
             "seconds_since_last_batch",
             "stale",
+            "store",
             "thread_alive",
             "transport"
         ]
     );
-    // pydantic writes a UTC datetime with at most microseconds: ...T12:34:56.123456Z
+    // A UTC datetime with at most microseconds, as the siblings write it: ...T12:34:56.123456Z
     let at = json["last_batch_at"].as_str().unwrap();
     assert!(at.ends_with('Z'), "{at}");
     let fraction = at.rsplit('.').next().unwrap().trim_end_matches('Z');
@@ -770,7 +773,11 @@ async fn staleness_fails_readiness_only_when_configured() {
             .iter()
             .find(|c| c.name == "ingest")
             .unwrap();
-        let expected = if fails_readiness { "down" } else { "up" };
+        let expected = if fails_readiness {
+            Status::Down
+        } else {
+            Status::Up
+        };
         assert_eq!(ingest.status, expected, "fails_readiness={fails_readiness}");
         svc.close().await;
     }
@@ -791,7 +798,7 @@ async fn staleness_is_reported_only_when_a_threshold_is_set() {
         svc.ingest_health().stale,
         "no batch ever, started > 0.2 s ago"
     );
-    svc.ingest_batch(make_batch(&[(1, "a", "v1", "upsert")]))
+    svc.ingest(vec![make_batch(&[(1, "a", "v1", "upsert")])])
         .await
         .unwrap();
     assert!(!svc.ingest_health().stale, "fresh batch");
@@ -799,7 +806,7 @@ async fn staleness_is_reported_only_when_a_threshold_is_set() {
 }
 
 #[tokio::test]
-async fn http_ingest_drops_an_oversized_batch_and_surfaces_invalid_ones() {
+async fn http_ingest_refuses_oversized_and_invalid_batches() {
     let store = lsm();
     let (svc, _) = start(
         ScriptedConsumer::new(Vec::new(), ConnectionState::Connected),
@@ -809,9 +816,11 @@ async fn http_ingest_drops_an_oversized_batch_and_surfaces_invalid_ones() {
             ..settings()
         },
     );
-    svc.ingest_batch(make_batch(&[(1, "a", "v1", "upsert")]))
-        .await
-        .expect("dropped, not an error");
+    assert!(matches!(
+        svc.ingest(vec![make_batch(&[(1, "a", "v1", "upsert")])])
+            .await,
+        Err(IngestError::TooLarge(_))
+    ));
     assert_eq!(store.query(0).unwrap().total, 0);
     let (svc2, _) = start(
         ScriptedConsumer::new(Vec::new(), ConnectionState::Connected),
@@ -819,8 +828,8 @@ async fn http_ingest_drops_an_oversized_batch_and_surfaces_invalid_ones() {
         settings(),
     );
     assert!(matches!(
-        svc2.ingest_batch(batch_without_id()).await,
-        Err(StoreError::InvalidBatch(_))
+        svc2.ingest(vec![batch_without_id()]).await,
+        Err(IngestError::Invalid(_))
     ));
     svc.close().await;
     svc2.close().await;
@@ -833,10 +842,10 @@ async fn get_data_returns_python_rows_sorted_by_key() {
         lsm(),
         settings(),
     );
-    svc.ingest_batch(make_batch(&[
+    svc.ingest(vec![make_batch(&[
         (2, "b", "v1", "upsert"),
         (1, "a", "v1", "upsert"),
-    ]))
+    ])])
     .await
     .unwrap();
     let page = svc.get_data(1).await.unwrap();

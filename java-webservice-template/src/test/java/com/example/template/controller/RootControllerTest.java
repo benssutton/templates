@@ -1,5 +1,7 @@
 package com.example.template.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.example.template.dto.RootInfo;
 import com.example.template.support.IntegrationSupport;
 import io.micronaut.http.HttpRequest;
@@ -8,8 +10,6 @@ import io.micronaut.http.client.annotation.Client;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
-
-import static org.assertj.core.api.Assertions.assertThat;
 
 @MicronautTest
 class RootControllerTest extends IntegrationSupport {

@@ -22,7 +22,7 @@ def test_rust_ci_builds_scans_and_smokes():
     from cicd import services
 
     assert rust_steps.SETS["ci"] == [
-        "fmt-check", "lint", "test", "coverage", "build-image", "scan-image", "k6-smoke",
+        "fmt-check", "lint", "deny", "test", "coverage", "build-image", "scan-image", "k6-smoke",
     ]
     assert {"build-image", "scan-image", "k6-smoke", "k6-load"} <= set(rust_steps.STEPS)
     rust = services.get("rust")

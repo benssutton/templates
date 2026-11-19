@@ -1,4 +1,6 @@
-use crate::schemas::health::{DetailedStatusResponse, LivenessResponse, ReadinessResponse};
+use crate::schemas::health::{
+    DetailedStatusResponse, LivenessResponse, Readiness, ReadinessResponse,
+};
 use crate::state::AppState;
 use axum::{extract::State, http::StatusCode, Json};
 
@@ -23,10 +25,9 @@ pub async fn get_live(State(state): State<AppState>) -> Json<LivenessResponse> {
 )]
 pub async fn get_ready(State(state): State<AppState>) -> (StatusCode, Json<ReadinessResponse>) {
     let readiness = state.health.readiness().await;
-    let code = if readiness.status == "ready" {
-        StatusCode::OK
-    } else {
-        StatusCode::SERVICE_UNAVAILABLE
+    let code = match readiness.status {
+        Readiness::Ready => StatusCode::OK,
+        Readiness::NotReady => StatusCode::SERVICE_UNAVAILABLE,
     };
     (code, Json(readiness))
 }

@@ -63,3 +63,20 @@ async fn data_read_emits_server_timing() {
         assert!(timing.contains(token), "missing {token} in {timing}");
     }
 }
+
+/// `GET /data` is ordered by `id`, so pages are stable.
+#[tokio::test]
+async fn rows_are_ordered_by_id() {
+    let app = TestApp::spawn(app_settings().await).await;
+    let (status, body) = app.get_json("/data?limit=100").await;
+    assert_eq!(status, 200);
+    let ids: Vec<u64> = body["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_u64().unwrap())
+        .collect();
+    let mut sorted = ids.clone();
+    sorted.sort_unstable();
+    assert_eq!(ids, sorted);
+}

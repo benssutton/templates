@@ -1,35 +1,51 @@
-//! In-memory LSM (Log-Structured Merge) store for Arrow record batches: a
-//! port of python persistence/stream_store/lsm_store.py onto arrow-rs kernels.
+//! In-memory LSM (Log-Structured Merge) store for Arrow record batches, on
+//! arrow-rs compute kernels.
 //!
 //! Single logical writer: `ingest` holds a `tokio::sync::Mutex` over the
 //! writer state for the whole write, so the ingest task and the HTTP ingest
 //! path are serialised. The lock is awaited on the async side and the CPU
-//! work (merge, flush, compaction) runs on the blocking pool. Readers load an immutable `Arc<Snapshot>` from an
-//! `ArcSwap` and never block; every write publishes a new snapshot at its end.
+//! work (merge, flush, compaction, eviction) runs on the blocking pool.
+//! Readers load an immutable `Arc<Snapshot>` from an `ArcSwap` and never
+//! block; every write publishes a new snapshot at its end.
 //!
 //! Lifecycle: memtable -> sorted run (flush at `flush_rows`) -> one compacted
 //! run (once there are `compaction_runs` runs). Compaction is the only point
 //! at which delete tombstones are reclaimed; until then a tombstone shadows
 //! older versions of its key in every frame.
+//!
+//! Memory bound: once the store holds more than `max_rows` rows, the writer
+//! first compacts everything (dropping shadowed versions and tombstones,
+//! which loses nothing) and only then evicts the oldest live rows. Evicted
+//! rows are counted.
+//!
+//! Reads: the merged, tombstone-free view of a snapshot is built on the
+//! first query and cached on the snapshot, so later queries of the same
+//! snapshot only slice it. A write publishes a new snapshot with an empty
+//! cache.
 
 use super::{QueryResult, StoreError, StreamStore};
+use crate::schemas::health::StreamStoreStats;
 use crate::settings::Settings;
 use arc_swap::ArcSwap;
 use arrow::array::{Array, ArrayRef, BooleanArray, RecordBatch, StringArray, UInt64Array};
 use arrow::compute::kernels::cmp::neq;
 use arrow::compute::{
-    cast, concat_batches, filter_record_batch, lexsort_to_indices, take_record_batch, SortColumn,
-    SortOptions,
+    cast, concat_batches, filter_record_batch, lexsort_to_indices, sort_to_indices,
+    take_record_batch, SortColumn, SortOptions,
 };
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow::row::{RowConverter, SortField};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 
-/// Monotonic per-row write order (Python `ORDER_COLUMN`).
+/// Monotonic per-row write order.
 pub const ORDER_COLUMN: &str = "seqno";
 /// Upsert/delete marker column (`"upsert"` | `"delete"`).
 pub const OP_COLUMN: &str = "op";
 pub const DELETE_OP: &str = "delete";
+
+/// The live rows of a snapshot, sorted by key, order and op columns dropped.
+type MergedView = Result<Option<RecordBatch>, String>;
 
 /// What readers see: immutable, swapped atomically after every write.
 #[derive(Debug, Default)]
@@ -38,6 +54,8 @@ struct Snapshot {
     memtable: Vec<RecordBatch>,
     /// The writer's fixed schema, so `validate` reads it without the lock.
     schema: Option<SchemaRef>,
+    rows: usize,
+    merged: OnceLock<MergedView>,
 }
 
 /// Writer-private working set, guarded by the writer mutex.
@@ -51,6 +69,12 @@ struct Writer {
     runs: Vec<RecordBatch>,
 }
 
+impl Writer {
+    fn rows(&self) -> usize {
+        self.memtable_rows + self.runs.iter().map(RecordBatch::num_rows).sum::<usize>()
+    }
+}
+
 pub struct LsmStore {
     core: Arc<Core>,
     /// Shared so `ingest` can move the owned guard into its blocking task.
@@ -62,26 +86,47 @@ pub struct LsmStore {
 struct Core {
     flush_rows: usize,
     compaction_runs: usize,
+    max_rows: usize,
     key_columns: Vec<String>,
     snapshot: ArcSwap<Snapshot>,
+    evicted_total: AtomicU64,
 }
 
 impl LsmStore {
-    /// `key_columns` is the merge partition key: Python's single extension
-    /// point (`["id"]` today, `["id", "version"]` later with no other change).
+    /// `key_columns` is the merge partition key: the single extension point
+    /// for a composite key (`["id", "version"]`). Unbounded until
+    /// `with_max_rows`.
     pub fn new(flush_rows: usize, compaction_runs: usize, key_columns: Vec<String>) -> Self {
         Self {
             core: Arc::new(Core {
                 flush_rows: flush_rows.max(1),
                 compaction_runs: compaction_runs.max(1),
+                max_rows: usize::MAX,
                 key_columns: if key_columns.is_empty() {
                     vec!["id".into()]
                 } else {
                     key_columns
                 },
                 snapshot: ArcSwap::from_pointee(Snapshot::default()),
+                evicted_total: AtomicU64::new(0),
             }),
             writer: Arc::new(tokio::sync::Mutex::new(Writer::default())),
+        }
+    }
+
+    /// Bound the rows held; see the module docs for the policy.
+    pub fn with_max_rows(self, max_rows: usize) -> Self {
+        let core = Core {
+            flush_rows: self.core.flush_rows,
+            compaction_runs: self.core.compaction_runs,
+            max_rows: max_rows.max(1),
+            key_columns: self.core.key_columns.clone(),
+            snapshot: ArcSwap::from_pointee(Snapshot::default()),
+            evicted_total: AtomicU64::new(0),
+        };
+        Self {
+            core: Arc::new(core),
+            writer: self.writer,
         }
     }
 
@@ -91,17 +136,18 @@ impl LsmStore {
             s.lsm_compaction_runs,
             s.lsm_key_columns.clone(),
         )
+        .with_max_rows(s.lsm_max_rows)
     }
 
-    /// Immutable runs in the current snapshot.
-    pub fn run_count(&self) -> usize {
+    #[cfg(test)]
+    fn run_count(&self) -> usize {
         self.core.snapshot.load().runs.len()
     }
 
     /// Rows physically retained across the runs (memtable excluded): the
-    /// only observable trace of tombstone reclamation (Python's
-    /// `_run_row_count` test helper).
-    pub fn run_rows(&self) -> usize {
+    /// only observable trace of tombstone reclamation.
+    #[cfg(test)]
+    fn run_rows(&self) -> usize {
         self.core
             .snapshot
             .load()
@@ -111,7 +157,8 @@ impl LsmStore {
             .sum()
     }
 
-    pub fn memtable_rows(&self) -> usize {
+    #[cfg(test)]
+    fn memtable_rows(&self) -> usize {
         self.core
             .snapshot
             .load()
@@ -136,7 +183,7 @@ impl Core {
         } else {
             Err(StoreError::InvalidBatch(format!(
                 "batch missing required columns: {}",
-                py_list(&missing)
+                quoted_list(&missing)
             )))
         }
     }
@@ -146,6 +193,8 @@ impl Core {
             runs: w.runs.clone(),
             memtable: w.memtable.clone(),
             schema: w.schema.clone(),
+            rows: w.rows(),
+            merged: OnceLock::new(),
         }));
     }
 
@@ -178,14 +227,15 @@ impl Core {
     }
 
     /// The CPU half of `ingest`, run on the blocking pool with the writer
-    /// lock held: check, build, flush, compact, commit and publish.
-    fn apply(&self, w: &mut Writer, batch: &RecordBatch) -> Result<(), StoreError> {
-        // Re-checked under the lock: HTTP callers never call `validate`, and
-        // the schema may have been fixed since a caller's `validate`.
+    /// lock held: check, build, flush, compact, bound, commit and publish.
+    /// Returns the number of live rows evicted by the memory bound.
+    fn apply(&self, w: &mut Writer, batch: &RecordBatch) -> Result<u64, StoreError> {
+        // Re-checked under the lock: the schema may have been fixed since a
+        // caller's `validate`.
         let (schema, mut columns) = self.check(batch, w.schema.as_ref())?;
         let rows = batch.num_rows();
         if rows == 0 {
-            return Ok(());
+            return Ok(0);
         }
         let start = w.seqno;
         columns
@@ -209,13 +259,55 @@ impl Core {
                 runs = compact(&runs, &self.key_columns)?;
             }
         }
+        let held = memtable_rows + runs.iter().map(RecordBatch::num_rows).sum::<usize>();
+        let mut evicted = 0;
+        if held > self.max_rows {
+            if memtable_rows > 0 {
+                runs.push(sorted_run(&schema, &memtable, &self.key_columns)?);
+                memtable.clear();
+                memtable_rows = 0;
+            }
+            runs = compact(&runs, &self.key_columns)?;
+            if let Some(run) = runs.pop() {
+                let (kept, dropped) = keep_newest(&run, self.max_rows, &self.key_columns)?;
+                evicted = dropped as u64;
+                if kept.num_rows() > 0 {
+                    runs.push(kept);
+                }
+            }
+        }
         w.schema = Some(schema);
         w.seqno += rows as u64;
         w.memtable = memtable;
         w.memtable_rows = memtable_rows;
         w.runs = runs;
         self.publish(w);
-        Ok(())
+        if evicted > 0 {
+            self.evicted_total.fetch_add(evicted, Ordering::Relaxed);
+            tracing::warn!(
+                evicted,
+                max_rows = self.max_rows,
+                "LSM store over its row bound after compaction; evicted the oldest rows"
+            );
+        }
+        Ok(evicted)
+    }
+
+    fn merged_view(&self, snap: &Snapshot) -> MergedView {
+        let frames: Vec<RecordBatch> = snap
+            .runs
+            .iter()
+            .chain(snap.memtable.iter())
+            .cloned()
+            .collect();
+        let merge_live = || -> Result<Option<RecordBatch>, StoreError> {
+            let Some(winners) = merge(&frames, &self.key_columns)? else {
+                return Ok(None);
+            };
+            let live_rows = live(&winners)?;
+            Ok(Some(drop_columns(&live_rows, &[ORDER_COLUMN, OP_COLUMN])?))
+        };
+        merge_live().map_err(|e| e.to_string())
     }
 }
 
@@ -227,7 +319,7 @@ impl StreamStore for LsmStore {
     /// commit stays atomic and writes stay serialised. The task cannot be
     /// cancelled: once started, a write commits even if this future is
     /// dropped.
-    async fn ingest(&self, batch: RecordBatch) -> Result<(), StoreError> {
+    async fn ingest(&self, batch: RecordBatch) -> Result<u64, StoreError> {
         let mut guard = self.writer.clone().lock_owned().await;
         let core = self.core.clone();
         let span = tracing::Span::current();
@@ -252,19 +344,17 @@ impl StreamStore for LsmStore {
 
     fn query(&self, limit: usize) -> Result<QueryResult, StoreError> {
         let snap = self.core.snapshot.load_full(); // atomic, lock-free
-        let frames: Vec<RecordBatch> = snap
-            .runs
-            .iter()
-            .chain(snap.memtable.iter())
-            .cloned()
-            .collect();
-        let Some(winners) = merge(&frames, &self.core.key_columns)? else {
+        let merged = snap
+            .merged
+            .get_or_init(|| self.core.merged_view(&snap))
+            .clone()
+            .map_err(StoreError::Internal)?;
+        let Some(live_rows) = merged else {
             return Ok(QueryResult {
                 rows: None,
                 total: 0,
             });
         };
-        let live_rows = live(&winners)?;
         let total = live_rows.num_rows();
         let page = if limit > 0 && limit < total {
             live_rows.slice(0, limit)
@@ -272,16 +362,50 @@ impl StreamStore for LsmStore {
             live_rows
         };
         Ok(QueryResult {
-            rows: Some(drop_columns(&page, &[ORDER_COLUMN, OP_COLUMN])?),
+            rows: Some(page),
             total,
         })
     }
+
+    fn stats(&self) -> StreamStoreStats {
+        StreamStoreStats {
+            rows: self.core.snapshot.load().rows as u64,
+            max_rows: self.core.max_rows as u64,
+            evicted_rows_total: self.core.evicted_total.load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// `run` (compacted: one row per key, sorted by key) cut down to its
+/// `max_rows` most recently written rows, still sorted by key; and how many
+/// rows were dropped.
+fn keep_newest(
+    run: &RecordBatch,
+    max_rows: usize,
+    key_columns: &[String],
+) -> Result<(RecordBatch, usize), StoreError> {
+    let rows = run.num_rows();
+    if rows <= max_rows {
+        return Ok((run.clone(), 0));
+    }
+    let newest_first = sort_to_indices(
+        &column(run, ORDER_COLUMN)?,
+        Some(SortOptions {
+            descending: true,
+            nulls_first: false,
+        }),
+        Some(max_rows),
+    )?;
+    let kept = take_record_batch(run, &newest_first)?;
+    Ok((
+        sort_by_key_newest_first(&kept, key_columns)?,
+        rows - max_rows,
+    ))
 }
 
 /// Newest version of every key across `frames`, tombstones included, sorted
-/// by key ascending. Python's `_merge_frame` ranks by seqno descending over
-/// the key and keeps rank 1; here `lexsort_to_indices` sorts on (key asc,
-/// seqno desc) and the first row of each run of equal keys is kept.
+/// by key ascending: `lexsort_to_indices` sorts on (key asc, seqno desc)
+/// and the first row of each run of equal keys is kept.
 pub fn merge(
     frames: &[RecordBatch],
     key_columns: &[String],
@@ -311,14 +435,14 @@ pub fn merge(
 }
 
 /// Drop tombstones (`op == "delete"`). A null `op` compares as null and is
-/// dropped as well, like polars' `pl.col("op") != "delete"` filter.
+/// dropped as well.
 pub fn live(batch: &RecordBatch) -> Result<RecordBatch, StoreError> {
     let op = cast(&column(batch, OP_COLUMN)?, &DataType::Utf8)?;
     let keep = neq(&op, &StringArray::new_scalar(DELETE_OP))?;
     Ok(filter_record_batch(batch, &keep)?)
 }
 
-/// Full compaction (Python `_compact`): every run merged into one, with
+/// Full compaction: every run merged into one, with
 /// tombstones reclaimed. No run at all when nothing is live.
 pub fn compact(
     runs: &[RecordBatch],
@@ -398,8 +522,8 @@ fn drop_columns(batch: &RecordBatch, names: &[&str]) -> Result<RecordBatch, Stor
 
 /// The store's frame schema (data columns, all nullable, then `seqno`) and the
 /// batch's data columns in that schema's order. The first batch fixes the
-/// schema; later batches must match it by name and type (Deviation 5). An
-/// incoming `seqno` column is ignored: Python's `with_columns` overwrites it.
+/// schema; later batches must match it by name and type. An incoming
+/// `seqno` column is ignored: the store assigns the write order.
 /// Types are compared with `DataType` equality, so nested field names and
 /// nullability are part of schema equality (top-level nullability is not).
 /// A batch with duplicate column names is invalid: names address columns.
@@ -418,7 +542,7 @@ fn conform(
     if !duplicates.is_empty() {
         return Err(StoreError::InvalidBatch(format!(
             "batch has duplicate column names: {}",
-            py_list(&duplicates)
+            quoted_list(&duplicates)
         )));
     }
     let data: Vec<(&Field, &ArrayRef)> = incoming
@@ -467,8 +591,8 @@ fn mismatch(store: &Schema, batch: &Schema) -> StoreError {
     ))
 }
 
-/// Python's list repr, for message parity: `['id', 'op']`.
-fn py_list(names: &[&str]) -> String {
+/// `['id', 'op']`: the same wording the sibling services use.
+fn quoted_list(names: &[&str]) -> String {
     let quoted: Vec<String> = names.iter().map(|n| format!("'{n}'")).collect();
     format!("[{}]", quoted.join(", "))
 }
@@ -479,7 +603,7 @@ mod tests {
     use arrow::array::{AsArray, Int64Array};
     use arrow::datatypes::Int64Type;
 
-    /// Python `tests/publishers/batches.py::make_batch`: rows of (id, name, value, op).
+    /// Rows of (id, name, value, op).
     fn batch(rows: &[(i64, &str, &str, &str)]) -> RecordBatch {
         let schema = Arc::new(Schema::new(vec![
             Field::new("id", DataType::Int64, true),
@@ -519,6 +643,62 @@ mod tests {
             .collect()
     }
 
+    /// Over the bound, shadowed versions and tombstones go first: rewriting
+    /// the same keys never evicts anything.
+    #[tokio::test]
+    async fn the_memory_bound_compacts_before_it_evicts() {
+        let s = store(100, 100).with_max_rows(4);
+        for round in 0..5 {
+            let value = format!("v{round}");
+            let evicted = s
+                .ingest(batch(&[
+                    (1, "a", &value, "upsert"),
+                    (2, "b", &value, "upsert"),
+                ]))
+                .await
+                .unwrap();
+            assert_eq!(evicted, 0, "round {round}");
+        }
+        assert!(s.stats().rows <= 4, "{:?}", s.stats());
+        assert_eq!(values(&s), [(1, "v4".to_owned()), (2, "v4".to_owned())]);
+        assert_eq!(s.stats().evicted_rows_total, 0);
+    }
+
+    /// Distinct live keys beyond the bound: the oldest writes are evicted
+    /// and counted; the newest survive.
+    #[tokio::test]
+    async fn the_memory_bound_evicts_the_oldest_live_rows_and_counts_them() {
+        let s = store(100, 100).with_max_rows(3);
+        let mut evicted = 0;
+        for id in 1..=5 {
+            evicted += s.ingest(batch(&[(id, "n", "v", "upsert")])).await.unwrap();
+        }
+        assert_eq!(evicted, 2);
+        assert_eq!(s.stats().evicted_rows_total, 2);
+        assert_eq!(s.stats().max_rows, 3);
+        let ids: Vec<i64> = values(&s).into_iter().map(|(id, _)| id).collect();
+        assert_eq!(ids, [3, 4, 5]);
+    }
+
+    /// The merged view is computed once per published snapshot and reused.
+    #[tokio::test]
+    async fn repeated_queries_on_one_snapshot_reuse_the_merged_view() {
+        let s = store(100, 4);
+        s.ingest(batch(&[(1, "a", "v", "upsert")])).await.unwrap();
+        let first = s.query(0).unwrap().rows.unwrap();
+        let second = s.query(0).unwrap().rows.unwrap();
+        assert!(first
+            .column(0)
+            .to_data()
+            .ptr_eq(&second.column(0).to_data()));
+        s.ingest(batch(&[(2, "b", "v", "upsert")])).await.unwrap();
+        assert_eq!(
+            s.query(0).unwrap().total,
+            2,
+            "a new snapshot is merged again"
+        );
+    }
+
     #[tokio::test]
     async fn newest_version_wins_within_the_memtable() {
         let s = store(100, 4);
@@ -530,7 +710,7 @@ mod tests {
         assert_eq!(s.query(0).unwrap().total, 1);
     }
 
-    /// Python tests/test_solace_ingest.py's three batches with flush_rows=2,
+    /// Three batches with flush_rows=2,
     /// compaction_runs=2: run1, run2 -> compaction (id 1 = v2), then a
     /// memtable tombstone beats id 2 in the compacted run.
     #[tokio::test]
@@ -557,7 +737,6 @@ mod tests {
         assert_eq!(values(&s), [(1, "v2".to_owned()), (3, "v1".to_owned())]);
     }
 
-    /// Python test_lsm_store.py::test_compaction_drops_tombstones.
     #[tokio::test]
     async fn compaction_drops_tombstones() {
         let s = store(1, 2);
@@ -587,7 +766,6 @@ mod tests {
         );
     }
 
-    /// Python test_http_ingest.py::test_reinsert_after_delete_wins_over_http.
     #[tokio::test]
     async fn reinsert_after_delete_wins_even_after_compaction() {
         let s = store(1, 2);
@@ -625,8 +803,7 @@ mod tests {
         assert_eq!(s.query(0).unwrap().total, 6);
     }
 
-    /// Python test_http_ingest.py::test_lsm_query_limit_zero_returns_all_rows,
-    /// plus paging: rows come back sorted by key whatever the write order.
+    /// Limit 0 returns every row; a limit pages: rows come back sorted by key whatever the write order.
     #[tokio::test]
     async fn limit_zero_returns_every_row_and_a_limit_pages_in_key_order() {
         let s = store(100, 4);
@@ -670,7 +847,6 @@ mod tests {
         assert_eq!(result.total, 0);
     }
 
-    /// Python test_lsm_store.py::test_ingest_rejects_batch_missing_key_column.
     #[tokio::test]
     async fn a_batch_without_the_key_column_is_invalid_and_writes_nothing() {
         let s = store(100, 4);
@@ -685,7 +861,6 @@ mod tests {
         assert_eq!(s.query(100).unwrap().total, 0);
     }
 
-    /// Python test_lsm_store.py::test_ingest_rejects_batch_missing_op_column.
     #[tokio::test]
     async fn a_batch_without_op_is_invalid() {
         let s = store(100, 4);
@@ -699,7 +874,7 @@ mod tests {
         );
     }
 
-    /// Deviation 5: once the first batch fixes the schema, a conflicting one
+    /// Once the first batch fixes the schema, a conflicting one
     /// is rejected up front instead of poisoning every later merge.
     #[tokio::test]
     async fn a_batch_with_a_conflicting_schema_is_invalid() {
@@ -772,7 +947,7 @@ mod tests {
         assert_eq!(values(&s), [(1, "v".to_owned())]);
     }
 
-    /// Python's `with_columns` overwrites an incoming `seqno`: the store's own
+    /// An incoming `seqno` is overwritten: the store's own
     /// write order decides, not the publisher's.
     #[tokio::test]
     async fn an_incoming_seqno_column_is_replaced_by_the_write_order() {
@@ -793,7 +968,7 @@ mod tests {
         assert_eq!(values(&s), [(1, "v2".to_owned())]);
     }
 
-    /// Python stream_ingest's all-or-nothing check: a message whose second
+    /// The all-or-nothing check: a message whose second
     /// batch is unmergeable is refused before anything is written.
     #[tokio::test]
     async fn validate_rejects_a_slice_whose_second_batch_lacks_op_and_writes_nothing() {
@@ -860,7 +1035,7 @@ mod tests {
         assert_eq!(s.query(0).unwrap().total, 1);
     }
 
-    /// Python's `key_columns` extension point: with `["id", "version"]` the
+    /// The `key_columns` extension point: with `["id", "version"]` the
     /// key is the pair, so a newer (1, 1) does not shadow (1, 2).
     #[tokio::test]
     async fn a_multi_column_key_partitions_by_every_key_column() {
@@ -898,8 +1073,8 @@ mod tests {
         assert_eq!(got, [(1, "v1-new"), (2, "v2-old")]);
     }
 
-    /// Null keys form one key (polars `over` groups nulls together): the
-    /// newer null-id row wins, and nulls sort first, as polars' `sort` does.
+    /// Null keys form one key: the newer null-id row wins, and nulls sort
+    /// first.
     #[tokio::test]
     async fn null_keys_are_one_key_and_sort_first() {
         let s = store(100, 4);
@@ -973,7 +1148,7 @@ mod tests {
         assert_eq!(values(&s), [(1, "v2".to_owned())]);
     }
 
-    /// Spec §6 "snapshot isolation under a concurrent write": every read sees
+    /// Snapshot isolation under a concurrent write: every read sees
     /// exactly the rows of some prefix of the writes, never a half-applied
     /// flush or compaction.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -1,0 +1,54 @@
+# cargo-deny: `python run_CICD.py rust deny` (cargo deny --all-features check).
+# Every exception below carries its reason; keep it that way.
+
+[graph]
+all-features = true
+
+[advisories]
+# RustSec advisories fail the build; yanked crates too.
+yanked = "deny"
+# Mirrors the time-boxed baselines in the root osv-scanner.toml; review by 2027-02-14.
+ignore = [
+    { id = "RUSTSEC-2026-0457", reason = "rmcp 2.2 OAuth client SSRF: only rmcp server features are compiled (no auth/client); fix needs rmcp 3.7+, a major migration" },
+    { id = "RUSTSEC-2026-0462", reason = "rmcp 2.2 streamable-HTTP *client* body buffering: no client transport is compiled; the server's bodies are capped by the body-limit layer; fix needs rmcp 3.9+" },
+    { id = "RUSTSEC-2026-0440", reason = "astral-tokio-tar unmaintained: dev-only, via testcontainers; no maintained release of testcontainers drops it yet" },
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained: required by arrow, rmcp and schemars; no drop-in replacement in those crates yet" },
+]
+
+[licenses]
+# Permissive licences only; anything else needs a deliberate decision here.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "OpenSSL",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+# The template itself is unpublished (publish = false) and carries no licence.
+private = { ignore = true }
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+deny = [
+    # The TLS provider is ring; aws-lc needs extra native tooling on Windows.
+    { crate = "aws-lc-sys", reason = "use the ring provider (core::install_crypto_provider)" },
+    { crate = "aws-lc-rs", reason = "use the ring provider (core::install_crypto_provider)" },
+    { crate = "openssl-sys", reason = "rustls only" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

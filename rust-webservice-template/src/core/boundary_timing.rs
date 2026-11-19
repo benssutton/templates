@@ -1,10 +1,10 @@
 //! Request-scoped capture of per-boundary wall-clock timings, surfaced as a
-//! W3C `Server-Timing` response header (Python `core/boundary_timing.py`).
+//! W3C `Server-Timing` response header.
 //!
 //! The middleware runs each request inside `collect`, which scopes a fresh
-//! sample buffer in a `tokio::task_local!` (Python: a `ContextVar`).
+//! sample buffer in a `tokio::task_local!`.
 //! `timed(label, fut)` appends `(label, ms)` to the buffer in scope.
-//! Outside a scope (background tasks, the R3 ingest task, anything
+//! Outside a scope (background tasks, the ingest task, anything
 //! `tokio::spawn`ed) it only logs, so background work never pollutes a
 //! response and concurrent requests/apps cannot collide.
 
@@ -26,7 +26,7 @@ pub fn record(label: &str, milliseconds: f64) {
 
 /// Records the elapsed time when dropped, so the sample is kept on every exit
 /// (normal return, panic unwind, or the future being dropped on cancellation),
-/// like Python's `finally`.
+/// as a `finally` block would.
 struct TimedGuard<'a> {
     label: &'a str,
     start: Instant,
@@ -42,7 +42,7 @@ impl Drop for TimedGuard<'_> {
 }
 
 /// Await `fut`, log its duration at DEBUG (inside the current tracing span,
-/// so it carries the correlation ID) and record it as a Server-Timing sample.
+/// so it carries the request id) and record it as a Server-Timing sample.
 pub async fn timed<F: Future>(label: &str, fut: F) -> F::Output {
     let _guard = TimedGuard {
         label,

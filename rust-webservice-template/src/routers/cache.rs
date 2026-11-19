@@ -1,29 +1,28 @@
-//! Python `routers/cache.py` (prefix `/cache`).
-
-use super::json_body;
 use crate::error::AppError;
+use crate::extract::ValidJson;
 use crate::schemas::cache::{CacheEntry, CacheSetRequest};
+use crate::schemas::error::ErrorResponse;
 use crate::state::AppState;
-use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
 
 #[utoipa::path(
     post,
-    path = "/cache/",
+    path = "/cache",
     tag = "Cache",
     request_body = CacheSetRequest,
     responses(
         (status = 201, description = "Stored", body = CacheEntry),
-        (status = 422, description = "Malformed body")
+        (status = 400, description = "Body is not JSON", body = ErrorResponse),
+        (status = 422, description = "Missing field, empty or long key, or `ttl_seconds` below 1", body = ErrorResponse),
+        (status = 503, description = "Redis unavailable", body = ErrorResponse)
     )
 )]
 pub async fn set_cache(
     State(state): State<AppState>,
-    body: Result<Json<CacheSetRequest>, JsonRejection>,
+    ValidJson(body): ValidJson<CacheSetRequest>,
 ) -> Result<(StatusCode, Json<CacheEntry>), AppError> {
-    let body = json_body(body)?;
     let entry = state
         .cache
         .set(&body.key, body.value, body.ttl_seconds)
@@ -38,7 +37,8 @@ pub async fn set_cache(
     params(("key" = String, Path, description = "Cache key")),
     responses(
         (status = 200, description = "The entry and its remaining TTL", body = CacheEntry),
-        (status = 404, description = "No such key")
+        (status = 404, description = "No such key", body = ErrorResponse),
+        (status = 503, description = "Redis unavailable", body = ErrorResponse)
     )
 )]
 pub async fn get_cache(
@@ -50,6 +50,5 @@ pub async fn get_cache(
         .get(&key)
         .await?
         .map(Json)
-        // AppError::NotFound renders "{0} not found": Python's "Key 'x' not found".
         .ok_or_else(|| AppError::NotFound(format!("Key '{key}'")))
 }

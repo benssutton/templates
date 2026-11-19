@@ -1,36 +1,31 @@
-//! StreamIngestService (Python services/stream_ingest.py): a tokio task that
-//! drains a `BatchConsumer`, writes every batch through the `StreamStore`,
-//! then settles the delivery exactly once:
+//! StreamIngestService: a tokio task that drains a `BatchConsumer`, writes
+//! every batch through the `StreamStore`, then settles the delivery once:
 //!
 //! | situation                                              | settlement |
 //! |--------------------------------------------------------|------------|
 //! | every batch written                                    | accept     |
 //! | store error                                            | fail + jittered, doubling, capped backoff |
-//! | InvalidBatch, or decoded size > max_ingest_batch_bytes | reject     |
+//! | invalid batch, or decoded size > max_ingest_batch_bytes | reject    |
 //! | payload not Arrow IPC                                  | rejected inside the consumer |
 //!
-//! All-or-nothing: every batch of a delivery is size-checked and validated
-//! before any is written, so a rejected delivery leaves nothing in the store.
+//! `POST /data/ingest` goes through the same `ingest` call, so both paths
+//! apply the same rules: every batch is size-checked and validated (by the
+//! store and against the read model `GET /data/cache` serves) before any is
+//! written, so a refused message leaves nothing in the store.
 //!
 //! Resilience: five consecutive `next_delivery()` errors, or the transport
 //! staying out of CONNECTED longer than `ingest_max_disconnect_seconds`,
 //! trigger the app's `Shutdown`. With that setting unset, neither fires. A
 //! delivery or a rise in the consumer's `bound_epoch` resets the count.
-//!
-//! The LSM write (merge, flush, compaction) is CPU-bound; `LsmStore::ingest`
-//! runs it on the blocking pool, never on an async worker (Python runs
-//! ingest on its own thread). Both ingest paths, the loop and
-//! `POST /data/ingest`, go through `write`, which makes each write and its
-//! bookkeeping one detached task that a dropped caller cannot cut short.
 
 use crate::core::boundary_timing::timed;
-use crate::core::correlation::new_id;
+use crate::core::request_id::new_id;
 use crate::core::retry::{seconds, Backoff};
 use crate::core::shutdown::Shutdown;
 use crate::error::AppError;
-use crate::health::ingest::IngestHealthProvider;
 use crate::ingestion::ipc::batch_bytes;
-use crate::ingestion::{BatchConsumer, ConnectionState, Delivery};
+use crate::ingestion::{BatchConsumer, ConnectionState, Delivery, Settlement};
+use crate::persistence::stream_store::lsm::OP_COLUMN;
 use crate::persistence::stream_store::{StoreError, StreamStore};
 use crate::schemas::data::{DataRowResponse, DataRowsResponse};
 use crate::schemas::health::IngestHealth;
@@ -56,20 +51,35 @@ pub const INGEST_MAX_FAILURES: u32 = 5;
 /// How long `close` waits for each task.
 pub const JOIN_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Outcome {
-    Accept,
-    Fail,
-    Reject,
+/// Why a message was not written.
+#[derive(Debug, thiserror::Error)]
+pub enum IngestError {
+    /// A decoded batch is over `max_ingest_batch_bytes`; nothing was written.
+    #[error("{0}")]
+    TooLarge(String),
+    /// A batch can never be stored or served; nothing was written.
+    #[error("{0}")]
+    Invalid(String),
+    /// The write itself failed; may be transient.
+    #[error(transparent)]
+    Store(StoreError),
 }
 
-impl Outcome {
-    /// `ingest_deliveries_total{outcome=...}` label.
-    pub fn metric_label(self) -> &'static str {
-        match self {
-            Self::Accept => "accepted",
-            Self::Fail => "failed",
-            Self::Reject => "rejected",
+impl From<StoreError> for IngestError {
+    fn from(err: StoreError) -> Self {
+        match err {
+            StoreError::InvalidBatch(msg) => Self::Invalid(msg),
+            other => Self::Store(other),
+        }
+    }
+}
+
+impl From<IngestError> for AppError {
+    fn from(err: IngestError) -> Self {
+        match err {
+            IngestError::TooLarge(msg) => Self::PayloadTooLarge(msg),
+            IngestError::Invalid(msg) => Self::Unprocessable(msg),
+            IngestError::Store(err) => Self::Internal(err.into()),
         }
     }
 }
@@ -98,7 +108,7 @@ struct Progress {
 }
 
 /// A poisoned lock only means another thread panicked mid-update of plain
-/// data; the value is still usable (no `unwrap` in `src/`).
+/// data; the value is still usable.
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
@@ -146,15 +156,15 @@ impl StreamIngestService {
         svc
     }
 
-    /// True while the ingest loop runs (Python's `thread_alive`).
+    /// True while the ingest loop runs.
     pub fn is_running(&self) -> bool {
         lock(&self.loop_task)
             .as_ref()
             .is_some_and(|h| !h.is_finished())
     }
 
-    /// The consumer's `bound_epoch`, for tests. Deliberately not part of
-    /// `IngestHealth`: the /health JSON keeps Python parity.
+    /// The consumer's `bound_epoch`, for tests: not part of the health
+    /// contract.
     #[doc(hidden)]
     pub fn bound_epoch(&self) -> u64 {
         self.consumer.bound_epoch()
@@ -182,7 +192,7 @@ impl StreamIngestService {
         }
     }
 
-    /// `GET /data/cache` (Python `get_data`).
+    /// `GET /data/cache`: the live rows, ordered by key.
     pub async fn get_data(&self, limit: u32) -> Result<DataRowsResponse, AppError> {
         let store = self.store.clone();
         let query = tokio::task::spawn_blocking(move || store.query(limit as usize));
@@ -201,44 +211,66 @@ impl StreamIngestService {
         })
     }
 
-    /// `POST /data/ingest` (Python `ingest_batch`): straight to the LSM, no
-    /// `Delivery`. An oversized batch is dropped and logged (`Ok`); an
-    /// unmergeable one is `Err(InvalidBatch)` (the router answers 422).
-    pub async fn ingest_batch(&self, batch: RecordBatch) -> Result<(), StoreError> {
-        timed("ingest.lsm_write", self.record_ingest(batch))
-            .await
-            .map(|_| ())
+    /// Admit and write one message: all its batches or none. Shared by the
+    /// stream and `POST /data/ingest`.
+    pub async fn ingest(&self, batches: Vec<RecordBatch>) -> Result<(), IngestError> {
+        self.admit(&batches).await?;
+        // One narrow race remains: a concurrent writer can fix the store's
+        // schema between `admit` and a later batch's write; that batch is
+        // then refused with earlier ones already written. Newest-wins merge
+        // makes a redelivered message re-apply harmlessly.
+        timed("ingest.lsm_write", async {
+            for batch in batches {
+                self.write(batch).await?;
+            }
+            Ok(())
+        })
+        .await
     }
 
-    /// True (and logged) if the decoded batch exceeds `max_ingest_batch_bytes`.
-    fn oversized(&self, batch: &RecordBatch) -> bool {
-        let bytes = batch_bytes(batch);
+    /// Size, then the store's rules and the read model's, on the blocking
+    /// pool (the store may run the merge kernels on a trial frame).
+    async fn admit(&self, batches: &[RecordBatch]) -> Result<(), IngestError> {
         let max = self.settings.max_ingest_batch_bytes;
-        if bytes > max {
-            tracing::error!(
-                "dropping ingest batch: {bytes} bytes exceeds max_ingest_batch_bytes ({max})"
-            );
-            return true;
+        for batch in batches {
+            let bytes = batch_bytes(batch);
+            if bytes > max {
+                return Err(IngestError::TooLarge(format!(
+                    "decoded batch of {bytes} bytes exceeds max_ingest_batch_bytes ({max})"
+                )));
+            }
         }
-        false
+        let store = self.store.clone();
+        let batches = batches.to_vec();
+        let span = tracing::Span::current();
+        tokio::task::spawn_blocking(move || {
+            span.in_scope(|| {
+                store.validate(&batches)?;
+                batches.iter().try_for_each(check_read_model)
+            })
+        })
+        .await
+        .map_err(|e| task_failed("LSM validate", e))??;
+        Ok(())
     }
 
     /// Write one batch, then record it (`last_batch_at`, the row total,
     /// `ingest_rows_total`). The write and its bookkeeping are one detached
     /// task: if this future is dropped (an HTTP client disconnects) the task
     /// still runs to the end, so a committed batch is always counted. The
-    /// caller's span (the delivery's correlation ID) is carried into it.
+    /// caller's span (the request id) is carried into it.
     async fn write(&self, batch: RecordBatch) -> Result<(), StoreError> {
         let store = self.store.clone();
         let progress = self.progress.clone();
         let metrics = self.metrics.clone();
         let task = async move {
             let rows = batch.num_rows() as u64;
-            store.ingest(batch).await?;
+            let evicted = store.ingest(batch).await?;
             *lock(&progress.last_batch_at) = Some(Utc::now().trunc_subsecs(6));
             progress.rows_total.fetch_add(rows, Ordering::Relaxed);
             if let Some(m) = &metrics {
                 m.record_ingested_rows(rows);
+                m.record_evicted_rows(evicted);
             }
             tracing::debug!(rows, "ingested batch");
             Ok(())
@@ -248,71 +280,32 @@ impl StreamIngestService {
             .map_err(|e| task_failed("LSM write", e))?
     }
 
-    /// The store's whole-message check, on the blocking pool (it may run the
-    /// merge kernels on a trial frame).
-    async fn validate(&self, batches: &[RecordBatch]) -> Result<(), StoreError> {
-        let store = self.store.clone();
-        let batches = batches.to_vec();
-        let span = tracing::Span::current();
-        tokio::task::spawn_blocking(move || span.in_scope(|| store.validate(&batches)))
-            .await
-            .map_err(|e| task_failed("LSM validate", e))?
-    }
-
-    /// Write one batch. `Ok(false)` = refused as oversized (logged).
-    async fn record_ingest(&self, batch: RecordBatch) -> Result<bool, StoreError> {
-        if self.oversized(&batch) {
-            return Ok(false);
-        }
-        self.write(batch).await?;
-        Ok(true)
-    }
-
-    /// Write every batch and decide the outcome. Never settles. All or
-    /// nothing (Python `_decide`): every batch is size-checked and validated
-    /// before any is written, so a rejected message normally leaves nothing
-    /// in the store. One narrow race remains, as in Python: a concurrent
-    /// HTTP write can fix the schema between `validate` and a later batch's
-    /// write; that batch is then refused (`InvalidBatch`) and the delivery is
-    /// rejected with its earlier batches already written. A failed message
-    /// is redelivered whole, so batches written before an unexpected write
-    /// error are re-applied (harmless under newest-wins merge semantics).
-    async fn decide(&self, batches: &[RecordBatch]) -> Outcome {
-        if batches.iter().any(|b| self.oversized(b)) {
-            return Outcome::Reject;
-        }
-        let written = async {
-            self.validate(batches).await?;
-            for batch in batches {
-                self.write(batch.clone()).await?;
-            }
-            Ok::<(), StoreError>(())
-        }
-        .await;
-        match written {
-            Ok(()) => Outcome::Accept,
-            Err(StoreError::InvalidBatch(msg)) => {
-                tracing::error!(error = %msg, "rejecting unmergeable message");
-                Outcome::Reject
+    /// Write every batch and decide the settlement. Never settles.
+    async fn decide(&self, batches: Vec<RecordBatch>) -> Settlement {
+        match self.ingest(batches).await {
+            Ok(()) => Settlement::Accept,
+            Err(err @ (IngestError::TooLarge(_) | IngestError::Invalid(_))) => {
+                tracing::error!(error = %err, "rejecting message");
+                Settlement::Reject
             }
             Err(err) => {
                 tracing::error!(error = %err, "ingest failed; message will be redelivered");
-                Outcome::Fail
+                Settlement::Fail
             }
         }
     }
 
     /// Decide, then settle exactly once. `None` when the settlement itself
     /// failed (logged; the broker still holds the message and redelivers it).
-    async fn settle(&self, delivery: Delivery) -> Option<Outcome> {
+    async fn settle(&self, delivery: Delivery) -> Option<Settlement> {
         let Delivery {
             batches, settle, ..
         } = delivery;
-        let outcome = self.decide(&batches).await;
+        let outcome = self.decide(batches).await;
         let settled = match outcome {
-            Outcome::Accept => settle.accept().await,
-            Outcome::Fail => settle.fail().await,
-            Outcome::Reject => settle.reject().await,
+            Settlement::Accept => settle.accept().await,
+            Settlement::Fail => settle.fail().await,
+            Settlement::Reject => settle.reject().await,
         };
         match settled {
             Ok(()) => {
@@ -381,9 +374,9 @@ impl StreamIngestService {
                 Ok(None) => break, // the consumer was closed
                 Ok(Some(delivery)) => {
                     consecutive_failures = 0;
-                    let span = tracing::info_span!("ingest", correlation_id = %new_id());
+                    let span = tracing::info_span!("ingest", request_id = %new_id());
                     match self.settle(delivery).instrument(span).await {
-                        Some(Outcome::Fail) => {
+                        Some(Settlement::Fail) => {
                             consecutive_fails += 1;
                             if !self.pause(backoff.jittered(consecutive_fails)).await {
                                 break;
@@ -445,10 +438,9 @@ impl StreamIngestService {
             }
         }
     }
-}
 
-impl IngestHealthProvider for StreamIngestService {
-    fn ingest_health(&self) -> IngestHealth {
+    /// Cheap, synchronous read of ingest state (no I/O).
+    pub fn ingest_health(&self) -> IngestHealth {
         let now = Utc::now();
         let last = *lock(&self.progress.last_batch_at);
         let since = last.map(|t| secs_between(t, now));
@@ -461,32 +453,84 @@ impl IngestHealthProvider for StreamIngestService {
             None => false,
         };
         IngestHealth {
-            transport: self.settings.ingest_transport.as_str().into(),
-            connection_state: self.consumer.connection_state().as_str().into(),
+            transport: self.settings.ingest_transport,
+            connection_state: self.consumer.connection_state(),
             thread_alive: self.is_running(),
             last_batch_at: last,
             seconds_since_last_batch: since.map(round3),
             rows_ingested_total: self.progress.rows_total.load(Ordering::Relaxed),
             stale,
+            store: self.store.stats(),
         }
     }
 }
 
-/// LSM rows -> Python's `DataRowResponse(**r)`. A row that does not fit
-/// (`id` negative or null, a missing column) is a 500, as pydantic's
-/// validation error is in Python.
-fn to_rows(batch: &RecordBatch) -> Result<Vec<DataRowResponse>, AppError> {
-    let col = |name: &str, to: &DataType| -> Result<ArrayRef, AppError> {
-        let array = batch.column_by_name(name).ok_or_else(|| {
-            AppError::Internal(anyhow::anyhow!("LSM rows have no `{name}` column"))
-        })?;
-        cast(array, to).map_err(|e| AppError::Internal(e.into()))
+/// The columns `GET /data/cache` serves: `id` (a non-negative integer),
+/// `name`, `value` (strings). Rows that are not tombstones need all three.
+const READ_MODEL: [&str; 3] = ["id", "name", "value"];
+
+fn read_model_column(batch: &RecordBatch, name: &str) -> Result<ArrayRef, StoreError> {
+    let array = batch
+        .column_by_name(name)
+        .ok_or_else(|| StoreError::InvalidBatch(format!("batch has no `{name}` column")))?;
+    let (to, ok) = if name == "id" {
+        (DataType::Int64, array.data_type().is_integer())
+    } else {
+        (
+            DataType::Utf8,
+            matches!(
+                array.data_type(),
+                DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View
+            ),
+        )
     };
-    let (ids, names, values) = (
-        col("id", &DataType::Int64)?,
-        col("name", &DataType::Utf8)?,
-        col("value", &DataType::Utf8)?,
-    );
+    if !ok {
+        return Err(StoreError::InvalidBatch(format!(
+            "column `{name}` has type {}, which GET /data/cache cannot serve",
+            array.data_type()
+        )));
+    }
+    cast(array, &to).map_err(|e| StoreError::InvalidBatch(format!("column `{name}`: {e}")))
+}
+
+/// Refuse a batch whose rows `to_rows` could not turn into a response, so
+/// one bad write cannot make every later read fail.
+fn check_read_model(batch: &RecordBatch) -> Result<(), StoreError> {
+    let [ids, names, values] = READ_MODEL.map(|c| read_model_column(batch, c));
+    let (ids, names, values) = (ids?, names?, values?);
+    let ids = ids.as_primitive::<Int64Type>();
+    let op = batch
+        .column_by_name(OP_COLUMN)
+        .map(|op| cast(op, &DataType::Utf8))
+        .transpose()
+        .map_err(|e| StoreError::InvalidBatch(format!("column `{OP_COLUMN}`: {e}")))?;
+    let op = op.as_ref().map(|op| op.as_string::<i32>());
+    for i in 0..batch.num_rows() {
+        let tombstone = op.is_some_and(|op| op.is_valid(i) && op.value(i) == "delete");
+        if tombstone {
+            continue;
+        }
+        if ids.is_null(i) || ids.value(i) < 0 {
+            return Err(StoreError::InvalidBatch(format!(
+                "row {i}: `id` must be a non-negative integer"
+            )));
+        }
+        if names.is_null(i) || values.is_null(i) {
+            return Err(StoreError::InvalidBatch(format!(
+                "row {i}: `name` and `value` must not be null"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// LSM rows -> response rows. `check_read_model` admitted every row, so a
+/// failure here is a bug (500).
+fn to_rows(batch: &RecordBatch) -> Result<Vec<DataRowResponse>, AppError> {
+    let column = |name: &str| {
+        read_model_column(batch, name).map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))
+    };
+    let (ids, names, values) = (column("id")?, column("name")?, column("value")?);
     let (ids, names, values) = (
         ids.as_primitive::<Int64Type>(),
         names.as_string::<i32>(),
@@ -494,11 +538,6 @@ fn to_rows(batch: &RecordBatch) -> Result<Vec<DataRowResponse>, AppError> {
     );
     (0..batch.num_rows())
         .map(|i| {
-            if ids.is_null(i) || names.is_null(i) || values.is_null(i) {
-                return Err(AppError::Internal(anyhow::anyhow!(
-                    "LSM row {i} has a null field"
-                )));
-            }
             let id = u64::try_from(ids.value(i)).map_err(|_| {
                 AppError::Internal(anyhow::anyhow!("LSM row id {} is negative", ids.value(i)))
             })?;

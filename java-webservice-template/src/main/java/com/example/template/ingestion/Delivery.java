@@ -1,32 +1,38 @@
 package com.example.template.ingestion;
 
-import com.example.template.persistence.streamstore.LsmRow;
-
-import java.util.List;
+import io.micronaut.core.annotation.Nullable;
 
 /**
- * One transport message: its decoded rows plus broker settlement. Mirrors the
- * Python ingestion/base.py Delivery. StreamIngestService settles each delivery
- * exactly once, after the store write:
+ * One transport message: its encoded payload plus broker settlement. StreamIngestService checks the
+ * size, decodes and writes it, then settles it exactly once:
+ *
  * <ul>
- *   <li>{@link #accept()}: ACCEPTED, removed from the queue</li>
- *   <li>{@link #fail()}: FAILED, redelivered (after max-redelivery, to the DMQ)</li>
- *   <li>{@link #reject()}: REJECTED, removed (to the DMQ if configured), never redelivered</li>
+ *   <li>{@link #accept()}: ACCEPTED, removed from the queue
+ *   <li>{@link #fail()}: FAILED, redelivered (after max-redelivery, to the DMQ)
+ *   <li>{@link #reject()}: REJECTED, removed (to the DMQ if configured), never redelivered
  * </ul>
  *
- * <p><b>Production queues:</b> configure a max-redelivery count and a DMQ on the
- * queue. The template's auto-created queues (CREATE_ON_START) get the broker
- * defaults: unlimited redelivery and no DMQ, so a message that keeps failing is
- * redelivered forever. StreamIngestService waits a jittered, doubling delay
- * (1 s up to 60 s, reset by the next accept/reject) after each {@code fail()};
- * that only prevents a hot redelivery loop, it does not bound redelivery.
+ * The payload is decoded by the service, not the transport, so an oversized message is rejected
+ * before any decoding memory is spent on it.
+ *
+ * <p><b>Production queues:</b> configure a max-redelivery count and a DMQ on the queue. The
+ * template's auto-created queues (CREATE_ON_START) get the broker defaults: unlimited redelivery
+ * and no DMQ, so a message that keeps failing is redelivered forever; the service's settlement
+ * backoff only prevents a hot loop.
  */
 public interface Delivery {
-    List<LsmRow> rows();
-    /** Encoded (wire) size, checked against {@code template.ingest.max-batch-bytes}. */
-    int payloadBytes();
+    /** Arrow IPC stream bytes, as sent. */
+    byte[] payload();
+
+    /** The sender's correlation id (Solace: the message's correlation id property), if any. */
+    @Nullable
+    String correlationId();
+
     boolean redelivered();
+
     void accept();
+
     void fail();
+
     void reject();
 }

@@ -10,6 +10,17 @@ micronaut:
         default:
           allowed-origins:
             - "*"
+  # SIGTERM: stop accepting, let in-flight requests finish (bounded), then close beans.
+  lifecycle:
+    graceful-shutdown:
+      enabled: true
+      grace-period: ${SHUTDOWN_GRACE_PERIOD:20s}
+  # Wire contract shared with the Python and Rust templates: snake_case fields, nulls
+  # and empty lists written out (the serde default NON_EMPTY would drop "rows": []).
+  serde:
+    property-naming-strategy: SNAKE_CASE
+    serialization:
+      inclusion: ALWAYS
   router:
     static-resources:
       swagger:
@@ -18,6 +29,32 @@ micronaut:
       swagger-ui:
         paths: classpath:META-INF/swagger/views/swagger-ui
         mapping: /swagger-ui/**
+  # MCP over Streamable HTTP at /mcp (micronaut-mcp on the official MCP Java SDK).
+  mcp:
+    server:
+      transport: HTTP
+      endpoint: /mcp
+      info:
+        name: ${template.mcp-name}
+        version: ${template.app-version}
+  # Bearer-JWT auth seam (template.auth.*). Off by default; when on, every route needs
+  # Authorization: Bearer <HS256 JWT> except the orchestrator probes.
+  security:
+    enabled: ${template.auth.enabled}
+    token:
+      jwt:
+        signatures:
+          secret:
+            generator:
+              secret: ${template.auth.jwt-secret}
+              jws-algorithm: HS256
+    intercept-url-map:
+      - pattern: /health/live
+        access: isAnonymous()
+      - pattern: /health/ready
+        access: isAnonymous()
+      - pattern: /**
+        access: isAuthenticated()
   metrics:
     enabled: true
     binders:
@@ -33,29 +70,58 @@ micronaut:
         step: PT1M
 
 endpoints:
+  # MetricsController serves the Prometheus scrape at /metrics; the built-in
+  # /prometheus and JSON /metrics management endpoints would duplicate it.
   prometheus:
-    enabled: true
-    sensitive: false
-  # Our /metrics controller serves the Prometheus scrape; disable the management
-  # JSON metrics endpoint so it does not collide on the /metrics path.
+    enabled: false
   metrics:
     enabled: false
 
+# OpenTelemetry tracing: an inbound W3C traceparent is always propagated; spans are created
+# and exported only when OTEL_TRACES_EXPORTER=otlp (endpoint OTEL_EXPORTER_OTLP_ENDPOINT).
+# With export off the SDK (1.68+) creates no spans at all.
+otel:
+  traces:
+    exporter: ${OTEL_TRACES_EXPORTER:none}
+  exporter:
+    otlp:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:`http://localhost:4317`}
+
 template:
+  auth:
+    enabled: ${AUTH_ENABLED:false}
+    jwt-secret: ${AUTH_JWT_SECRET:}
+    jwt-issuer: ${AUTH_JWT_ISSUER:}
+    jwt-audience: ${AUTH_JWT_AUDIENCE:}
   app-title: "Template Micronaut Service"
   app-version: "1.0.0"
   app-description: "A Java Micronaut service mirroring the Python webservice template"
   status: "running"
   correlation-id-header: "X-Request-ID"
   health-check-timeout-seconds: 2.0
-  max-request-body-bytes: 16777216
+  # /health/status and /metrics reuse one probe round this long (readiness is always live).
+  health-cache-ttl-seconds: ${HEALTH_CACHE_TTL_SECONDS:5}
   mcp-name: "java-template"
-  mcp-instructions: "Tools for this template application."
+  mcp-instructions: "Tools for this template application. Each tool mirrors a read-only REST endpoint."
+  # /mcp DNS-rebinding protection (McpHostFilter): allowed Host header values, as a JSON
+  # array or comma-separated host[:port]; Origin is checked against the same hosts. An
+  # entry without a port matches any port. Must not be empty; a bad entry fails startup.
+  mcp-allowed-hosts: ${MCP_ALLOWED_HOSTS:localhost}
+  connect-max-attempts: 5
+  connect-base-delay-seconds: 1.0
+  connect-max-delay-seconds: 30.0
   ingest:
-    transport: ${INGEST_TRANSPORT:solace}   # solace | noop
+    transport: ${INGEST_TRANSPORT:noop}   # noop (HTTP ingest only) | solace
     max-batch-bytes: 16777216
+    # Watchdog: exit when the transport stays disconnected this long (0 disables).
     max-disconnect-seconds: 60
+    # Exit after this many transport failures in a row without a bind (0 disables).
+    max-consecutive-failures: 5
     staleness-threshold-seconds: 0
+    lsm-max-rows: 1000000   # retention cap for the append-only LSM store (oldest evicted)
+    decoder-memory-bytes: 268435456   # direct memory bound shared by all Arrow decodes
+    retry-base-delay-seconds: 1.0
+    retry-max-delay-seconds: 60.0
     solace:
       host: ${SOLACE_HOST:localhost}
       port: ${SOLACE_PORT:55555}
@@ -65,6 +131,7 @@ template:
       topic: ${SOLACE_TOPIC:ingest/batches}
       queue: ${SOLACE_QUEUE:java-template/ingest}   # durable exclusive; one per replica
 
+# Every store client has bounded waits, so an outage is a prompt 503, not a hung request.
 datasources:
   default:
     url: ${POSTGRES_URL:`jdbc:postgresql://localhost:5432/appdb`}
@@ -74,7 +141,13 @@ datasources:
     dialect: POSTGRES
     schema-generate: NONE
     minimum-idle: 2
-    maximum-pool-size: 10
+    maximum-pool-size: ${POSTGRES_POOL_SIZE:10}
+    connection-timeout: 3000      # ms to wait for a pooled connection
+    validation-timeout: 1000
+    data-source-properties:
+      connectTimeout: 3           # s (pgjdbc)
+      socketTimeout: 10           # s: a frozen server cannot hold a request longer
+      options: "-c statement_timeout=5000"
   clickhouse:
     url: ${CLICKHOUSE_URL:`jdbc:ch://localhost:8123/default`}
     username: ${CLICKHOUSE_USER:default}
@@ -82,6 +155,36 @@ datasources:
     driver-class-name: com.clickhouse.jdbc.ClickHouseDriver
     dialect: ANSI
     schema-generate: NONE
+    minimum-idle: 1
+    maximum-pool-size: ${CLICKHOUSE_POOL_SIZE:10}
+    connection-timeout: 3000
+    validation-timeout: 1000
+    data-source-properties:
+      # Quoted: the client-v2 driver rejects non-string property values.
+      connection_timeout: "3000"  # ms
+      socket_timeout: "10000"     # ms
+      clickhouse_setting_max_execution_time: "5"   # s, enforced by the server
+      # ClickHouse has no transactions; Micronaut's transaction manager (and
+      # @MicronautTest's per-test transaction) still calls setAutoCommit(false).
+      # Accept such calls as no-ops instead of throwing.
+      jdbc_ignore_unsupported_values: "true"
+
+# Postgres schema: versioned Flyway migrations in db/postgres, applied at startup. Flyway
+# holds a Postgres advisory lock while migrating, so replicas starting together are safe.
+# A database created before migrations existed is baselined at version 0 and V1 (all
+# IF NOT EXISTS) re-applied, so it joins the history without manual steps.
+flyway:
+  datasources:
+    default:
+      enabled: true
+      locations:
+        - classpath:db/postgres
+      baseline-on-migrate: true
+      baseline-version: "0"
+      connect-retries: 5
 
 redis:
   uri: ${REDIS_URL:`redis://localhost:6379/0`}
+  pool-size: ${REDIS_POOL_SIZE:16}
+  connect-timeout-ms: 2000
+  socket-timeout-ms: 2000

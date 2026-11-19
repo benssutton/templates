@@ -42,7 +42,7 @@ def scan_image(s: Service) -> None:
 
 
 def k6_smoke(s: Service) -> None:
-    images.k6(s, "smoke.js")
+    images.k6(s, "smoke.js", "contract.js")
 
 
 def k6_load(s: Service) -> None:  # local / manual only: not in any set

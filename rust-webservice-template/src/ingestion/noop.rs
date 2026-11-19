@@ -1,6 +1,6 @@
 //! Connects to nothing and idles until closed. Selected with
 //! INGEST_TRANSPORT=noop for deployments (and tests) that only need the
-//! HTTP ingest path. Mirrors Python's and Java's NoopBatchConsumer.
+//! HTTP ingest path. The default transport.
 
 use super::{BatchConsumer, ConnectionState, Delivery};
 use tokio::sync::watch;

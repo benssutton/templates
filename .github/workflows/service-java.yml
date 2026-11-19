@@ -5,7 +5,7 @@ permissions:
   contents: read
 jobs:
   java:
-    name: Java (compile + verify + image + k6 smoke)
+    name: Java (format + lint + verify + image + k6 smoke)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

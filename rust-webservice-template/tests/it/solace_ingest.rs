@@ -213,7 +213,7 @@ async fn an_unmergeable_message_is_rejected() {
     assert_eq!(app.get_json("/data/cache?limit=100").await.1["total"], 0);
     // Python asserts at caplog level ERROR.
     assert!(
-        logs.line_with(&["ERROR", "rejecting unmergeable message"])
+        logs.line_with(&["ERROR", "rejecting message", "missing required columns"])
             .is_some(),
         "{}",
         logs.text()
@@ -364,7 +364,7 @@ async fn streaming_assigns_distinct_per_message_ids() {
     assert_eq!(lines.len(), 3, "{text}");
     let cids: HashSet<&str> = lines
         .iter()
-        .map(|l| correlation_id(l).unwrap_or_else(|| panic!("no correlation_id: {l}")))
+        .map(|l| request_id(l).unwrap_or_else(|| panic!("no request_id: {l}")))
         .collect();
     assert!(
         cids.iter().all(|c| !c.is_empty() && *c != "-"),
@@ -408,9 +408,9 @@ fn ingest_lines(text: &str) -> Vec<&str> {
         .collect()
 }
 
-/// The `correlation_id=<id>` span field of a captured line.
-fn correlation_id(line: &str) -> Option<&str> {
-    let rest = line.split("correlation_id=").nth(1)?;
+/// The `request_id=<id>` span field of a captured line.
+fn request_id(line: &str) -> Option<&str> {
+    let rest = line.split("request_id=").nth(1)?;
     let end = rest
         .find(|c: char| !c.is_ascii_alphanumeric() && c != '-')
         .unwrap_or(rest.len());

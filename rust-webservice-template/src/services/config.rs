@@ -1,9 +1,8 @@
-//! Python `services/config.py`: key/value configuration in Postgres.
+//! Key/value configuration in Postgres.
 
 use crate::core::boundary_timing::timed;
 use crate::error::AppError;
 use crate::schemas::config::ConfigEntry;
-use anyhow::Context;
 use sqlx::postgres::PgPool;
 
 const UPSERT: &str = "INSERT INTO configuration (key, value) \
@@ -27,8 +26,7 @@ impl ConfigService {
             sqlx::query_as("SELECT key, value FROM configuration ORDER BY key")
                 .fetch_all(&self.pool),
         )
-        .await
-        .context("listing configuration")?;
+        .await?;
         Ok(rows
             .into_iter()
             .map(|(key, value)| ConfigEntry { key, value })
@@ -44,8 +42,7 @@ impl ConfigService {
                 .bind(value)
                 .fetch_one(&self.pool),
         )
-        .await
-        .context("upserting configuration")?;
+        .await?;
         Ok(ConfigEntry { key, value })
     }
 }

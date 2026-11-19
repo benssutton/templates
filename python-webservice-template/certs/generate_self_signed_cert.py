@@ -1,3 +1,6 @@
+"""Self-signed dev certificate for running the app outside Docker (`python main.py`).
+The compose stack provisions its own via the one-shot `certs` service."""
+
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
@@ -5,6 +8,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 import datetime
 import ipaddress
 
+now = datetime.datetime.now(datetime.timezone.utc)
 key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
 cert = (
     x509.CertificateBuilder()
@@ -12,8 +16,8 @@ cert = (
     .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")]))
     .public_key(key.public_key())
     .serial_number(x509.random_serial_number())
-    .not_valid_before(datetime.datetime.utcnow())
-    .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365))
+    .not_valid_before(now)
+    .not_valid_after(now + datetime.timedelta(days=365))
     .add_extension(
         x509.SubjectAlternativeName(
             [

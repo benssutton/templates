@@ -34,8 +34,8 @@
       "id": 6, "type": "timeseries", "title": "Process CPU % / memory bytes",
       "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
       "targets": [
-        {"expr": "process_cpu_percent", "legendFormat": "cpu %"},
-        {"expr": "process_memory_rss_bytes", "legendFormat": "rss bytes"}
+        {"expr": "app_process_cpu_percent", "legendFormat": "cpu %"},
+        {"expr": "app_process_memory_rss_bytes", "legendFormat": "rss bytes"}
       ]
     }
   ]

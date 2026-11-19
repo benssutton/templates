@@ -1,5 +1,5 @@
-//! Python tests/test_cache.py, plus the 404 body, the stored-null quirk,
-//! the slash forms and the 422 case.
+//! `/cache`: round trips, the 404 body, the stored-null rule, the slash
+//! forms and the 422 cases.
 
 use crate::support::{app_settings, TestApp};
 use serde_json::json;
@@ -61,7 +61,7 @@ async fn get_cache_returns_entry() {
 }
 
 #[tokio::test]
-async fn get_cache_missing_key_returns_404_with_python_detail() {
+async fn get_cache_missing_key_returns_404_with_a_detail() {
     let app = TestApp::spawn(app_settings().await).await;
     let key = unique("nonexistent");
     let (status, body) = app.get_json(&format!("/cache/{key}")).await;
@@ -99,15 +99,34 @@ async fn post_cache_with_list_value() {
     assert_eq!(body["value"], value);
 }
 
-/// Deviation 6: Python reads a stored JSON null back as "not found".
+/// RedisJSON cannot tell a stored JSON null from a missing value, so it
+/// reads back as "not found".
 #[tokio::test]
-async fn stored_null_reads_as_404_like_python() {
+async fn stored_null_reads_as_404() {
     let app = TestApp::spawn(app_settings().await).await;
     let key = unique("null_value");
     let (status, _) = app
         .post_json("/cache/", &json!({"key": key, "value": null}))
         .await;
     assert_eq!(status, 201);
+    let (status, _) = app.get_json(&format!("/cache/{key}")).await;
+    assert_eq!(status, 404);
+}
+
+/// An empty key or a TTL below 1 is 422 (Redis EXPIRE with 0 or a negative
+/// TTL would delete the key at once).
+#[tokio::test]
+async fn invalid_key_or_ttl_is_422_and_stores_nothing() {
+    let app = TestApp::spawn(app_settings().await).await;
+    let key = unique("bad_ttl");
+    for payload in [
+        json!({"key": key, "value": 1, "ttl_seconds": 0}),
+        json!({"key": key, "value": 1, "ttl_seconds": -1}),
+        json!({"key": "", "value": 1}),
+    ] {
+        let (status, body) = app.post_json("/cache/", &payload).await;
+        assert_eq!(status, 422, "{payload}: {body}");
+    }
     let (status, _) = app.get_json(&format!("/cache/{key}")).await;
     assert_eq!(status, 404);
 }

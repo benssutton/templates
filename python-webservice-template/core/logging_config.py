@@ -1,27 +1,51 @@
-"""Idempotent logging configuration that surfaces the correlation ID.
+"""JSON logging with the correlation ID on every line, uvicorn's included.
 
-Installs a stream handler on the root logger whose formatter includes
-[%(correlation_id)s], and attaches CorrelationIdFilter so the attribute always
-exists. Safe to call multiple times — the multi-app test pattern constructs many
-apps in one process.
+One stream handler on the root logger writes one JSON object per line;
+CorrelationIdFilter stamps each record with the current ID. uvicorn's own
+loggers propagate to it (main.py starts uvicorn with log_config=None), and its
+access line is emitted while the response is sent, i.e. inside
+CorrelationIdMiddleware's context, so access lines carry the request's ID too.
+Logging is process-wide, so the first call configures it (handler and level) and
+later calls are no-ops: the multi-app test pattern builds many apps per process,
+and a later app must not reset a level a test has set.
 """
 
+import json
 import logging
+from datetime import datetime, timezone
 
 from core.correlation import CorrelationIdFilter
 
-_CONFIGURED = False
-_FORMAT = "%(asctime)s %(levelname)s [%(correlation_id)s] %(name)s: %(message)s"
+_HANDLER_NAME = "app-json"
 
 
-def configure_logging(level: int = logging.INFO) -> None:
-    global _CONFIGURED
-    if _CONFIGURED:
-        return
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter(_FORMAT))
-    handler.addFilter(CorrelationIdFilter())
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        entry = {
+            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(
+                timespec="milliseconds"
+            ),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "correlation_id": getattr(record, "correlation_id", "-"),
+        }
+        if record.exc_info:
+            entry["exception"] = self.formatException(record.exc_info)
+        return json.dumps(entry, default=str)
+
+
+def configure_logging(level: str = "INFO") -> None:
     root = logging.getLogger()
+    if any(h.get_name() == _HANDLER_NAME for h in root.handlers):
+        return
+    root.setLevel(level.upper())
+    handler = logging.StreamHandler()
+    handler.set_name(_HANDLER_NAME)
+    handler.setFormatter(JsonFormatter())
+    handler.addFilter(CorrelationIdFilter())
     root.addHandler(handler)
-    root.setLevel(level)
-    _CONFIGURED = True
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uvicorn_logger = logging.getLogger(name)
+        uvicorn_logger.handlers.clear()
+        uvicorn_logger.propagate = True

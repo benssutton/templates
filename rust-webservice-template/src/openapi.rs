@@ -1,108 +1,71 @@
-use crate::routers::{cache, config, data, health, metrics, root};
-use crate::schemas::cache::{CacheEntry, CacheSetRequest};
-use crate::schemas::config::{ConfigEntry, ConfigSetRequest};
-use crate::schemas::data::{DataRowResponse, DataRowsResponse, IngestAccepted};
-use crate::schemas::health::{
-    AppInfo, CheckResult, DetailedStatusResponse, HostStats, IngestHealth, LivenessResponse,
-    ProbeResult, ProcessStats, ReadinessResponse, RequestInfo, SystemSnapshot, UptimeInfo,
-};
-use crate::schemas::root::RootResponse;
+//! The OpenAPI document. Paths come from the handlers' `#[utoipa::path]`
+//! through `utoipa_axum::OpenApiRouter` (see `app::router`); this module adds
+//! what the routes cannot say: tags, the error schema, `/mcp` (served by
+//! rmcp, not a handler), the service identity from settings, and the bearer
+//! scheme when authentication is on.
+
+use crate::schemas::error::ErrorResponse;
+use crate::settings::Settings;
+use utoipa::openapi::path::{HttpMethod, OperationBuilder};
+use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityRequirement, SecurityScheme};
+use utoipa::openapi::{OpenApi as Document, Response};
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(
-        root::get_root,
-        health::get_live,
-        health::get_ready,
-        health::get_status,
-        metrics::get_metrics,
-        config::get_config,
-        config::set_config,
-        data::get_data,
-        data::get_cached_data,
-        data::ingest_batch,
-        cache::set_cache,
-        cache::get_cache,
-    ),
-    components(schemas(
-        RootResponse,
-        LivenessResponse,
-        ReadinessResponse,
-        CheckResult,
-        DetailedStatusResponse,
-        AppInfo,
-        UptimeInfo,
-        ProbeResult,
-        IngestHealth,
-        RequestInfo,
-        SystemSnapshot,
-        ProcessStats,
-        HostStats,
-        ConfigSetRequest,
-        ConfigEntry,
-        DataRowResponse,
-        DataRowsResponse,
-        IngestAccepted,
-        CacheSetRequest,
-        CacheEntry,
-    )),
+    components(schemas(ErrorResponse)),
     tags(
         (name = "API Root Page", description = "Service information"),
         (name = "Application Health", description = "Liveness, readiness and detailed status endpoints"),
         (name = "Observability", description = "Prometheus metrics"),
-        (name = "Configuration", description = "Endpoints for managing key-value configuration settings"),
-        (name = "Data Service", description = "Endpoints for retrieving data"),
-        (name = "Cache", description = "Endpoints for reading and writing Redis cache entries"),
-    ),
-    info(
-        title = "Rust Template Service",
-        version = "1.0.0",
-        description = "A Rust axum service with REST and MCP endpoints, ready for Claude",
+        (name = "Configuration", description = "Key-value configuration in Postgres"),
+        (name = "Data Service", description = "ClickHouse rows and the in-memory LSM store"),
+        (name = "Cache", description = "Redis cache entries"),
+        (name = "MCP", description = "Model Context Protocol (streamable HTTP); tools mirror the REST endpoints"),
     )
 )]
 pub struct ApiDoc;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub const BEARER: &str = "bearer";
 
-    #[test]
-    fn document_serialises_with_every_r1_path() {
-        let json = ApiDoc::openapi().to_pretty_json().unwrap();
-        for path in [
-            "\"/\"",
-            "/health/live",
-            "/health/ready",
-            "/health/status",
-            "/metrics",
-        ] {
-            assert!(json.contains(path), "missing {path}");
+/// Finish the document built from the routes.
+pub fn finish(mut doc: Document, settings: &Settings) -> Document {
+    doc.info.title = settings.app_title.clone();
+    doc.info.version = settings.app_version.clone();
+    doc.info.description = Some(settings.app_description.clone());
+    let mcp = |summary: &str| {
+        OperationBuilder::new()
+            .tag("MCP")
+            .summary(Some(summary))
+            .response("200", Response::new("JSON-RPC response or SSE stream"))
+            .response("403", Response::new("Host or Origin not allowed"))
+            .build()
+    };
+    doc.paths.add_path_operation(
+        "/mcp",
+        vec![HttpMethod::Post],
+        mcp("Send a JSON-RPC message (initialize, tools/list, tools/call)"),
+    );
+    doc.paths.add_path_operation(
+        "/mcp",
+        vec![HttpMethod::Get],
+        mcp("Open the server event stream"),
+    );
+    doc.paths
+        .add_path_operation("/mcp", vec![HttpMethod::Delete], mcp("End the session"));
+    if settings.auth_enabled {
+        if let Some(components) = doc.components.as_mut() {
+            components.add_security_scheme(
+                BEARER,
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("JWT")
+                        .build(),
+                ),
+            );
         }
+        doc.security = Some(vec![SecurityRequirement::new(BEARER, Vec::<String>::new())]);
     }
-
-    #[test]
-    fn document_serialises_with_every_r2_path() {
-        let json = ApiDoc::openapi().to_pretty_json().unwrap();
-        for path in [
-            "\"/config/\"",
-            "\"/data\"",
-            "\"/cache/\"",
-            "\"/cache/{key}\"",
-        ] {
-            assert!(json.contains(path), "missing {path}");
-        }
-    }
-
-    #[test]
-    fn document_serialises_with_every_r3_path() {
-        let json = ApiDoc::openapi().to_pretty_json().unwrap();
-        for path in [
-            "\"/data/cache\"",
-            "\"/data/ingest\"",
-            "application/vnd.apache.arrow.stream",
-        ] {
-            assert!(json.contains(path), "missing {path}");
-        }
-    }
+    doc
 }

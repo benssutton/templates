@@ -1,145 +1,178 @@
 # java-webservice-template
 
-A Micronaut (Java 25) service that mirrors `python-webservice-template`
-feature-for-feature, built so a developer can read either codebase and map one
-onto the other. Same endpoints, same request/response shapes, minimal business
-logic — a reusable foundation wired to common technologies.
-
-Design + Python↔Java mapping: `../docs/superpowers/specs/2026-06-15-java-webservice-template-design.md`.
+A Micronaut (Java 25) webservice template: REST endpoints over Postgres, ClickHouse,
+Redis and an in-memory stream store fed by HTTP or Solace, with health, metrics, MCP
+tools, and tests against real dependencies. It is one of three sibling templates
+(Python, Java, Rust). Each is idiomatic in its own language; they share one wire
+contract (paths, snake_case JSON, `{"detail"}` errors, status codes, env vars), and
+parity is held by contract tests, not by mirroring code.
 
 ## Stack
-- **Micronaut 5** on **Java 25** (Temurin), **Maven**
-- **Virtual threads** — controllers run blocking handlers via `@ExecuteOn(TaskExecutors.BLOCKING)`
-- **Micronaut Data JDBC** + HikariCP (Postgres; pgvector/pgvector image; `vector` extension enabled by the init script), **clickhouse-jdbc** (ClickHouse), **Jedis** + RedisJSON
-- **Apache Arrow** + **Solace PubSub+ Guaranteed messaging** stream ingestion
-- **Micronaut Serialization**, Jakarta Validation, **Micrometer/Prometheus**, OpenAPI/Swagger-UI
-- **JUnit 5 + Micronaut Test + Testcontainers** (real dependencies, no mocks)
+- **Micronaut 5** (platform 5.2.5) on **Java 25**, Maven, Netty, virtual threads
+  (`@ExecuteOn(TaskExecutors.BLOCKING)`)
+- **Micronaut Data JDBC** + HikariCP + **Flyway** (Postgres, pgvector image),
+  **clickhouse-jdbc** with app-applied versioned migrations, **Jedis** + RedisJSON
+- **Apache Arrow** IPC ingest over HTTP or **Solace** Guaranteed messaging (opt-in)
+- Micronaut Serialization (global snake_case), Jakarta Validation, Micrometer/Prometheus,
+  OpenAPI/Swagger UI, micronaut-mcp (official MCP Java SDK), micronaut-security-jwt
+  (off by default), OpenTelemetry tracing (export off by default), JSON logs
+- JUnit 5 + Micronaut Test + Testcontainers (no mocks), JaCoCo, Spotless, javac lint
 
-## Feature map (entry points)
+## Endpoints
 
-| Feature | Entry point |
+| Path | What |
 |---|---|
-| App bootstrap (the `create_app`/DI analogue) | [Application.java](src/main/java/com/example/template/Application.java) |
-| Typed settings | [config/AppSettings.java](src/main/java/com/example/template/config/AppSettings.java) + [application.yml](src/main/resources/application.yml) |
-| `/config` (Postgres, Micronaut Data) | [controller/ConfigController.java](src/main/java/com/example/template/controller/ConfigController.java) |
-| `/data` (ClickHouse) | [controller/DataController.java](src/main/java/com/example/template/controller/DataController.java) |
-| `/data/cache` + `/data/ingest` (LSM) | [controller/DataController.java](src/main/java/com/example/template/controller/DataController.java) |
-| `/cache` (Redis + RedisJSON) | [controller/CacheController.java](src/main/java/com/example/template/controller/CacheController.java) |
-| `/health/{live,ready,status}` | [controller/HealthController.java](src/main/java/com/example/template/controller/HealthController.java), [service/HealthService.java](src/main/java/com/example/template/service/HealthService.java) |
-| `/metrics` (Prometheus) | [observability/MetricsController.java](src/main/java/com/example/template/observability/MetricsController.java) |
-| Correlation-ID (MDC propagation) | [core/CorrelationFilter.java](src/main/java/com/example/template/core/CorrelationFilter.java) |
-| Server-Timing attribution | [core/ServerTimingFilter.java](src/main/java/com/example/template/core/ServerTimingFilter.java), [core/Timed.java](src/main/java/com/example/template/core/Timed.java) |
-| Simplified append-only LSM store | [persistence/streamstore/LsmStore.java](src/main/java/com/example/template/persistence/streamstore/LsmStore.java) |
-| Stream ingestion (thread, backoff, watchdog) | [service/StreamIngestService.java](src/main/java/com/example/template/service/StreamIngestService.java) |
-| Solace / noop transports + `Delivery` settlement | [ingestion/solace/SolaceBatchConsumer.java](src/main/java/com/example/template/ingestion/solace/SolaceBatchConsumer.java), [ingestion/NoopBatchConsumer.java](src/main/java/com/example/template/ingestion/NoopBatchConsumer.java), [ingestion/Delivery.java](src/main/java/com/example/template/ingestion/Delivery.java) |
-| Ingest settings | [config/IngestSettings.java](src/main/java/com/example/template/config/IngestSettings.java) |
-| Ingest lifecycle wiring (graceful shutdown, `System.exit(3)` hook) | [service/StreamIngestBeans.java](src/main/java/com/example/template/service/StreamIngestBeans.java) |
-| Demo publisher + Arrow IPC encoder | [publisher/ExampleSolacePublisher.java](src/main/java/com/example/template/publisher/ExampleSolacePublisher.java), [publisher/ArrowBatches.java](src/main/java/com/example/template/publisher/ArrowBatches.java) |
-| Fail-fast startup smoke-test | [core/StartupSmoke.java](src/main/java/com/example/template/core/StartupSmoke.java) |
-| Connect-with-backoff | [core/Retry.java](src/main/java/com/example/template/core/Retry.java) |
-| Shared Testcontainers base | [test/.../support/IntegrationSupport.java](src/test/java/com/example/template/support/IntegrationSupport.java) |
-| Solace test broker (one per JVM) + SEMP assertions | [test/.../support/SolaceSupport.java](src/test/java/com/example/template/support/SolaceSupport.java), [test/.../support/Semp.java](src/test/java/com/example/template/support/Semp.java) |
-| k6 performance tests | [tests/performance/](tests/performance/) |
+| `GET /` | title, version, description, `docs`, `MCP` |
+| `GET /config`, `POST /config` | Postgres key/value configuration (POST 201) |
+| `GET /cache/{key}`, `POST /cache` | RedisJSON values with optional `ttl_seconds` (POST 201, GET 404 when absent) |
+| `GET /data?limit=1..100` | ClickHouse rows ordered by `id` |
+| `GET /data/cache?limit=1..100` | newest LSM rows (oldest first), each with `seqno` and `op` |
+| `POST /data/ingest` | Arrow IPC stream (`application/octet-stream`), 202 |
+| `GET /health/live`, `/health/ready`, `/health/status` | liveness, readiness (503 when not ready), detailed status |
+| `GET /metrics` | Prometheus text |
+| `/mcp` | MCP tools mirroring the read endpoints |
+| `/swagger-ui` | OpenAPI UI |
 
-## Build & test
+**Errors** are always `application/json {"detail": "..."}`: 400 unreadable body,
+401 (auth on), 403 (`/mcp` Host/Origin rejected), 404, 405, 413 (body or batch too
+large), 415, 422 (validation and conversion errors, invalid Arrow batch), 500 (no
+internals), 503 (a store is down or timing out; detail `Service Unavailable`). One
+`ErrorResponseProcessor` (`controller/ErrorDetailResponseProcessor`) renders every
+error; exception handlers only pick the status.
+
+**Correlation id.** `X-Request-ID` is adopted only if it is 1-128 chars of
+`[A-Za-z0-9._-]`, otherwise a new UUID is generated; it is echoed on the response and
+stamped on every log line (MDC `correlationId`), including health probe threads. A
+Solace message's correlation id follows the same rule.
+
+## Build, test, format, lint
+
+JDK 25 and a running Docker (Testcontainers) are needed. From this directory:
+
 ```bash
-cd java-webservice-template
-# JAVA_HOME must point at a JDK 25; Docker must be running (Testcontainers).
-./mvnw verify      # runs all tests + JaCoCo coverage gate
+./mvnw test                         # fast: *Test classes; no Solace broker (*IT classes need it)
+./mvnw verify                       # all tests (Solace broker too) + JaCoCo gate
+./mvnw test -Dtest=CacheControllerTest   # one class
+./mvnw spotless:apply               # format (google-java-format, AOSP style)
+./mvnw spotless:check               # format gate
+./mvnw -Plint -DskipTests test-compile   # javac -Xlint -Werror
 ```
-On Windows + Docker Desktop, the `windows-docker` Maven profile auto-activates to
-pin `DOCKER_HOST`; on Linux/CI it stays inactive.
 
-Tests start one Solace broker per JVM (`SolaceSupport`, about a minute to come
-up) and isolate by unique topic/queue names; `Semp` asserts broker-side state
-(queue existence, subscriptions, message, bind and unacked counts) and network partitions are simulated with `docker pause`.
-The embedded server runs on a random port (`src/test/resources/application-test.yml`)
-because the broker's SEMP API uses 8080.
+From the repo root the same steps run as `python run_CICD.py java fmt|fmt-check|lint|test-fast|test`
+(`fast` = fmt-check + lint; `check` adds `test`; `ci` adds image build, scan and k6 smoke).
 
-## Streaming ingestion (Solace)
+On Windows + Docker Desktop the `windows-docker` Maven profile auto-activates to pin
+`DOCKER_HOST`. Tests run the embedded server on a random port because the Solace
+broker's SEMP API uses 8080.
 
-A dedicated ingest thread consumes Arrow IPC batches from Solace Guaranteed
-messaging and writes them into the LSM store, served from `/data/cache`.
+## Configuration
 
-- **Transport:** `template.ingest.transport` (env `INGEST_TRANSPORT`) defaults to
-  `solace`. `SolaceBatchConsumer` binds a **durable exclusive queue**
-  (`template.ingest.solace.queue`, default `java-template/ingest`), created on
-  start (`CREATE_ON_START`) with the topic subscription
-  (`template.ingest.solace.topic`, default `ingest/batches`) attached, using client
-  acknowledgement. One queue per replica: the LSM store is a per-instance cache.
-- **Settle after write.** Each message becomes a [`Delivery`](src/main/java/com/example/template/ingestion/Delivery.java);
-  `StreamIngestService` decides and settles it exactly once:
+Settings are immutable, validated records (`config/AppSettings`, `config/IngestSettings`,
+`auth/AuthSettings`); defaults live in `application.yml` and a value that breaks a
+constraint fails startup.
 
-  | Situation | Outcome |
-  |---|---|
-  | Written to the store | ACCEPTED (acked) |
-  | Store write raised | FAILED: redelivered, after a jittered, doubling settlement backoff (1 s up to 60 s) |
-  | Not Arrow IPC / unmergeable / over `max-batch-bytes` | REJECTED: never redelivered (DMQ if configured) |
+| Env | Default | Meaning |
+|---|---|---|
+| `INGEST_TRANSPORT` | `noop` | `noop` (HTTP ingest only) or `solace` |
+| `MCP_ALLOWED_HOSTS` | `localhost` | `/mcp` Host/Origin allow-list: JSON array or comma-separated `host[:port]` (no port = any port) |
+| `AUTH_ENABLED` | `false` | require `Authorization: Bearer <HS256 JWT>` on every route but `/health/live` and `/health/ready` |
+| `AUTH_JWT_SECRET` | (none) | HS256 key, at least 32 bytes; startup fails if auth is on without it |
+| `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE` | (none) | checked only when set |
+| `LOG_FORMAT`, `LOG_LEVEL` | `json`, `INFO` | `json` or `text` logs; root level |
+| `OTEL_TRACES_EXPORTER`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `none` | set `otlp` to export traces (traceparent is always honoured) |
+| `HEALTH_CACHE_TTL_SECONDS` | `5` | `/health/status` and `/metrics` reuse one probe round this long; readiness is always live |
+| `POSTGRES_URL`, `CLICKHOUSE_URL`, `REDIS_URL` (+ users, passwords, `*_POOL_SIZE`) | localhost | store connections |
+| `SOLACE_HOST`, `SOLACE_PORT`, `SOLACE_VPN`, `SOLACE_USERNAME`, `SOLACE_PASSWORD`, `SOLACE_TOPIC`, `SOLACE_QUEUE` | localhost defaults | Solace transport |
 
-  Auto-created queues use Solace's default unlimited max-redelivery and have no
-  dead-message queue; production queues should configure both.
-- **`noop` opt-out:** `INGEST_TRANSPORT=noop` connects to nothing and idles, for
-  HTTP-only ingest (`POST /data/ingest`) without a broker. Under compose, `app`
-  depends on a healthy `solace`, so skip that dependency explicitly:
-  `docker compose up -d postgres clickhouse redis && INGEST_TRANSPORT=noop docker compose up -d --no-deps app`.
-- **Extension point: Message Replay.** The durable queue buffers only unacked
-  messages; to rebuild the in-memory cache after a restart, build the receiver in
-  `SolaceBatchConsumer` with a replay strategy
-  (`withMessageReplay(ReplayStrategy...)`) against a broker replay log, configured
-  alongside `template.ingest.solace.queue` / `topic`.
-- **Connect timing (differs from Python):** the consumer connects lazily inside the
-  ingest loop; each `consume()` builds a fresh `MessagingService`. With the broker
-  unreachable the app still comes up live with ingest `DOWN`, and the retry
-  failure path or the disconnect watchdog exits the process. Python connects with
-  backoff in its lifespan and fails startup instead. Both reconnect with a fresh
-  service after a terminal interruption.
-- **Batch size limit (differs from Python):** `max-batch-bytes` is checked against
-  the encoded message payload, all-or-nothing, before any write. Python checks the
-  decoded Arrow `nbytes` of each batch, also before any write.
-- **Resilience and shutdown:** SDK lifecycle listeners drive `ConnectionState`;
-  the SDK reconnects forever. Transport failures retry with jittered exponential
-  backoff; a successful bind (the persistent receiver started) or a delivery resets
-  the backoff and the failure count. 5 consecutive failures without a successful
-  bind, or the transport staying disconnected longer than
-  `max-disconnect-seconds`, trigger the shutdown hook, which calls `System.exit(3)`
-  on a separate non-blocking thread so an orchestrator restarts the process.
-  Graceful shutdown uses `@Bean(preDestroy = "close")` in `StreamIngestBeans`
-  (Micronaut 5 does not infer `close()` on factory beans), which stops the ingest
-  thread and closes the Solace session.
-- **Config** (`template.ingest.*`, see [IngestSettings.java](src/main/java/com/example/template/config/IngestSettings.java)
-  and [application.yml](src/main/resources/application.yml)): `transport`
-  (`INGEST_TRANSPORT`), `max-batch-bytes`, `max-disconnect-seconds`,
-  `staleness-threshold-seconds`, and `solace.host|port|vpn|username|password|topic|queue`
-  (env `SOLACE_HOST`, `SOLACE_PORT`, `SOLACE_VPN`, `SOLACE_USERNAME`,
-  `SOLACE_PASSWORD`, `SOLACE_TOPIC`, `SOLACE_QUEUE`).
+Every store client has bounded waits (Hikari connection timeout, pgjdbc socket timeout
+and `statement_timeout`, ClickHouse socket and `max_execution_time`, Jedis pool, connect
+and socket timeouts), so an outage is a prompt 503. SIGTERM drains in-flight requests
+for `SHUTDOWN_GRACE_PERIOD` (20 s).
 
-## Run the full stack (HTTPS on 443)
+## Schema migrations
+
+- **Postgres:** Flyway, `src/main/resources/db/postgres/V<n>__<name>.sql`, applied at
+  startup. Flyway holds an advisory lock while migrating, so replicas starting together
+  are safe (`MigrationsTest` races six migrators on a fresh database).
+- **ClickHouse:** `db/clickhouse/V1.sql`, `V2.sql`, ... applied at startup by
+  `ClickHouseMigrations`, recorded in `schema_migrations`. ClickHouse has no DDL lock,
+  so every migration must be idempotent (`IF NOT EXISTS`).
+
+## Streaming ingestion
+
+Arrow IPC batches (columns `id` int64 and `op` utf8 in `{upsert, delete}`, both
+non-null; `name`, `value` nullable utf8) land in the LSM store served from
+`/data/cache`. HTTP decodes and validates every batch of a stream before writing any,
+and answers 413 when a batch's decoded Arrow buffers exceed `max-batch-bytes`. All
+decodes share one Arrow allocator bounded by `decoder-memory-bytes`.
+
+The LSM store is append-only and bounded by `lsm-max-rows`: the oldest rows are evicted,
+counted (`lsm_rows_evicted_total`, `rows_evicted_total` on the ingest health) and logged
+at WARN at most once a minute. Compaction is left to the client.
+
+**Solace (`INGEST_TRANSPORT=solace`).** `SolaceBatchConsumer` binds a durable exclusive
+queue (`SOLACE_QUEUE`, one per replica), created on start with the topic subscription,
+and hands each message's raw payload to `StreamIngestService`, which settles it exactly
+once after the write:
+
+| Situation | Outcome |
+|---|---|
+| Written to the store | ACCEPT |
+| Store write or decode memory failed | FAIL: redelivered after a jittered, doubling backoff (`retry-base-delay-seconds` to `retry-max-delay-seconds`) |
+| Over `max-batch-bytes` (checked before decoding), not Arrow IPC, or invalid | REJECT: never redelivered |
+
+Settlements are counted in `ingest_settlements_total{outcome}`. Auto-created queues have
+unlimited redelivery and no dead-message queue; production queues should set both.
+
+The consumer connects lazily inside the ingest loop, so the app comes up live with
+ingest down if the broker is unreachable. Two independent limits then exit the process
+(`System.exit(3)`, so an orchestrator restarts it): `max-consecutive-failures` transport
+failures in a row without a successful bind (default 5), and the watchdog when the
+transport stays disconnected for `max-disconnect-seconds` (default 60). Setting either
+to 0 disables only that one. With `noop`, ingest never affects readiness.
+
+## Run with Docker Compose (HTTPS on 443)
+
 ```bash
 docker compose up -d --build --wait
 curl -fsk https://localhost/health/ready
-# Swagger UI: https://localhost/swagger-ui  •  MCP: https://localhost/mcp
-```
-Compose also starts the `solace` broker (SMF on 55555, SEMP on 8080) and a
-`solace-publisher` demo that runs `ExampleSolacePublisher`, continuously
-publishing Arrow batches to `ingest/batches`. The publisher has
-`restart: on-failure` because the broker's health check passes shortly before the
-message VPN accepts clients and the demo does not retry its connect. To run the
-app without the broker (HTTP-only ingest), start its other dependencies first and
-skip `app`'s `solace` dependency with `--no-deps`; `INGEST_TRANSPORT=noop docker compose up app`
-alone would still start the broker and wait for it to be healthy:
-```bash
-docker compose up -d postgres clickhouse redis
-INGEST_TRANSPORT=noop docker compose up -d --no-deps app
 ```
 
-## How this maps to python-webservice-template
-Micronaut's `ApplicationContext` replaces the Python hand-rolled DI container;
-`@MicronautTest` replaces `create_app` isolation. Deliberate divergences:
-native DI; **append-only LSM store** (compaction pushed to the client, so
-`/data/cache` rows carry `seqno`+`op`); **Jedis** for RedisJSON; **async-profiler**
-for Layer-2 profiling; lazy Solace connect and an encoded-payload batch size check
-(see [Streaming ingestion](#streaming-ingestion-solace)). Everything else mirrors the Python structure and naming.
+The image listens on 8443 (compose publishes `443:8443`), runs as uid 10001 with a
+`HEALTHCHECK`, and sizes its heap from the container limit. It carries no TLS key:
+compose's one-shot `certs` service writes a self-signed dev keystore into a volume
+mounted at `/app/certs`; real deployments mount their own. Compose opts into
+`INGEST_TRANSPORT=solace` and starts the broker plus a demo publisher
+(`ExampleSolacePublisher`, built from the test sources with the Dockerfile's
+`publisher` target, so it never ships in the app jar).
+
+## Adding things
+
+- **An endpoint:** a `@Controller` in `controller/` with `@ExecuteOn(TaskExecutors.BLOCKING)`,
+  `@Tag`/`@Operation` for OpenAPI, `@Serdeable` record DTOs in `dto/` (camelCase in
+  Java, snake_case on the wire automatically), logic in a `service/` singleton. Throw
+  `HttpStatusException` for 4xx; errors render as `{"detail"}` without extra code. Add
+  its raw-JSON shape to `ContractTest`.
+- **A store:** its client factory with explicit timeouts under `persistence/`, migrations
+  if it has a schema, one `PingProbe` method in `health/DependencyProbes` (health,
+  readiness, `/metrics` and the startup smoke test pick it up), and an outage mapping in
+  `controller/StoreUnavailableHandlers` if its client throws its own exception types.
+  Test with a Testcontainer in `support/IntegrationSupport`.
+- **An MCP tool:** a `@Tool` method in `mcp/McpTools` that calls the same service as
+  the REST endpoint it mirrors; return a DTO (serialised as snake_case JSON) or, for a
+  not-found style result, a `CallToolResult` with `isError` (a thrown exception becomes
+  a JSON-RPC protocol error). Test it with the SDK client in `McpEndpointTest`.
+
+## Deliberate differences from the Python and Rust templates
+1. **Append-only LSM store**: `/data/cache` rows carry `seqno` and `op`; the client compacts.
+2. **Stateless MCP transport** (micronaut-mcp's stateless Streamable HTTP: JSON responses,
+   no sessions); Python and Rust are session-based.
+3. **Lazy Solace connect** (above); Python connects in its lifespan and fails startup.
+4. **Solace batch limit** is checked on the encoded payload before decoding; HTTP checks
+   the decoded Arrow buffers per batch, like the other templates.
+5. **`memory_rss_bytes` / `system_boot_seconds`** come from `/proc` and are `null`
+   off Linux.
 
 ## Performance profiling
-See [PERF_PROFILING_RUNBOOK.md](PERF_PROFILING_RUNBOOK.md) — Layer 1 (k6 +
-Server-Timing) and Layer 2 (async-profiler).
+See [PERF_PROFILING_RUNBOOK.md](PERF_PROFILING_RUNBOOK.md): Layer 1 (k6 + Server-Timing)
+and Layer 2 (async-profiler).

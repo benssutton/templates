@@ -1,7 +1,7 @@
-//! CORS from settings (Python: Starlette CORSMiddleware). Settings::validate
+//! CORS from settings (tower-http `CorsLayer`). Settings validation
 //! already rejects credentials + wildcard origin. For credentials +
 //! wildcard methods/headers, tower-http would panic, so the request's own
-//! method/headers are mirrored (what Starlette does in that case).
+//! method/headers are mirrored instead.
 
 use crate::settings::Settings;
 use axum::http::{HeaderName, HeaderValue, Method};
@@ -45,7 +45,7 @@ pub fn layer(s: &Settings) -> CorsLayer {
         .allow_methods(methods)
         .allow_headers(headers)
         .allow_credentials(s.cors_allow_credentials)
-        // Starlette CORSMiddleware default max_age=600.
+        // Browsers cache a preflight for 10 minutes.
         .max_age(Duration::from_secs(600))
 }
 

@@ -8,7 +8,7 @@ pub enum ProbeError {
 }
 
 /// A dependency health check. Registered only after the dependency has
-/// connected and passed its smoke test (spec §5).
+/// connected and passed its smoke test.
 #[async_trait]
 pub trait HealthProbe: Send + Sync {
     /// Stable name used in `/health/ready`, `/health/status` and the

@@ -6,7 +6,6 @@ import com.example.template.dto.DataRowsResponse;
 import com.example.template.persistence.analyticsstore.clickhouse.ItemEntity;
 import com.example.template.persistence.analyticsstore.clickhouse.ItemRepository;
 import jakarta.inject.Singleton;
-
 import java.util.List;
 
 /** ClickHouse analytics reads (mirrors Python services/data.py) with Server-Timing boundaries. */
@@ -28,9 +27,8 @@ public class DataService {
         try (Timed t = Timed.start("clickhouse.select")) {
             items = repository.findLimited(limit);
         }
-        List<DataRow> rows = items.stream()
-            .map(i -> new DataRow(i.id(), i.name(), i.value()))
-            .toList();
+        List<DataRow> rows =
+                items.stream().map(i -> new DataRow(i.id(), i.name(), i.value())).toList();
         return new DataRowsResponse(rows, total, limit);
     }
 }

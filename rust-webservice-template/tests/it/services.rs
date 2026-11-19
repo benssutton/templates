@@ -44,7 +44,10 @@ async fn config_upserts_and_lists_in_key_order() {
 
 #[tokio::test]
 async fn data_counts_all_rows_and_limits_the_page() {
-    let svc = DataService::new(stores().await.clickhouse.client().clone());
+    let svc = DataService::new(
+        stores().await.clickhouse.client().clone(),
+        std::time::Duration::from_secs(10),
+    );
     let (page, samples) = collect(svc.get_data(2)).await;
     let page = page.unwrap();
     assert_eq!(page.total, 3);

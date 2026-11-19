@@ -6,29 +6,40 @@
 
 ## Getting Set Up
 
-### 1. Create Local Docker Services 
+### 1. Install Python dependencies
 
 ```bash
-# Start all services (Postgres/pgvector, ClickHouse, Redis, Solace + demo publisher)
-docker compose up -d --build
+pip install -r requirements.txt -r requirements-dev.txt   # exact runtime pins + tests/linters
+```
 
-# Verify all containers are running
+### 2. Generate the dev TLS certificate (only for `python main.py`)
+
+```bash
+python certs/generate_self_signed_cert.py   # writes certs/key.pem + certs/cert.pem (gitignored)
+```
+
+The compose stack needs no host-side step: its one-shot `certs` service writes a
+self-signed certificate into a volume the `app` container mounts read-only.
+
+### 3. Start the backing services
+
+```bash
+# Postgres/pgvector, ClickHouse, Redis, Solace + demo publisher, and the app
+docker compose up -d --build --wait
 docker compose ps
 ```
 
-Solace needs a Docker VM with at least 3 GiB RAM (the broker alone takes ~1 GiB). For HTTP-only ingest without a broker: `docker compose up -d db clickhouse redis && INGEST_TRANSPORT=noop docker compose up -d --no-deps app` (`app` depends on a healthy `solace`, so a plain `up` would still start it).
-
-### 2. Install Python Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Generate Self-signed SSL Certificates for HTTPS
+The compose stack streams from Solace (`INGEST_TRANSPORT=solace` is set on `app`);
+Solace needs a Docker VM with at least 3 GiB RAM. The application default is
+`noop` (HTTP ingest only), so for a broker-free stack start just the stores and
+run the app locally:
 
 ```bash
-python ./certs/generate_self_signed_cert.py
+docker compose up -d db clickhouse redis
+python main.py
 ```
+
+The app applies its Postgres and ClickHouse migrations (`migrations/`) at startup.
 
 ## Running the Application
 
@@ -36,55 +47,46 @@ python ./certs/generate_self_signed_cert.py
 python main.py
 ```
 
-Once running, swagger documentation will be available at https://localhost/docs#/
-
-Both run modes serve HTTPS on the default port 443 with the self-signed dev cert:
-`python main.py` and the `app` container started by `docker compose up` both expose
-`https://localhost/`. Your browser will warn about the self-signed certificate —
-accept it to proceed (dev only).
+Swagger is at https://localhost/docs. `python main.py` serves HTTPS on 443; the
+container listens on 8443 and compose publishes it as `443:8443`, so both are
+reached at `https://localhost/`. Your browser will warn about the self-signed
+certificate: accept it (dev only).
 
 ## Running the Tests
 
-To run the functional pytests with a coverage report at htmlcov/index.html:
+All tests start their own containers (Testcontainers); Docker must be running.
+
 ```bash
-pytest tests/ -v --cov --cov-report=html
+pytest tests/ -v --cov --cov-report=html    # coverage report at htmlcov/index.html
+pytest tests/test_cache.py::test_post_cache_without_ttl -v   # one test
 ```
 
-To run the smoke tests:
+k6 runs against the compose stack from inside its network:
 
-First, make sure the k6 image is built:
 ```bash
 docker build -t perf-scripts ./tests/performance
-```
-
-```bash
-docker run --rm --network python-template_default -e BASE_URL=https://app perf-scripts run /scripts/smoke.js
-```
-
-To run the performance tests:
-```bash
-docker run --rm --network python-template_default -e BASE_URL=https://app perf-scripts run /scripts/load.js
-```
-
-To run the stress tests:
-```bash
-docker run --rm --network python-template_default -e BASE_URL=https://app -e TARGET_RPS=50 perf-scripts run /scripts/stress.js
+docker run --rm --network python-template_default -e BASE_URL=https://app:8443 perf-scripts run /scripts/smoke.js
+docker run --rm --network python-template_default -e BASE_URL=https://app:8443 perf-scripts run /scripts/load.js
+docker run --rm --network python-template_default -e BASE_URL=https://app:8443 -e TARGET_RPS=50 perf-scripts run /scripts/stress.js
 ```
 
 ## Integrating with Claude Desktop
 
-Start the FastAPI app — /mcp is mounted at https://localhost/mcp.
-Add to Claude Desktop's claude_desktop_config.json. Because the dev cert is
-self-signed, mcp-remote must be told to accept it via NODE_TLS_REJECT_UNAUTHORIZED=0
-(dev only — do not use against production endpoints):
+Start the app; `/mcp` is mounted at https://localhost/mcp. Add to Claude Desktop's
+`claude_desktop_config.json`. Because the dev cert is self-signed, mcp-remote must
+be told to accept it via `NODE_TLS_REJECT_UNAUTHORIZED=0` (dev only; never against
+production endpoints):
 
-  "mcpServers": {
-    "python-template": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "https://localhost/mcp"],
-      "env": { "NODE_TLS_REJECT_UNAUTHORIZED": "0" }
-    }
-  },
+```json
+"mcpServers": {
+  "python-template": {
+    "command": "npx",
+    "args": ["-y", "mcp-remote", "https://localhost/mcp"],
+    "env": { "NODE_TLS_REJECT_UNAUTHORIZED": "0" }
+  }
+}
+```
 
-Restart Claude Desktop. The health tool should appear.
-
+Restart Claude Desktop. The tools `get_health_status`, `list_config`,
+`get_cache_entry`, `get_data` and `get_cached_data` should appear. With
+`AUTH_ENABLED=true`, add `"--header", "Authorization: Bearer <jwt>"` to `args`.

@@ -1,281 +1,277 @@
 # Python Web-Service Template
 
 A production-shaped **FastAPI** service that wires up the technologies a real
-enterprise data service needs — ClickHouse, Postgres, Redis, streaming ingest —
-behind clean, testable boundaries. It contains **no business logic**. Its intended job is
+enterprise data service needs (ClickHouse, Postgres, Redis, streaming ingest)
+behind clean, testable boundaries. It contains **no business logic**. Its job is
 to be a *reference*: a place to copy proven boilerplate, and a place to read when
 you want to see what "good" looks like for testability, observability and
 resilience.
 
-This document is a **map of the example features**. Each section says what the
-feature is, why it's here, and the **entry point in the code** so you can jump
-straight to it and explore.
+This document is a **map of the example features**: what each one is, why it is
+here, and its **entry point in the code**.
 
 - New to the repo and want to run it? → [GETTING_STARTED.md](GETTING_STARTED.md)
-- Want the architectural rationale and patterns in depth? → [CLAUDE.md](CLAUDE.md)
+- Patterns, commands and recipes for working on it → [CLAUDE.md](CLAUDE.md)
 
 ---
 
 ## Table of Contents
 
-1. [Core Framework — FastAPI, Pydantic, REST-first, MCP](#1-core-framework)
-2. [Backing Technologies](#2-backing-technologies)
-3. [Streaming Ingestion](#3-streaming-ingestion)
-4. [Observability](#4-observability)
-5. [Resilience](#5-resilience)
-6. [Testing](#6-testing)
-7. [Performance & Profiling](#7-performance--profiling)
-8. [Configuration](#8-configuration)
-9. [Project Layout](#9-project-layout)
+1. [Core Framework](#1-core-framework)
+2. [Wire Contract](#2-wire-contract)
+3. [Backing Technologies](#3-backing-technologies)
+4. [Streaming Ingestion](#4-streaming-ingestion)
+5. [Observability](#5-observability)
+6. [Resilience](#6-resilience)
+7. [Security](#7-security)
+8. [Testing](#8-testing)
+9. [Performance & Profiling](#9-performance--profiling)
+10. [Configuration and Dependencies](#10-configuration-and-dependencies)
+11. [Project Layout](#11-project-layout)
 
 ---
 
 ## 1. Core Framework
 
-The heart of the service is the **application factory** in
-[main.py](main.py). `create_app(settings)` builds a
-*fully isolated* app — its own DI container, its own MCP server, its own
-lifespan — so several apps can run side-by-side in one process (this is what lets
-the whole test suite run in a single pytest session).
+The heart of the service is the **application factory** in [main.py](main.py).
+`create_app(settings)` builds a *fully isolated* app (its own services, MCP
+server and lifespan), so several apps can run side by side in one process; this
+is what lets the whole test suite run in one pytest session.
 
 | Feature | What it does | Entry point |
 | --- | --- | --- |
-| **FastAPI app factory** | Builds an isolated app; lifespan eagerly opens & smoke-tests every dependency before serving traffic | [`create_app` / `create_lifespan`](main.py) |
+| **App factory + lifespan** | Opens, smoke-tests and migrates every store before serving traffic, then builds the services | [`create_app` / `create_lifespan`](main.py) |
 | **Pydantic settings** | All config is a typed `BaseSettings` model; env vars / `.env` override defaults; secrets use `SecretStr` | [settings.py](settings.py) |
-| **Dependency injection** | A small custom `Container` holds singletons per app; route params resolve them via typed `Annotated` aliases | [core/container.py](core/container.py), [core/dependencies.py](core/dependencies.py) |
-| **REST-first routers** | Every capability — data, config, cache, health, metrics — is a REST endpoint. Routers are thin; logic lives in services | [routers/](routers/) |
-| **Pydantic schemas** | Request/response models give automatic validation + OpenAPI docs | [schemas/](schemas/) |
-| **OpenAPI / Swagger** | Tag metadata is co-located with each router and assembled in the factory; docs served at `/docs` | [`openapi_tags`](main.py) |
-| **MCP server** | A `FastMCP` server is mounted at `/mcp` as a **starting point** for exposing capabilities to AI agents. One example tool (`get_health_status`) mirrors a REST endpoint by calling the same service; `resources.py` / `prompts.py` are stubs to fill in. MCPs are optional and add no new logic | [mcp_routers/tools.py](mcp_routers/tools.py), [`app.mount("/mcp")`](main.py) |
-
-> **Design note — REST-first, MCP as a starting point.** Application management,
-> configuration, observability and functional calls are *all* REST endpoints.
-> The MCP layer is a thin adapter intended to let an AI agent call the same
-> capabilities by delegating to the services; it never holds business logic of
-> its own. It ships as a worked example (one tool) to extend, not a complete
-> mirror of every endpoint.
+| **Dependency injection** | The lifespan stores a frozen `AppServices` dataclass on `app.state.services`; typed `Annotated` getters hand each route its service | [services/app_services.py](services/app_services.py), [core/dependencies.py](core/dependencies.py) |
+| **REST-first routers** | Every capability (data, config, cache, health, metrics) is a REST endpoint. Routers are thin; logic lives in services | [routers/](routers/) |
+| **Pydantic schemas** | Request/response models give validation and OpenAPI docs (`/docs`) | [schemas/](schemas/) |
+| **MCP server** | `FastMCP` mounted at `/mcp`. Its tools mirror the REST read endpoints by calling the same service methods: `get_health_status`, `list_config`, `get_cache_entry`, `get_data`, `get_cached_data` | [mcp_routers/tools.py](mcp_routers/tools.py) |
 
 ---
 
-## 2. Backing Technologies
+## 2. Wire Contract
 
-Each external dependency is wrapped in an **async context manager** that opens
-the connection in `__aenter__` and closes it in `__aexit__`. The lifespan in
-[main.py](main.py) enters them in order, so a
-failed dependency aborts startup (fail-fast) and a clean/exception shutdown
-always closes them.
+Shared with the Java and Rust templates and pinned by tests:
 
-| Technology | Role | Client (entry point) | Service |
+- JSON field names are snake_case (`ttl_seconds`, `latency_ms`).
+- Every error is `application/json` `{"detail": <string or list>}`: 400, 401, 404,
+  405, 413, 422, 500, 503, including `/mcp` Host/Origin rejections
+  ([core/errors.py](core/errors.py)). Internal error text is logged, not returned.
+- A store outage on a request path answers 503 `{"detail": "Service Unavailable"}`
+  within the client timeouts.
+- `GET /data` is ordered by `id`.
+- `POST /data/ingest` validates every batch before writing any; a decoded batch
+  over `max_ingest_batch_bytes` answers 413.
+- `X-Request-ID` is adopted only if it is 1-128 chars of `[A-Za-z0-9._-]`;
+  otherwise a new id is generated.
+- `/config` and `/cache` answer with or without a trailing slash.
+
+---
+
+## 3. Backing Technologies
+
+Each external dependency is wrapped in an **async context manager** that connects
+with backoff and smoke-tests in `__aenter__` and closes in `__aexit__`. The
+lifespan enters them in order, so a failed dependency aborts startup (fail fast)
+and any shutdown closes them.
+
+| Technology | Role | Client | Service |
 | --- | --- | --- | --- |
-| **Postgres** (asyncpg, no ORM; pgvector/pgvector image; `vector` extension enabled by the init script) | Transactional config store | [postgres_client.py](persistence/transaction_store/postgres/postgres_client.py) | [services/config.py](services/config.py) |
+| **Postgres** (asyncpg, no ORM; pgvector image, `vector` extension enabled) | Transactional config store | [postgres_client.py](persistence/transaction_store/postgres/postgres_client.py) | [services/config.py](services/config.py) |
 | **ClickHouse** (clickhouse-connect async) | Analytics / columnar reads | [clickhouse_client.py](persistence/analytics_store/clickhouse/clickhouse_client.py) | [services/data.py](services/data.py) |
 | **Redis** (redis-py async, RedisJSON) | Cache store | [redis_client.py](persistence/cache_store/redis/redis_client.py) | [services/cache.py](services/cache.py) |
-| **In-memory LSM store** | Hot cache of the streamed record batches, queryable over REST | [lsm_store.py](persistence/stream_store/lsm_store.py) | [services/stream_ingest.py](services/stream_ingest.py) |
+| **In-memory LSM store** | Hot cache of streamed record batches, queryable over REST | [lsm_store.py](persistence/stream_store/lsm_store.py) | [services/stream_ingest.py](services/stream_ingest.py) |
 
-SQL is kept as plain DDL/DML files — the single source of truth shared between
-the app, docker-compose and the tests:
-[scripts/postgres-init.sql](scripts/postgres-init.sql),
-[scripts/clickhouse-init.sql](scripts/clickhouse-init.sql).
+**Migrations.** Numbered SQL files in [migrations/postgres](migrations/postgres)
+and [migrations/clickhouse](migrations/clickhouse) are applied at startup by
+[persistence/migrations.py](persistence/migrations.py); each store records what it
+applied in `schema_migrations`. Postgres applies all pending files in one
+transaction under an advisory lock (replicas starting together apply each version
+once). ClickHouse has no transactions, so its files are single idempotent
+statements. A fresh database needs nothing but the app.
 
 ---
 
-## 3. Streaming Ingestion
+## 4. Streaming Ingestion
 
-A dedicated background thread consumes batches from a streaming transport and
-writes them into the LSM store; the data is then served from `/data/cache`.
+A background thread consumes batches from a streaming transport and writes them
+into the LSM store; `/data/cache` serves them.
 
-- **Transport: Solace PubSub+ Guaranteed messaging** (`ingest_transport="solace"`,
-  the default). The consumer binds a **durable exclusive queue** (`solace_queue`),
-  creating it on start with the `solace_topic` subscription attached
-  ([ingestion/solace/client.py](ingestion/solace/client.py)). One queue per replica:
-  the LSM store is a per-instance cache.
+- **Transports.** `noop` (default: no stream, HTTP ingest only) or `solace`
+  (Guaranteed messaging). With `solace`, the consumer binds a **durable exclusive
+  queue** (`solace_queue`), creating it on start with the `solace_topic`
+  subscription ([ingestion/solace/client.py](ingestion/solace/client.py)). One
+  queue per replica: the LSM store is a per-instance cache. The compose demo stack
+  sets `INGEST_TRANSPORT=solace`.
 - **Settle after write.** Each message becomes a [`Delivery`](ingestion/base.py);
-  [`StreamIngestService`](services/stream_ingest.py) settles it once the batches
-  are in the LSM store:
+  [`StreamIngestService`](services/stream_ingest.py) settles it once its batches
+  are in the store:
 
   | Situation | Outcome |
   |---|---|
   | Written | ACCEPTED (acked) |
   | Store write raised | FAILED: redelivered, with an increasing backoff between redeliveries |
-  | Not Arrow IPC / missing key columns / unmergeable / over `max_ingest_batch_bytes` (any batch in the message) | REJECTED before any write: never redelivered (DMQ if configured) |
+  | Not Arrow IPC / missing key columns / schema conflicting with the store's / over `max_ingest_batch_bytes` (any batch in the message) | REJECTED before any write: never redelivered (DMQ if configured) |
 
   Auto-created queues use Solace's default unlimited max-redelivery and have no
-  dead-message queue; production should configure max-redelivery and a DMQ.
-- **`noop` transport** (`INGEST_TRANSPORT=noop`) for deployments without a broker.
-  Under Compose, `app` depends on a healthy `solace`, so a plain `up` still starts
-  the broker; skip it with `docker compose up -d db clickhouse redis && INGEST_TRANSPORT=noop docker compose up -d --no-deps app`.
+  dead-message queue; production should configure both.
+- **Schema.** The first accepted batch fixes the store's Arrow schema; a later
+  batch with an extra column or a different dtype is refused (422 / REJECTED)
+  instead of breaking every later flush and query.
+- **HTTP ingest.** [`POST /data/ingest`](routers/data.py) takes an Arrow IPC
+  stream (decoded off the event loop): 202 when every batch is written, 400 for an
+  unreadable body, 413 for an oversized batch, 422 for an unmergeable one, and
+  nothing is written unless all batches pass.
 - **Recovery after a terminal interruption.** The SDK reconnects forever, so a
-  network partition is normally healed by the SDK itself. If it does report a
-  terminal service interruption, `deliveries()` raises `SolaceServiceInterrupted`;
-  the ingest loop counts a failure and backs off, and the next `deliveries()`
-  call disconnects the dead service and connects a fresh one (same backoff as
-  startup). Connection state goes DOWN, then CONNECTED again. A successful bind
-  resets the loop's consecutive-failure count, so only failures to *bind* (or
-  connect) add up to a shutdown.
-- **Deliberate divergences from the Java template**:
-  - *Startup:* Python connects to Solace with backoff in the lifespan and fails
-    startup if the broker is unreachable. Java connects lazily inside the ingest
-    loop: it comes up live with ingest DOWN, and the watchdog or the
-    consecutive-failure path exits.
-  - *Size limit:* `max_ingest_batch_bytes` measures the decoded Arrow `nbytes` of
-    each batch in Python, and the encoded message payload in Java. In both, a
-    message is validated in full (size + required columns) before anything is
-    written, so a REJECTED message leaves nothing in the store.
-- **HTTP ingest** path for pushing a batch directly:
-  [`POST /data/ingest`](routers/data.py) (422 for an unmergeable batch).
-- **Extension point: Message Replay.** The durable queue buffers only unacked
-  messages; to rebuild the in-memory cache after a restart, start the receiver
-  with a replay strategy (`with_message_replay`) against a broker replay log.
-- **Ingest loop, reconnection & shutdown logic**:
-  [services/stream_ingest.py](services/stream_ingest.py)
-  — per-message correlation IDs; transport reconnect/bind failures retry with
-  randomised exponential backoff and, after N consecutive failures, request
-  shutdown; a FAILED settlement is followed by an increasing backoff between
-  redeliveries; plus a disconnect watchdog (see [Resilience](#5-resilience)).
-- **HTTP ingest** path for pushing a batch directly:
-  [`POST /data/ingest`](routers/data.py).
+  partition is normally healed by the SDK. If it reports a terminal interruption,
+  `deliveries()` raises `SolaceServiceInterrupted`; the loop counts a failure,
+  backs off (`ingest_retry_*` settings) and the next call connects a fresh
+  service. A successful bind resets the failure count, so only failures to bind
+  add up to a shutdown (`ingest_max_consecutive_failures`).
+- **Deliberate divergences from the Java template.** *Startup:* Python connects to
+  Solace with backoff in the lifespan and fails startup if the broker is
+  unreachable; Java connects lazily. *Size limit:* Python measures each batch's
+  decoded Arrow `nbytes`; Java measures the encoded payload.
+- **Extension point: message replay.** The durable queue buffers only unacked
+  messages; to rebuild the cache after a restart, start the receiver with a replay
+  strategy (`with_message_replay`) against a broker replay log.
 
 ---
 
-## 4. Observability
-
-The application exposes the data points needed for monitoring and debugging.
+## 5. Observability
 
 | Feature | What it gives you | Entry point |
 | --- | --- | --- |
-| **Liveness / readiness / status** | `/health/live` (always 200), `/health/ready` (503 if any dependency down), `/health/status` (full detail incl. system metrics) | [routers/health.py](routers/health.py), [services/health.py](services/health.py) |
-| **Prometheus metrics** | `/metrics` exposes dependency up/latency, ingest connection-state & freshness, process & host gauges, request histograms | [routers/metrics.py](routers/metrics.py), [services/metrics.py](services/metrics.py) |
-| **Correlation middleware** | Adopts or generates an `X-Request-ID`, stamps every log line via a logging filter, echoes it back. Propagates across `to_thread` into the store-write thread | [core/correlation.py](core/correlation.py) |
-| **Server-Timing header** | Each response carries a W3C `Server-Timing` header built from `timed()` boundary samples — per-request latency attribution with no external tooling | [core/boundary_timing.py](core/boundary_timing.py), [`timed()`](core/correlation.py#L74-L87) |
-| **System metrics** | Process & host CPU / memory / threads / open files via psutil | [core/system_metrics.py](core/system_metrics.py) |
-| **Grafana + Prometheus stack** | `docker compose --profile observability up` brings up Prometheus (`:9090`) scraping `/metrics` and a pre-provisioned Grafana dashboard (`:3000`) | [observability/](observability/), [docker-compose.yml](docker-compose.yml) |
+| **Liveness / readiness / status** | `/health/live` (always 200), `/health/ready` (503 if any dependency is down), `/health/status` (full detail incl. system metrics). Probe results are cached for `health_probe_cache_seconds` so scrapes do not ping every store each time | [routers/health.py](routers/health.py), [services/health.py](services/health.py) |
+| **Prometheus metrics** | `/metrics`: dependency up/latency, ingest state and freshness, counters `ingest_rows_ingested_total` and `ingest_outcomes_total{outcome=accepted\|failed\|rejected}`, `app_process_*` and `system_*` gauges, the standard `process_*`/`python_*` collectors, request histograms | [routers/metrics.py](routers/metrics.py), [services/metrics.py](services/metrics.py) |
+| **Structured logs** | One JSON object per line (`timestamp`, `level`, `logger`, `message`, `correlation_id`, `exception`), level from `LOG_LEVEL`; uvicorn's access and error logs go through the same handler | [core/logging_config.py](core/logging_config.py) |
+| **Correlation id** | Adopts a safe inbound `X-Request-ID` or generates one, stamps every log line, echoes it back; carried across `to_thread` into the store-write thread | [core/correlation.py](core/correlation.py) |
+| **Tracing** | OpenTelemetry, off until `OTEL_EXPORTER_OTLP_ENDPOINT` is set: FastAPI instrumentation with an OTLP/HTTP exporter; continues inbound W3C `traceparent` | [core/tracing.py](core/tracing.py) |
+| **Server-Timing header** | Each response carries a W3C `Server-Timing` header built from `timed()` boundary samples | [core/boundary_timing.py](core/boundary_timing.py) |
+| **Grafana + Prometheus** | `docker compose --profile observability up` adds Prometheus (`:9090`) and a provisioned Grafana dashboard (`:3000`) | [observability/](observability/) |
 
 ---
 
-## 5. Resilience
-
-Enterprise-grade stability through fail-fast startup and self-recovery.
+## 6. Resilience
 
 | Measure | Behaviour | Entry point |
 | --- | --- | --- |
-| **HTTPS / TLS** | Uvicorn serves over TLS using a key/cert pair; a script generates a self-signed pair for local dev | [`ssl_keyfile`/`ssl_certfile`](settings.py), [certs/generate_self_signed_cert.py](certs/generate_self_signed_cert.py) |
-| **Fail-fast startup** | Critical dependencies are eagerly connected and smoke-tested in the lifespan; if one cannot be reached after retries, startup aborts and the process exits | [main.py lifespan](main.py) |
-| **Reconnect with randomised backoff** | Startup connections retry with exponential delay **+ up to 25% jitter**, capped, for `connect_max_attempts` before giving up | [`connect_with_backoff`](core/retry.py) |
-| **Ingest self-recovery** | The Solace SDK reconnects forever and the persistent flow resumes after a network partition; unsettled messages stay on the durable queue and are redelivered. After a terminal service interruption, `deliveries()` raises, the ingest loop backs off and the next call reconnects with a fresh service. A receiver-level flow termination on a live service is not signalled ("Recovery" in [ingestion/solace/client.py](ingestion/solace/client.py)). If binding the queue fails N consecutive times (e.g. permission denied), the ingest loop requests a graceful `SIGTERM` | [`_ingest_loop`](services/stream_ingest.py) |
-| **Disconnect watchdog** | The single give-up point: if the transport stays non-connected longer than `ingest_max_disconnect_seconds`, the app shuts itself down rather than silently serving stale data | [`_disconnect_watchdog`](services/stream_ingest.py) |
-| **Max-payload middleware** | Outermost middleware rejects oversized HTTP bodies with **413** (fast-path on `Content-Length`, byte-counting for chunked uploads) — before any handler runs | [core/request_limits.py](core/request_limits.py), [wiring](main.py) |
-| **Decoded-batch limit** | A second, independent guard (`max_ingest_batch_bytes`) checks each batch *after* Arrow decode and logs at ERROR. HTTP path: the batch is dropped and the request still returns 202 (so the caller isn't retried into a storm). Solace path: every batch is checked before any is written, and the message is REJECTED — removed, never redelivered (to the DMQ if configured) | [`_record_ingest`, `_decide`](services/stream_ingest.py) |
-| **Secret hygiene** | All credentials are `SecretStr` — never printed in `repr`/logs; health probes return generic `"unavailable"` tokens, never raw exception strings | [settings.py](settings.py), [`_probe`](services/health.py#L53-L70) |
+| **Fail-fast startup** | Stores are connected, smoke-tested and migrated in the lifespan; if one is unreachable after `connect_max_attempts`, startup aborts | [main.py](main.py), [`connect_with_backoff`](core/retry.py) |
+| **Bounded store calls** | Explicit timeouts and pool limits on every client (`postgres_*_timeout_seconds`, pool sizes, `redis_*_timeout_seconds`, `redis_max_connections`, `clickhouse_*_timeout_seconds`); an outage answers 503 instead of hanging | [settings.py](settings.py), [core/errors.py](core/errors.py) |
+| **Graceful shutdown** | uvicorn waits `shutdown_timeout_seconds` for in-flight requests; the lifespan then closes the ingest thread and every client | [main.py](main.py) |
+| **Ingest self-recovery** | SDK reconnects; unsettled messages are redelivered; after a terminal interruption the loop reconnects with backoff; repeated bind failures request a graceful `SIGTERM` | [`_ingest_loop`](services/stream_ingest.py) |
+| **Disconnect watchdog** | If the transport stays non-connected longer than `ingest_max_disconnect_seconds`, the app shuts itself down rather than serve stale data | [`_disconnect_watchdog`](services/stream_ingest.py) |
+| **Request body limit** | Outermost middleware answers 413 for an oversized body (fast path on `Content-Length`; byte counting for chunked uploads), even when a mounted app such as MCP swallows the error | [core/request_limits.py](core/request_limits.py) |
+| **Decoded batch limit** | `max_ingest_batch_bytes`, checked for every batch before any is written: 413 over HTTP, REJECTED over Solace | [services/stream_ingest.py](services/stream_ingest.py) |
 
 ---
 
-## 6. Testing
+## 7. Security
 
-Faithful, comprehensive tests are the core guardrail of this template. The suite
-targets **>90% coverage** and follows a few firm rules.
+- **Authentication seam, off by default.** `AUTH_ENABLED=true` with
+  `AUTH_JWT_SECRET` (HS256) and optional `AUTH_JWT_ISSUER` / `AUTH_JWT_AUDIENCE`
+  requires `Authorization: Bearer <jwt>` on every route including `/mcp`, except
+  `/health/live` and `/health/ready`. Failure is 401 `{"detail": "Not authenticated"}`
+  with `WWW-Authenticate: Bearer`; startup fails if auth is on without a secret.
+  Pure-ASGI middleware: [core/auth.py](core/auth.py). Authorisation (who may do
+  what) is left to the project.
+- **Secrets** are `SecretStr`, never logged; health probes return the generic
+  `"unavailable"` / `"timeout"` tokens, never exception text.
+- **CORS** defaults to `*` for local development; a validator forbids
+  `credentials=True` with `origins=["*"]`.
+- **`/mcp` DNS-rebinding protection** from `mcp_allowed_hosts` (JSON array or
+  comma-separated).
+- **Container**: runs as uid 10001 on port 8443; the TLS key is mounted at runtime
+  (compose provisions a dev certificate into a volume with its one-shot `certs`
+  service), never baked into an image layer; tests, coverage and editor state are excluded
+  from the build context.
 
-- **Real dependencies, not mocks.** Tests spin up **real** Postgres / ClickHouse
-  / Redis containers via `testcontainers`; assertions go through the actual
-  clients. Setup: [tests/conftest.py](tests/conftest.py).
+---
+
+## 8. Testing
+
+- **Real dependencies, not mocks.** Postgres, ClickHouse, Redis and Solace run in
+  `testcontainers`; setup in [tests/conftest.py](tests/conftest.py). Images are
+  pinned in [tests/support/images.py](tests/support/images.py).
 - **Real HTTP endpoints.** Tests drive the app through an async HTTPX client
-  against a real ASGI app, not by calling functions directly:
-  [tests/app_client.py](tests/app_client.py)
-  (`lifespan_test_client` runs the full lifespan, fails fast if startup raises).
-- **Async & parallel.** Tests are `async` and run concurrently to keep the cycle
-  short ([pytest.ini](pytest.ini)).
-- **Multiple application instances in one process.** Because every app is built
-  by `create_app`, the HTTP-ingest and Solace fixtures (one shared broker, per-test topic/queue) each get their own
-  isolated app — "run all tests" works from the IDE. See the multi-app
-  observability tests in
-  [tests/test_observability.py](tests/test_observability.py).
-- **Failure-path coverage.** Resilience is tested by killing dedicated
-  containers mid-test and asserting readiness flips to 503 with a *generic* error
-  (e.g. `test_dependency_down_fails_readiness`,
-  `test_health_probe_error_is_generic_not_leaky` in
-  [tests/test_observability.py](tests/test_observability.py)).
-- **Configured by `Settings`, not monkeypatching.** Test behaviour is set by the
-  `Settings` passed to `create_app` — no patching, no DI overrides.
-
-Run them:
+  against the real ASGI app ([tests/app_client.py](tests/app_client.py)
+  `lifespan_test_client` runs the full lifespan and fails fast if startup raises).
+- **Async, sequential.** Tests are `async` (pytest-asyncio, one session loop) and
+  run one at a time; containers are session-scoped so the cycle stays short.
+- **Multiple apps in one process.** Every fixture builds its own app with
+  `create_app`, so noop, HTTP-ingest and Solace apps coexist in one session.
+- **Failure paths with real outages.** Dedicated containers are stopped or
+  paused mid-test: readiness flips to 503 with a generic error
+  ([tests/test_observability.py](tests/test_observability.py)), and a request on
+  a paused Redis answers a bounded 503 ([tests/test_store_outage.py](tests/test_store_outage.py)).
+- **Configured by `Settings`, not monkeypatching.**
 
 ```bash
-pytest tests/ -v --cov --cov-report=html   # report at htmlcov/index.html
+pytest tests/ -v --cov --cov-report=html   # coverage gate in .coveragerc
 ```
 
 ---
 
-## 7. Performance & Profiling
+## 9. Performance & Profiling
 
-- **k6 load tests** live in
-  [tests/performance/](tests/performance/) and double
-  as CI quality gates:
-  - `smoke.js` — 1 VU / 30 s, hard gate
-  - `load.js` — ramping + constant VUs, hard gate
-  - `stress.js` — ramping arrival rate, soft gate
-  - Shared check helpers and named SLO presets in
-    [lib/](tests/performance/lib/).
-- **Two-layer bottleneck attribution** (see the
-  [runbook](PERF_PROFILING_RUNBOOK.md)):
-  - *Layer 1 (always on, report-only):* the `Server-Timing` header is parsed by
-    [profile_reads.js](tests/performance/profile_reads.js)
-    / [profile_ingest.js](tests/performance/profile_ingest.js)
-    into a ranked per-endpoint attribution table.
-  - *Layer 2 (on demand):* attach **py-spy** to the running container for
-    flamegraphs that separate CPU/GIL- from I/O-bound time —
-    [profile/run_pyspy.sh](tests/performance/profile/run_pyspy.sh)
-    + [docker-compose.profiling.yml](docker-compose.profiling.yml).
+- **k6** scripts in [tests/performance/](tests/performance/): `smoke.js` (1 VU /
+  30 s, CI gate), `load.js` (hard gate), `stress.js` (soft gate); shared checks
+  and SLO presets in [lib/](tests/performance/lib/).
+- **Two-layer bottleneck attribution** ([runbook](PERF_PROFILING_RUNBOOK.md)):
+  the `Server-Timing` header parsed by `profile_reads.js` / `profile_ingest.js`,
+  and py-spy flamegraphs on demand
+  ([profile/run_pyspy.sh](tests/performance/profile/run_pyspy.sh) +
+  [docker-compose.profiling.yml](docker-compose.profiling.yml)).
 
 ---
 
-## 8. Configuration
+## 10. Configuration and Dependencies
 
-Everything is configured through [settings.py](settings.py)
-(Pydantic `BaseSettings`). Defaults are sane for local dev; override any field
-with an environment variable or a `.env` file. Notable groups:
+Everything is configured through [settings.py](settings.py); override any field
+with an environment variable or `.env` (see [.env.example](.env.example)).
+Groups: connections and timeouts (`postgres_*`, `clickhouse_*`, `redis_*`,
+`solace_*`), TLS and server (`ssl_*`, `server_*`, `shutdown_timeout_seconds`),
+retry (`connect_*`, `ingest_retry_*`), observability (`log_level`,
+`otel_*`, `metrics_enabled`, `health_*`, `ingest_staleness_*`,
+`ingest_max_disconnect_seconds`), size limits, CORS, auth (`auth_*`).
 
-- **Connections:** `postgres_*`, `clickhouse_*`, `redis_url`, `solace_*` (including `solace_queue`)
-- **TLS:** `ssl_keyfile`, `ssl_certfile`
-- **Retry/backoff:** `connect_max_attempts`, `connect_base_delay`, `connect_max_delay`
-- **Observability:** `metrics_enabled`, `health_check_timeout_seconds`,
-  `ingest_staleness_threshold_seconds`, `ingest_max_disconnect_seconds`
-- **Size limits:** `max_request_body_bytes`, `max_ingest_batch_bytes`
-- **CORS:** `cors_allow_origins` / `…_methods` / `…_headers` / `…_credentials`
-  (a validator forbids the unsafe `credentials=True` + `origins=["*"]` combo)
+**Dependency lock.** The standard pip-tools pair: [requirements.in](requirements.in)
+holds bounded ranges, and [requirements.txt](requirements.txt), compiled from it,
+pins every runtime package exactly and is what the image and CI install (and what
+OSV, Trivy and Dependabot read). It targets Linux / Python 3.12 (the image and CI),
+so regenerate it in that environment after changing `requirements.in`:
+
+```bash
+docker run --rm -v "$PWD:/src" -w /src python:3.12.16-slim sh -c \
+  "pip install -q 'pip-tools>=7.4,<8.0' && pip-compile --quiet --strip-extras --no-emit-index-url --output-file=requirements.txt requirements.in"
+```
 
 ---
 
-## 9. Project Layout
+## 11. Project Layout
 
 ```
-main.py                  App factory + lifespan (dependency wiring, fail-fast startup)
+main.py                  App factory + lifespan (wiring, fail-fast startup)
 settings.py              Typed configuration (Pydantic BaseSettings)
-core/                    Cross-cutting infra: DI container, correlation, retry,
-                         request-size + server-timing middleware, system metrics
-routers/                 REST endpoints (thin) — health, data, config, cache, metrics
-mcp_routers/             MCP starting point — one example tool; resources/prompts are stubs
+core/                    Cross-cutting infra: auth, errors, correlation, logging,
+                         tracing, retry, body limit, Server-Timing, last request
+routers/                 REST endpoints (thin): health, data, config, cache, metrics
+mcp_routers/tools.py     MCP tools mirroring the REST read endpoints
 schemas/                 Pydantic request/response models
-services/                Business logic — health, data, config, cache, stream_ingest, metrics
-persistence/             One package per backing store (postgres, clickhouse, redis, lsm)
-ingestion/               Streaming transports (Solace, noop) behind BatchConsumer
-scripts/                 SQL DDL/DML (shared by app, compose and tests)
+services/                Business logic + AppServices (the per-app service set)
+persistence/             One package per store (postgres, clickhouse, redis, lsm) + migrations runner
+migrations/              Numbered SQL migrations per store
+ingestion/               Streaming transports (solace, noop) behind BatchConsumer
 observability/           Prometheus config + Grafana dashboards & provisioning
-certs/                   Self-signed TLS cert + generator
+certs/                   Dev certificate generator for `python main.py` (key/cert are gitignored)
 tests/                   Pytest integration tests; performance/ holds k6 scripts
-docs/                    Design specs and plans
-PERF_PROFILING_RUNBOOK.md  Two-layer performance profiling guide (Server-Timing + py-spy)
+PERF_PROFILING_RUNBOOK.md  Two-layer performance profiling guide
 ```
-
----
 
 ## Where to Start Reading
 
-If you have ten minutes, read these four files in order — they show the whole
-spine of the template:
-
-1. [settings.py](settings.py) — what's configurable.
-2. [main.py](main.py) — how everything is wired and
-   started.
-3. [services/health.py](services/health.py) — how the
-   service reports on itself.
-4. [tests/test_observability.py](tests/test_observability.py)
-   — how the behaviour above is proven with real dependencies.
+1. [settings.py](settings.py): what is configurable.
+2. [main.py](main.py): how everything is wired and started.
+3. [services/health.py](services/health.py): how the service reports on itself.
+4. [tests/test_observability.py](tests/test_observability.py): how that behaviour
+   is proven with real dependencies.

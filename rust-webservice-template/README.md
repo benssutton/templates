@@ -1,234 +1,196 @@
 # rust-webservice-template
 
-An axum (Rust 2021) service that mirrors `python-webservice-template`
-feature for feature, so a developer can read either codebase and map one onto
-the other. It has the same endpoints, request/response shapes, setting names
-and resilience behaviour, with minimal business logic: a reusable foundation
-wired to common technologies.
+An idiomatic axum/Tower service (Rust 2021) with the same HTTP contract as
+its Python and Java siblings: same endpoints, JSON field names, error bodies
+and status codes, so a client or a contract test cannot tell them apart.
+Inside, it is written the way an axum service is written: one Tower
+`ServiceBuilder`-style layer stack, typed extractors, `AppError` as the one
+error type, and traits only at real seams.
 
 Rust is the repo's choice for CPU-heavy or highly concurrent work (root
 README, "Languages"). Here that is the LSM stream store: merge and compaction
-run on arrow-rs compute kernels (`lexsort_to_indices`, `filter`, `concat`),
-on tokio's blocking pool, and readers never block the single writer.
+run on arrow-rs compute kernels on tokio's blocking pool, and readers never
+block the single writer.
 
 ## Stack
-- **axum 0.8** on **tokio**; HTTPS on 443 through **axum-server + rustls**
-  (ring provider); `tower-http` for CORS and the body limit
-- **sqlx** (Postgres; pgvector/pgvector image, `vector` extension enabled at
-  startup), **clickhouse** (official HTTP/RowBinary client), **redis**
-  `ConnectionManager` + RedisJSON
-- **arrow-rs** (IPC codec + compute kernels) and **arc-swap** for the LSM
-  stream store; **fe2o3-amqp** (AMQP 1.0) for Solace Guaranteed messaging,
-  **reqwest** for SEMP v2 provisioning
-- **envy + dotenvy + secrecy** for typed settings with redacted secrets
-- **tracing**, **metrics + metrics-exporter-prometheus**, **sysinfo**;
-  **utoipa** + Swagger UI; **rmcp** (streamable HTTP MCP server)
+- **axum 0.8** on **tokio**; HTTPS through **axum-server + rustls** (ring
+  provider, never aws-lc); **tower / tower-http** for request ids, tracing,
+  timeouts, load shedding, compression, CORS, body limits and path
+  normalisation
+- **sqlx** (Postgres, versioned migrations), **clickhouse** (HTTP/RowBinary,
+  versioned migrations applied by the app), **redis** `ConnectionManager` +
+  RedisJSON
+- **arrow-rs** + **arc-swap** for the LSM stream store
+- **envy + dotenvy + secrecy + garde** for typed, validated settings
+- **tracing** (JSON logs) + optional **OpenTelemetry** OTLP export,
+  **metrics + metrics-exporter-prometheus**, **sysinfo**
+- **utoipa + utoipa-axum** (OpenAPI generated from the routes) + Swagger UI;
+  **rmcp** (streamable-HTTP MCP server); **jsonwebtoken** (HS256 auth seam)
+- Optional, behind the `solace` Cargo feature: **fe2o3-amqp** (Solace over
+  AMQP 1.0) and **reqwest** SEMP v2 provisioning
 - **Testcontainers + reqwest** integration tests against real Postgres,
   ClickHouse, Redis Stack and Solace (no mocks); **criterion** benchmark;
-  **k6** (Python's scripts, unchanged); **cargo-llvm-cov** coverage gate (≥ 90 % lines)
+  **k6** (the shared scripts); **cargo-llvm-cov** gate (≥ 90 % lines);
+  **cargo-deny**
 
-LSM benchmark (`cargo bench --bench lsm`: 4 runs × 10,000 rows, half the keys
-rewritten per run, one row in ten a tombstone): merge 7.88 ms, full
-compaction 5.57 ms (criterion median, developer laptop).
+## The shared contract
+What every sibling implements, and the integration tests here pin:
+
+| Rule | Where |
+|---|---|
+| snake_case JSON; root field `"MCP"` | [src/schemas/](src/schemas/) |
+| every error is `application/json` `{"detail": ...}`: 400 unreadable body, 401, 404, 405, 413, 422 invalid, 500, 503 | [src/error.rs](src/error.rs), [src/extract.rs](src/extract.rs), [src/core/json_errors.rs](src/core/json_errors.rs) |
+| a store outage on a request path is 503 `{"detail": "Service Unavailable"}` within a bounded time | `From<sqlx/redis/clickhouse error> for AppError`; store timeouts in settings |
+| `GET /data` ordered by `id` | [src/services/data.rs](src/services/data.rs) |
+| `POST /data/ingest`: every batch validated before any is written; a decoded batch over the limit is 413 | [src/services/stream_ingest.rs](src/services/stream_ingest.rs) |
+| `X-Request-ID` adopted only if 1-128 chars of `[A-Za-z0-9._-]` | [src/core/request_id.rs](src/core/request_id.rs) |
+| auth seam (`AUTH_ENABLED`, HS256), off by default | [src/core/auth.rs](src/core/auth.rs) |
+| `INGEST_TRANSPORT` defaults to `noop`; containers listen on 8443 | [src/settings.rs](src/settings.rs), [Dockerfile](Dockerfile) |
+| `MCP_ALLOWED_HOSTS` as JSON array or comma-separated | [src/settings.rs](src/settings.rs) |
 
 ## Feature map (entry points)
 
 | Feature | Entry point |
 |---|---|
-| Bootstrap (`create_app` isolation, shutdown order) | [src/app.rs](src/app.rs), [src/main.rs](src/main.rs) |
-| Typed settings (Python's names, `validate()`) | [src/settings.rs](src/settings.rs) + [.env.example](.env.example) |
-| HTTPS / plain-HTTP serving, graceful drain | [src/server.rs](src/server.rs) |
+| Bootstrap, routes and the layer stack | [src/app.rs](src/app.rs), [src/main.rs](src/main.rs) |
+| Settings (one validation, garde rules on the fields) | [src/settings.rs](src/settings.rs) + [.env.example](.env.example) |
+| HTTPS / plain HTTP, graceful drain, container healthcheck | [src/server.rs](src/server.rs) |
 | Shared state (no DI container) | [src/state.rs](src/state.rs) |
-| Error → status mapping (`{"detail": ...}`) | [src/error.rs](src/error.rs) |
-| `/config` (Postgres, sqlx) | [src/routers/config.rs](src/routers/config.rs), [src/services/config.rs](src/services/config.rs), [src/persistence/transaction_store/postgres.rs](src/persistence/transaction_store/postgres.rs) |
+| Errors and extractors | [src/error.rs](src/error.rs), [src/extract.rs](src/extract.rs) |
+| `/config` (Postgres) | [src/routers/config.rs](src/routers/config.rs), [src/services/config.rs](src/services/config.rs), [src/persistence/transaction_store/postgres.rs](src/persistence/transaction_store/postgres.rs) |
 | `/data` (ClickHouse) | [src/routers/data.rs](src/routers/data.rs), [src/services/data.rs](src/services/data.rs), [src/persistence/analytics_store/clickhouse.rs](src/persistence/analytics_store/clickhouse.rs) |
-| `/data/cache` + `/data/ingest` (LSM) | [src/routers/data.rs](src/routers/data.rs), [src/persistence/stream_store/lsm.rs](src/persistence/stream_store/lsm.rs) |
-| `/cache` (Redis + RedisJSON) | [src/routers/cache.rs](src/routers/cache.rs), [src/services/cache.rs](src/services/cache.rs), [src/persistence/cache_store/redis.rs](src/persistence/cache_store/redis.rs) |
-| `/health/{live,ready,status}` | [src/routers/health.rs](src/routers/health.rs), [src/services/health.rs](src/services/health.rs), [src/health/](src/health/) |
+| `/data/cache` + `/data/ingest` (LSM) | [src/routers/data.rs](src/routers/data.rs), [src/services/stream_ingest.rs](src/services/stream_ingest.rs), [src/persistence/stream_store/lsm.rs](src/persistence/stream_store/lsm.rs) |
+| `/cache` (Redis + RedisJSON) | [src/routers/cache.rs](src/routers/cache.rs), [src/services/cache.rs](src/services/cache.rs) |
+| `/health/{live,ready,status}` (cached probes) | [src/routers/health.rs](src/routers/health.rs), [src/services/health.rs](src/services/health.rs), [src/health/](src/health/) |
 | `/metrics` (Prometheus) | [src/routers/metrics.rs](src/routers/metrics.rs), [src/services/metrics.rs](src/services/metrics.rs) |
-| `/mcp` (`get_health_status`, Host allow-list) | [src/mcp/mod.rs](src/mcp/mod.rs), [src/mcp/tools.rs](src/mcp/tools.rs) |
-| `/docs` (Swagger UI) | [src/openapi.rs](src/openapi.rs) |
-| Correlation ID | [src/core/correlation.rs](src/core/correlation.rs) |
-| Server-Timing attribution (`task_local!`) | [src/core/boundary_timing.rs](src/core/boundary_timing.rs) |
-| CORS, body limit | [src/core/cors.rs](src/core/cors.rs), [src/core/request_limits.rs](src/core/request_limits.rs) |
+| `/mcp` (tools mirroring the REST reads; Host/Origin allow-list) | [src/mcp/](src/mcp/) |
+| `/docs`, `/api-doc/openapi.json` | [src/openapi.rs](src/openapi.rs) |
+| Auth seam | [src/core/auth.rs](src/core/auth.rs) |
+| Logs and traces | [src/core/telemetry.rs](src/core/telemetry.rs) |
+| Server-Timing attribution | [src/core/boundary_timing.rs](src/core/boundary_timing.rs) |
 | Fail-fast connect with backoff | [src/core/retry.rs](src/core/retry.rs), [src/persistence/mod.rs](src/persistence/mod.rs) |
-| Graceful shutdown handle | [src/core/shutdown.rs](src/core/shutdown.rs) |
-| Stream ingestion (settle after write, backoff, watchdog) | [src/services/stream_ingest.rs](src/services/stream_ingest.rs) |
-| `BatchConsumer` / `Settle` contract; noop transport; Arrow IPC codec | [src/ingestion/mod.rs](src/ingestion/mod.rs), [src/ingestion/noop.rs](src/ingestion/noop.rs), [src/ingestion/ipc.rs](src/ingestion/ipc.rs) |
-| Solace consumer (AMQP 1.0) + SEMP provisioning | [src/ingestion/solace/mod.rs](src/ingestion/solace/mod.rs), [src/ingestion/solace/amqp.rs](src/ingestion/solace/amqp.rs), [src/ingestion/solace/provision.rs](src/ingestion/solace/provision.rs), [src/ingestion/solace/semp.rs](src/ingestion/solace/semp.rs) |
-| Compose demo publisher | [src/bin/demo_publisher.rs](src/bin/demo_publisher.rs), [src/ingestion/solace/publisher.rs](src/ingestion/solace/publisher.rs) |
-| SQL DDL + compose init scripts | [scripts/](scripts/) |
-| LSM merge/compaction benchmark | [benches/lsm.rs](benches/lsm.rs) |
-| Shared Testcontainers (one per run) + Solace leases | [tests/it/support/containers.rs](tests/it/support/containers.rs) |
-| k6 performance tests | [tests/performance/](tests/performance/) |
+| Migrations | [migrations/postgres/](migrations/postgres/), [migrations/clickhouse/](migrations/clickhouse/) |
+| Stream ingestion (settle after write, backoff, watchdog) | [src/services/stream_ingest.rs](src/services/stream_ingest.rs), [src/ingestion/](src/ingestion/) |
+| Solace consumer + SEMP provisioning (`solace` feature) | [src/ingestion/solace/](src/ingestion/solace/) |
+| Compose demo publisher (`solace` feature) | [src/bin/demo_publisher.rs](src/bin/demo_publisher.rs) |
+| LSM benchmark | [benches/lsm.rs](benches/lsm.rs) |
+| Shared Testcontainers + Solace leases | [tests/it/support/containers.rs](tests/it/support/containers.rs) |
+
+## The request path
+Outermost first (`src/app.rs`): drop an unacceptable inbound request id →
+set/propagate `X-Request-ID` → `TraceLayer` (request span with the id and
+any W3C `traceparent` parent; one access-log line per request with status
+and latency) → gzip compression → JSON error bodies for responses made
+outside a handler → load shedding over `MAX_CONCURRENT_REQUESTS` (503) →
+`REQUEST_TIMEOUT_SECONDS` (503) → CORS → body limit (413) → Server-Timing →
+last-request tracking → auth (when on) → Prometheus metrics (per matched
+route) → handler. `POST /data/ingest` has its own in-flight bound
+(`INGEST_MAX_IN_FLIGHT`, 503), so decoded bodies cannot pile up behind the
+single LSM writer. Trailing slashes are normalised before routing
+(`/config/` is `/config`).
+
+## Ingest and the LSM store
+Both ingest paths go through `StreamIngestService::ingest`: every batch of a
+message is size-checked (`MAX_INGEST_BATCH_BYTES`, measured like pyarrow's
+`nbytes`), validated by the store (key and `op` columns, a schema consistent
+with the first batch) and against the read model `GET /data/cache` serves
+(`id` a non-negative integer, `name` and `value` non-null strings), all
+before any batch is written. Over HTTP that is 413 or 422 with nothing
+written; on the stream, a reject. Arrow IPC is decoded on the blocking pool.
+
+The store holds at most `LSM_MAX_ROWS` rows: over it, it first compacts
+(dropping shadowed versions and tombstones, which loses nothing) and only
+then evicts the oldest rows, counted in `lsm_evicted_rows_total` and
+`/health/status` (`ingest.store`). A read builds the merged view of the
+current snapshot once and caches it on the snapshot, so repeated reads cost
+a slice.
+
+## Choosing a broker (the `solace` feature)
+The default build has no broker: `INGEST_TRANSPORT=noop`, and
+`POST /data/ingest` feeds the store. Build with `--features solace` for
+Solace Guaranteed messaging over AMQP 1.0. Facts about Solace over AMQP that
+the code depends on (checked against `solace/solace-pubsub-standard:10.26.10`;
+re-check them against a live broker after a broker upgrade):
+
+| Question | Answer | Lives in |
+|---|---|---|
+| How is the queue created? | SEMP v2 at startup, before the first attach (an attach to a missing queue creates it without the topic subscription) | `src/ingestion/solace/provision.rs` |
+| Does AMQP need enabling on the VPN? | No, the default VPN listens on 5672 | compose `solace-init` `ENABLE_AMQP: "false"` |
+| Topic address form | `topic://<name>` (publish only) | `src/ingestion/solace/amqp.rs` |
+| SMF binary payload arrives as | one `data` section (several are concatenated; `amqp-value(binary)` also accepted) | `amqp::payload_bytes` |
+| Redelivered? | `header.delivery_count > 0` (`first_acquirer` is always false on Solace) | `amqp::redelivered` |
+| Paused broker detection | the 5 s AMQP idle timeout; without it `recv` and attach block forever | `amqp::IDLE_TIMEOUT_MS` |
+| Second receiver on an exclusive queue | attaches as a standby without error, so `Connected` means "transport up"; a standby counts for `bound_epoch` | `src/ingestion/solace/mod.rs` |
+| fe2o3-amqp behaviour | PLAIN is refused client-side when the VPN offers only ANONYMOUS; `OpenError`'s Display hides the reason (log `{e:?}`); always close the old connection, or it keeps the exclusive queue | `amqp.rs`, `solace/mod.rs` |
+| SASL | empty `SOLACE_USERNAME` = ANONYMOUS, otherwise PLAIN | `amqp::sasl_profile` |
+
+Consumer errors: five consecutive `next_delivery` failures, or the transport
+out of CONNECTED for `INGEST_MAX_DISCONNECT_SECONDS`, trigger a graceful
+shutdown (the orchestrator restarts the process). Leaving that setting empty
+disables both triggers, and the consumer then reconnects forever.
 
 ## Build & test
 Prerequisites:
-- A Rust toolchain at or above `rust-version` in [Cargo.toml](Cargo.toml) (1.94).
-- For coverage: `cargo install cargo-llvm-cov` and
+- A Rust toolchain at or above `rust-version` in [Cargo.toml](Cargo.toml).
+- `cargo install cargo-llvm-cov cargo-deny` and
   `rustup component add llvm-tools-preview`.
-- Docker Desktop or Docker Engine with ≥ 3 GiB of memory. Testcontainers,
-  the image build, Trivy and k6 all run in Docker.
-- Python 3.15 for `run_CICD.py` (the repo's `p315` conda env; see the root
-  `CLAUDE.md`), with `solace-pubsubplus` and `pyarrow` installed for the SMF
-  interop test.
+- Docker Desktop or Docker Engine with ≥ 3 GiB of memory.
+- Python for `run_CICD.py` (the repo's `p315` conda env, see the root
+  `CLAUDE.md`; CI uses 3.13), with `solace-pubsubplus` and `pyarrow` for the
+  SMF interop test.
 
 ```bash
 cd rust-webservice-template
-# Docker Desktop must be running with >= 3 GiB of VM memory (Testcontainers
-# starts Postgres, ClickHouse, Redis Stack and a Solace broker, once per run).
-export SMF_PYTHON=/path/to/python   # with solace-pubsubplus + pyarrow (SMF interop test)
-cargo test --all-targets
+cargo test --all-targets                      # default build (no Solace)
+SMF_PYTHON=/path/to/python cargo test --all-features --all-targets
 cargo bench --bench lsm
 ```
-Without `SMF_PYTHON` the `smf_interop` test is skipped locally (it fails
-under `CI=true`). The whole pipeline, from the repo root:
-`python run_CICD.py rust ci` (fmt-check, clippy `-D warnings`, tests,
-coverage ≥ 90 % lines, image build, Trivy, k6 smoke). It sets `SMF_PYTHON`
-itself.
+From the repo root, `python run_CICD.py rust ci` runs fmt-check, clippy
+(both feature sets, `-D warnings`), one instrumented test run with every
+feature on, the coverage report (≥ 90 % lines), the image build, Trivy and
+k6 smoke; `python run_CICD.py rust deny` runs cargo-deny.
 
-## Run the full stack (HTTPS on 443)
+## Run the full stack
 ```bash
 docker compose up -d --build --wait
 curl -fsk https://localhost/health/ready
 # Swagger UI: https://localhost/docs  •  MCP: https://localhost/mcp
 ```
-Compose runs the app, Postgres (pgvector), ClickHouse (seeded), Redis Stack,
-the Solace broker, a one-shot `solace-init` (SEMP queue provisioning) and a
-demo publisher. `app` depends on a healthy `solace`, so for HTTP-only ingest
-without a broker skip that dependency with `--no-deps`:
+The app listens on 8443 in its container; compose publishes it on host port
+443. Compose runs the app (with `INGEST_TRANSPORT=solace`), Postgres
+(pgvector), ClickHouse (seeded), Redis Stack, the Solace broker, a one-shot
+`solace-init` (SEMP provisioning), a demo publisher and `dev-certs`, which
+writes a self-signed certificate into a named volume the app mounts: the
+image carries no key. Without a broker:
 ```bash
-docker compose up -d db clickhouse redis
+docker compose up -d db clickhouse redis dev-certs
 INGEST_TRANSPORT=noop docker compose up -d --no-deps app
 ```
 
-### HTTPS certificates
-The app serves HTTPS whenever `SSL_CERTFILE` and `SSL_KEYFILE` are set. They
-default to `./certs/cert.pem` and `./certs/key.pem`.
-- **Docker image / compose:** nothing to do. The image build mints its own
-  self-signed certificate (see the [Dockerfile](Dockerfile)), so
-  `docker compose up --build` always gets a fresh one.
-- **On the host (`cargo run --bin rust-template`):** the certificates are
-  gitignored (`certs/*.pem`), so a fresh clone has none. Create them, or
-  replace expired ones (they are valid for 365 days), from this directory:
-  ```bash
-  bash certs/generate_self_signed_cert.sh          # writes certs/key.pem + certs/cert.pem
-  bash certs/generate_self_signed_cert.sh /tmp/c   # or into another directory
-  ```
-  The script needs `openssl` on the PATH; Git Bash on Windows ships it.
-  It overwrites existing files. The certificate is for development only:
-  CN `localhost`, SANs `localhost`, `app` (the compose service name k6 uses)
-  and `127.0.0.1`, RSA 4096.
-- **Check a certificate:** `openssl x509 -in certs/cert.pem -noout -subject -enddate -ext subjectAltName`.
-- Clients must skip verification for a self-signed certificate (`curl -k`,
-  k6 `K6_INSECURE_SKIP_TLS_VERIFY`).
+On the host, plain HTTP:
+`SSL_CERTFILE= SSL_KEYFILE= cargo run --bin rust-template`, with `.env`
+pointing at reachable stores (compose does not publish the store ports). For
+HTTPS on the host, mint a certificate with
+`bash certs/generate_self_signed_cert.sh` (needs `openssl`; Git Bash ships
+it). It is for development only: CN `localhost`, SANs `localhost`, `app` and
+`127.0.0.1`. Clients must skip verification (`curl -k`).
 
-Plain HTTP on the host for local development:
-`SERVER_PORT=8000 SSL_CERTFILE= SSL_KEYFILE= INGEST_TRANSPORT=noop cargo run --bin rust-template`,
-with the store settings in `.env` pointing at reachable stores (compose does
-not publish the store ports; see [.env.example](.env.example)).
-
-## How this maps to python-webservice-template
-`create_app(settings)` exists in both. Python's hand-rolled DI `Container`
-becomes an explicit `AppState` of `Arc`'d concrete services, and traits exist
-only at real seams (`HealthProbe`, `IngestHealthProvider`, `BatchConsumer`,
-`Settle`, `StreamStore`), not one per service for mocking. Everything else
-mirrors the Python structure and naming. Deliberate divergences:
-
-**Solace transport**
-
-1. **AMQP 1.0 (fe2o3-amqp) instead of SMF**: Solace has no official Rust SDK.
-   `SOLACE_PORT` therefore defaults to 5672, not 55555, and the message VPN
-   is selected by the listen port (`SOLACE_VPN` is used only in SEMP paths).
-   Each connection gets a unique container id (`<queue>-<8 hex>`, `/` → `_`),
-   because a broker may still hold the stale connection after a partition.
-2. **SASL ANONYMOUS when `SOLACE_USERNAME` is empty**, PLAIN otherwise.
-   `SOLACE_USERNAME` and `SOLACE_PASSWORD` default to empty, and compose and
-   the tests leave them empty, because the broker's default VPN offers only
-   ANONYMOUS over AMQP. Python and Java always send credentials over SMF
-   (default `admin`/`admin`).
-3. **The queue is provisioned through SEMP v2 at startup**, before the first
-   AMQP attach (`SOLACE_SEMP_URL`, `SOLACE_SEMP_USERNAME`,
-   `SOLACE_SEMP_PASSWORD`, the last a secret), because an AMQP attach cannot
-   add a topic subscription to a queue. The calls are idempotent, which
-   matches SMF's `CREATE_ON_START`. Compose adds a one-shot `solace-init`
-   service so the queue exists before the demo publisher starts.
-
-**Ingest and the LSM store**
-
-4. **arrow-rs instead of polars.** The merge is `lexsort_to_indices` (key
-   ascending, seqno descending), then the first row per key, then a filter
-   on `op != "delete"`. Readers load an `ArcSwap<Snapshot>`; the writer holds
-   a tokio mutex and runs the CPU work in `spawn_blocking`.
-5. **An async `BatchConsumer` instead of an ingest thread.** The ingest loop is
-   a tokio task, and every consumer method takes `&self`, so one
-   `Arc<dyn BatchConsumer>` is shared by the ingest task, shutdown and the
-   health path. Python's `on_bound` callback becomes `bound_epoch()`, a count
-   of successful binds: when it rises, the loop resets its consecutive-failure
-   count and backoff.
-6. **`Settle` methods consume the delivery's settlement** (`accept`, `fail`,
-   `reject` take `self: Box<Self>`), so the compiler guarantees at most one
-   settlement per delivery.
-7. **`StreamStore::validate(&[RecordBatch])` checks the whole message**
-   before any write, and is stricter than Python's per-batch required-column
-   check: the first batch fixes the column names and types, a later batch
-   with a different schema, duplicate column names, or unmergeable key/`op`
-   types is rejected (422 over HTTP; `reject` on the stream). A message is
-   all-or-nothing, as in Python.
-8. **`max_ingest_batch_bytes` is checked against `batch_bytes`**, the sum of
-   the decoded batch's buffer lengths (within a few bytes of pyarrow's
-   `nbytes`; it overcounts sliced arrays, which decoding never produces).
-
-**HTTP surface**
-
-9. **Metrics.** Extra counters `ingest_deliveries_total{outcome}` and
-   `ingest_rows_total`. `http_request_size_bytes` and
-   `http_response_size_bytes` are emulated as `_count`/`_sum` counter pairs
-   (so their `# TYPE` differs), there are no `_created` series, and the
-   content type is `text/plain; version=0.0.4`.
-10. **Error bodies.** 422 bodies are `{"detail": "<message>"}`, not FastAPI's
-    list of error objects; status codes match, and serde is stricter than
-    pydantic's lax mode (`"ttl_seconds": "60"` is a 422). An undecodable
-    `POST /data/ingest` body is 400 as in Python, but its `detail` is
-    arrow-rs's error text, not pyarrow's. Every 413 is rewritten to Python's
-    plain-text `Payload Too Large` and an unrouted method to
-    `{"detail": "Method Not Allowed"}`, so those match.
-11. **No trailing-slash redirect.** Both forms of Python's canonical paths are
-    routed (`/config` and `/config/`, `/cache` and `/cache/`); FastAPI's 307
-    for other forms (`/data/`, `/cache/{key}/`) is a 404 here.
-12. **MCP (rmcp)** is mounted at both `/mcp` and `/mcp/` on one service
-    (shared sessions), so metrics carry both handler labels.
-    `MCP_ALLOWED_HOSTS` is Rust-only: the DNS-rebinding `Host` allow-list,
-    default `localhost`, which must not be empty (rmcp would then allow every
-    host); other hosts get 403. Compose sets `localhost,127.0.0.1,app`.
-13. **Correlation IDs** come from a small axum middleware (32-hex IDs and a
-    configurable header, like Python), not tower-http's request-id layer. An
-    inbound ID that is not visible ASCII is replaced, where Python echoes it.
-
-**Settings, tooling and tests**
-
-14. **Settings.** List settings accept Python's JSON form and comma-separated
-    values. The service-identity defaults are Rust's own (`app_title`,
-    `mcp_name=rust-template`, `solace_queue=rust-template/ingest`). An empty
-    `SSL_CERTFILE` or `SSL_KEYFILE` serves plain HTTP.
-15. **perf + inferno flamegraphs instead of py-spy** for Layer-2 profiling.
-    The profiling overlay adds `SYS_PTRACE` and `SYS_ADMIN` and builds with
-    frame pointers.
-16. **Compose does not publish the store and broker ports** (as in Java's
-    compose), so the Rust stack can run next to the Python and Java stacks.
-17. **Test redesigns.** The watchdog test pauses the broker under an
-    exclusive lease and trips in seconds (the AMQP idle timeout is 5 s; the
-    SMF keepalive takes about 30 s). The bind-denied tests bind anonymously
-    to an owner-less `no-access` queue instead of using a per-test client
-    username. Python's SMF-only tests (terminal interruption, interruption
-    before bind) have no Rust analogue; `smf_interop` checks that an SMF
-    publisher's batches reach the AMQP consumer.
-18. **Process stats on Windows.** `/health/status` reports `num_threads` and
-    `open_files` as 0 (sysinfo limits). Linux and Docker report real values.
-19. **Shutdown order.** Shutdown stops the ingest loop first, drains HTTP,
-    then closes the AMQP link and the stores; the spec's order is consumer,
-    drain, pools. The effect is equivalent: no new deliveries start, and
-    unsettled deliveries are redelivered.
+## Adding things
+- **An endpoint.** Write the handler in `src/routers/<area>.rs` with a
+  `#[utoipa::path(...)]` that lists its error responses
+  (`body = ErrorResponse`), take input through `ValidJson<T>` /
+  `ValidQuery<T>` (put garde rules on `T` in `src/schemas/`), return
+  `Result<_, AppError>`, and add `.routes(routes!(handler))` in
+  `app::router`. The route, the OpenAPI entry and the layer stack come with
+  it. Add a test in `tests/it/` through `TestApp`.
+- **A store.** Add a module under `src/persistence/`, connect it through
+  `connect_with_backoff` with a smoke test, implement `HealthProbe`, put it
+  in `Stores` (and `Stores::probes`), give its client timeouts from
+  settings, and add `impl From<its error> for AppError` mapping outages to
+  `Unavailable`. Schema changes are new files in `migrations/`.
+- **An MCP tool.** Add a `#[tool]` method in `src/mcp/tools.rs` that calls
+  the same service as the REST endpoint it mirrors, and return
+  `structured(...)`; extend `the_tools_mirror_the_rest_read_endpoints`.
 
 ## Performance profiling
 See [PERF_PROFILING_RUNBOOK.md](PERF_PROFILING_RUNBOOK.md): Layer 1 (k6 +

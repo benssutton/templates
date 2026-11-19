@@ -1,8 +1,10 @@
+"""Typed FastAPI dependencies resolving this app's services from app.state."""
+
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 
-from core.container import Container
+from services.app_services import AppServices
 from services.cache import CacheService
 from services.config import ConfigService
 from services.data import DataService
@@ -11,37 +13,39 @@ from services.metrics import MetricsService
 from services.stream_ingest import StreamIngestService
 
 
-def get_container(request: Request) -> Container:
-    # Resolved per-request from the owning app, so each app (including
-    # isolated test apps in the same process) sees only its own services.
-    return request.app.state.container
+def get_services(request: Request) -> AppServices:
+    # Resolved per request from the owning app, so each isolated app (including
+    # test apps in the same process) sees only its own services.
+    return request.app.state.services
 
 
-ContainerDep = Annotated[Container, Depends(get_container)]
+ServicesDep = Annotated[AppServices, Depends(get_services)]
 
 
-def get_health_service(container: ContainerDep) -> HealthService:
-    return container.get(HealthService)
+def get_health_service(services: ServicesDep) -> HealthService:
+    return services.health
 
 
-def get_data_service(container: ContainerDep) -> DataService:
-    return container.get(DataService)
+def get_data_service(services: ServicesDep) -> DataService:
+    return services.data
 
 
-def get_config_service(container: ContainerDep) -> ConfigService:
-    return container.get(ConfigService)
+def get_config_service(services: ServicesDep) -> ConfigService:
+    return services.config
 
 
-def get_cache_service(container: ContainerDep) -> CacheService:
-    return container.get(CacheService)
+def get_cache_service(services: ServicesDep) -> CacheService:
+    return services.cache
 
 
-def get_stream_ingest_service(container: ContainerDep) -> StreamIngestService:
-    return container.get(StreamIngestService)
+def get_stream_ingest_service(services: ServicesDep) -> StreamIngestService:
+    return services.stream_ingest
 
 
-def get_metrics_service(container: ContainerDep) -> MetricsService:
-    return container.get(MetricsService)
+def get_metrics_service(services: ServicesDep) -> MetricsService:
+    if services.metrics is None:  # the /metrics route is only mounted when enabled
+        raise HTTPException(status_code=404, detail="Not Found")
+    return services.metrics
 
 
 HealthServiceDep = Annotated[HealthService, Depends(get_health_service)]

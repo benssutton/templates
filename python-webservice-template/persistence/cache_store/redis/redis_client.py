@@ -14,7 +14,10 @@ class RedisClient:
     async def __aenter__(self) -> aioredis.Redis:
         async def _connect() -> aioredis.Redis:
             client = aioredis.Redis.from_url(
-                self._settings.redis_url.get_secret_value()
+                self._settings.redis_url.get_secret_value(),
+                socket_timeout=self._settings.redis_socket_timeout_seconds,
+                socket_connect_timeout=self._settings.redis_connect_timeout_seconds,
+                max_connections=self._settings.redis_max_connections,
             )
             await client.ping()  # smoke-test: raises if Redis is unreachable
             await self._assert_json_module(client)

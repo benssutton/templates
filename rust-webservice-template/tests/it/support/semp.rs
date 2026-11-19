@@ -8,7 +8,7 @@ use reqwest::Method;
 use serde_json::{json, Value};
 use std::time::Duration;
 
-/// [SPIKE D8] Q4: the queue monitor field that counts redelivered messages.
+/// The queue monitor field that counts redelivered messages.
 pub const REDELIVERED_FIELD: &str = "redeliveredMsgCount";
 
 #[derive(Clone)]
@@ -26,7 +26,7 @@ pub struct QueueStats {
     pub bound: usize,
     /// Delivered to a flow, not yet settled.
     pub unacked: u64,
-    /// Redeliveries counted by the broker (D8).
+    /// Redeliveries counted by the broker.
     pub redelivered: u64,
 }
 
@@ -48,7 +48,7 @@ fn error_status(v: &Value) -> Option<&str> {
 
 impl Semp {
     pub fn new(base_url: &str) -> Self {
-        rust_template::server::install_crypto_provider(); // reqwest is built with rustls-no-provider
+        rust_template::core::install_crypto_provider(); // reqwest is built with rustls-no-provider
         Self {
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(10)) // a paused broker must not hang a test
@@ -238,12 +238,11 @@ impl Semp {
             .await;
     }
 
-    // **Superseded — see Task 0 "Values fixed by Task 0" / SASL rule:** no
-    // `create_client_username` / `set_client_username_enabled` helpers. Tests
-    // connect anonymously as `default`; the bind-denied tests use an
+    // No client-username helpers: the default VPN offers only SASL
+    // ANONYMOUS over AMQP, so tests connect anonymously as `default`; the bind-denied tests use an
     // owner-less `no-access` queue and the watchdog test pauses the broker.
 
-    /// D2: enable AMQP plain text on the VPN (the PATCH from the findings note).
+    /// Enable AMQP plain text on the VPN (not needed on 10.26's default VPN).
     pub async fn enable_amqp(&self, port: u16) -> anyhow::Result<()> {
         let path = format!("/config/msgVpns/{}", self.vpn);
         let body =

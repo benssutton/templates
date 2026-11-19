@@ -79,6 +79,7 @@ impl Logs {
         String::from_utf8_lossy(&self.0 .0.lock().unwrap_or_else(|e| e.into_inner())).into_owned()
     }
 
+    #[cfg(feature = "solace")]
     pub fn contains(&self, needle: &str) -> bool {
         self.text().contains(needle)
     }

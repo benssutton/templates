@@ -58,3 +58,23 @@ async def test_timed_is_silent_when_no_request_active():
     async with timed("clickhouse.select"):  # must not raise
         pass
     assert boundary_samples_var.get() is None
+
+
+@pytest.mark.parametrize(
+    "inbound",
+    ["", "x" * 129, "has space", "new\nline", "semi;colon", "ünïcode"],
+)
+async def test_middleware_replaces_unsafe_inbound_id(inbound):
+    app = create_app(Settings())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/", headers={"X-Request-ID": inbound.encode()})
+    assert r.headers["X-Request-ID"] != inbound
+    assert len(r.headers["X-Request-ID"]) == 32
+
+
+async def test_middleware_adopts_max_length_safe_id():
+    inbound = "A-z_0.9" + "x" * 121  # 128 chars of the allowed alphabet
+    app = create_app(Settings())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/", headers={"X-Request-ID": inbound})
+    assert r.headers["X-Request-ID"] == inbound

@@ -1,5 +1,8 @@
 package com.example.template.core;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
+
 import com.example.template.support.IntegrationSupport;
 import io.micronaut.context.annotation.Property;
 import io.micronaut.http.HttpRequest;
@@ -14,9 +17,6 @@ import io.micronaut.http.client.exceptions.HttpClientResponseException;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 @MicronautTest
 @Property(name = "micronaut.server.max-request-size", value = "100")
@@ -37,10 +37,14 @@ class BodySizeTest extends IntegrationSupport {
     @Test
     void oversizedBodyRejectedWith413() {
         String big = "x".repeat(500);
-        HttpClientResponseException ex = catchThrowableOfType(
-            () -> client.toBlocking().exchange(
-                HttpRequest.POST("/__bodytest", big).contentType(MediaType.TEXT_PLAIN)),
-            HttpClientResponseException.class);
+        HttpClientResponseException ex =
+                catchThrowableOfType(
+                        () ->
+                                client.toBlocking()
+                                        .exchange(
+                                                HttpRequest.POST("/__bodytest", big)
+                                                        .contentType(MediaType.TEXT_PLAIN)),
+                        HttpClientResponseException.class);
         assertThat((Object) ex.getStatus()).isEqualTo(HttpStatus.REQUEST_ENTITY_TOO_LARGE);
     }
 }

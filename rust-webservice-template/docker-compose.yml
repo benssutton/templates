@@ -1,11 +1,11 @@
 name: rust-template
 
-# The app, its three stores, and the Solace broker (default transport) with a
-# demo publisher. Store and broker ports are not published (the app reaches
-# them on the compose network), so this stack can run next to the Python and
-# Java stacks. HTTP-only ingest without a broker (`app` depends on a healthy
-# `solace`, so skip that dependency with --no-deps):
-#   docker compose up -d db clickhouse redis
+# The app, its three stores, and the Solace broker with a demo publisher.
+# Store and broker ports are not published (the app reaches them on the
+# compose network), so this stack can run next to the Python and Java stacks.
+# The app listens on 8443 inside the network; the host reaches it on 443.
+# HTTP-only ingest without a broker:
+#   docker compose up -d db clickhouse redis dev-certs
 #   INGEST_TRANSPORT=noop docker compose up -d --no-deps app
 services:
   db:
@@ -21,13 +21,15 @@ services:
       retries: 10
 
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:26.8.40.7
     environment:
-      # A password lets the `default` user log in over the network (as in Java's compose).
+      # A password lets the `default` user log in over the network.
       CLICKHOUSE_PASSWORD: clickhouse
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
-      - ./scripts/clickhouse-init.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      # The app applies migrations/clickhouse itself; the first one is also
+      # run here so the seed script below has a table to fill.
+      - ./migrations/clickhouse/0001_items.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       - ./scripts/clickhouse-seed.sh:/docker-entrypoint-initdb.d/02-seed.sh:ro
       - ./tests/test_data/clickhouse_seed_data.ipc:/tmp/clickhouse_seed_data.ipc:ro
     ulimits:
@@ -39,7 +41,7 @@ services:
       retries: 10
 
   redis:
-    image: redis/redis-stack-server:latest
+    image: redis/redis-stack-server:7.4.0-v8
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -69,9 +71,9 @@ services:
       retries: 18
       start_period: 60s
 
-  # Variant (b): idempotent SEMP setup, so the queue exists (and spools the
-  # demo publisher's batches) before the app binds it. The broker image has
-  # curl and sh, so no extra image is pulled.
+  # Idempotent SEMP setup, so the queue exists (and spools the demo
+  # publisher's batches) before the app binds it. The broker image has curl
+  # and sh, so no extra image is pulled.
   solace-init:
     image: solace/solace-pubsub-standard:10.26.10
     entrypoint: ["/bin/sh", "/solace-init.sh"]
@@ -84,7 +86,7 @@ services:
       SOLACE_VPN: default
       SOLACE_QUEUE: rust-template/ingest
       SOLACE_TOPIC: ingest/batches
-      # AMQP plain text is enabled on the default VPN out of the box (spike Q1).
+      # AMQP plain text is enabled on the default VPN out of the box.
       ENABLE_AMQP: "false"
       PROVISION_QUEUE: "true"
     depends_on:
@@ -96,10 +98,12 @@ services:
     build: .
     command: ["/app/demo-publisher"]
     init: true
-    # As in Python's stack: a publish error ends the process, so restart it.
+    # A publish error ends the process, so restart it.
     restart: on-failure
+    healthcheck:
+      disable: true
     environment:
-      RUST_LOG: info
+      LOG_LEVEL: info
       SOLACE_HOST: solace
       SOLACE_PORT: "5672"
       # SASL rule: empty = ANONYMOUS (the only AMQP mechanism on this VPN).
@@ -113,21 +117,31 @@ services:
       solace-init:
         condition: service_completed_successfully
 
+  # Self-signed development certificate in a named volume, made once; the
+  # image itself carries no key.
+  dev-certs:
+    build:
+      context: .
+      target: dev-certs
+    volumes:
+      - certs:/certs
+    restart: "no"
+
   app:
     build: .
     # Drain grace (10 s) plus consumer teardown and task joins outlast
     # Docker's default 10 s before SIGKILL.
     stop_grace_period: 30s
     ports:
-      # HTTPS on the default port, like the Python and Java templates.
-      - "443:443"
+      - "443:8443"
+    volumes:
+      - certs:/app/certs:ro
     environment:
       STATUS: running
       INGEST_TRANSPORT: ${INGEST_TRANSPORT:-solace}
-      RUST_LOG: info
+      LOG_LEVEL: info
       # /mcp Host allow-list: the published port (localhost, 127.0.0.1) and the
-      # compose service name (app), as other containers (k6: BASE_URL=https://app)
-      # address it.
+      # compose service name (app), as other containers (k6) address it.
       MCP_ALLOWED_HOSTS: localhost,127.0.0.1,app
       POSTGRES_URL: postgresql://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-appdb}
       CLICKHOUSE_HOST: clickhouse
@@ -144,11 +158,12 @@ services:
       SOLACE_TOPIC: ingest/batches
       # One queue per replica: the LSM store is a per-instance cache.
       SOLACE_QUEUE: rust-template/ingest
-      # Variant (b): startup provisioning through SEMP.
       SOLACE_SEMP_URL: http://solace:8080
       SOLACE_SEMP_USERNAME: admin
       SOLACE_SEMP_PASSWORD: admin
     depends_on:
+      dev-certs:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       clickhouse:
@@ -159,9 +174,6 @@ services:
         condition: service_healthy
       solace-init:
         condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsk https://localhost/health/live || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
+
+volumes:
+  certs:

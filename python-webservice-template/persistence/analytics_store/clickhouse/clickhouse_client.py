@@ -2,10 +2,13 @@ import clickhouse_connect
 from clickhouse_connect.driver.asyncclient import AsyncClient
 
 from core.retry import connect_with_backoff
+from persistence.migrations import migrate_clickhouse
 from settings import Settings
 
 
 class ClickHouseClient:
+    """Async context manager yielding a live client with migrations applied."""
+
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._client: AsyncClient | None = None
@@ -18,6 +21,8 @@ class ClickHouseClient:
                 username=self._settings.clickhouse_user,
                 password=self._settings.clickhouse_password.get_secret_value(),
                 database=self._settings.clickhouse_database,
+                connect_timeout=self._settings.clickhouse_connect_timeout_seconds,
+                send_receive_timeout=self._settings.clickhouse_send_receive_timeout_seconds,
             )
             if not await client.ping():  # smoke-test: raises on failure -> retried
                 await client.close()
@@ -31,6 +36,11 @@ class ClickHouseClient:
             base_delay=self._settings.connect_base_delay,
             max_delay=self._settings.connect_max_delay,
         )
+        try:
+            await migrate_clickhouse(self._client)
+        except BaseException:
+            await self.__aexit__()
+            raise
         return self._client
 
     async def __aexit__(self, *_: object) -> None:

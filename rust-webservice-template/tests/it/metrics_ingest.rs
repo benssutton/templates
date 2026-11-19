@@ -1,5 +1,5 @@
+use crate::probes::NoopIngestHealth;
 use rust_template::core::last_request::LastRequest;
-use rust_template::health::ingest::NoopIngestHealth;
 use rust_template::health::registry::ProbeRegistry;
 use rust_template::services::health::HealthService;
 use rust_template::services::metrics::MetricsService;
