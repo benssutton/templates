@@ -10,13 +10,14 @@ automatically; the streaming ingest thread sets its own per-batch ID.
 
 import contextvars
 import logging
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
 
 from core.boundary_timing import record_boundary
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
+from starlette.datastructures import Headers, MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 correlation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
     "correlation_id", default="-"
@@ -43,6 +44,17 @@ def new_id() -> str:
     return uuid.uuid4().hex
 
 
+# An inbound id ends up in every log line and response header, so only a short,
+# log-safe token is adopted (no spaces, newlines or delimiters to forge records).
+_SAFE_ID = re.compile(r"[A-Za-z0-9._-]{1,128}")
+
+
+def adopt_or_new_id(inbound: str | None) -> str:
+    if inbound is not None and _SAFE_ID.fullmatch(inbound):
+        return inbound
+    return new_id()
+
+
 class CorrelationIdFilter(logging.Filter):
     """Injects the current correlation ID onto every LogRecord."""
 
@@ -51,23 +63,36 @@ class CorrelationIdFilter(logging.Filter):
         return True
 
 
-class CorrelationIdMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, header_name: str = "X-Request-ID") -> None:
-        super().__init__(app)
+class CorrelationIdMiddleware:
+    """Adopts the inbound correlation header (or mints an ID), exposes it to the
+    endpoint and its loggers via the ContextVar, and echoes it on the response.
+
+    Pure ASGI, not BaseHTTPMiddleware: BaseHTTPMiddleware runs receive() inside a
+    task group, which wraps errors raised mid-read (e.g. the 413 from
+    MaxBodySizeMiddleware) in an ExceptionGroup, and it buffers streaming responses.
+    """
+
+    def __init__(self, app: ASGIApp, header_name: str = "X-Request-ID") -> None:
+        self.app = app
         self._header = header_name
 
-    async def dispatch(self, request: Request, call_next):
-        # Set BEFORE call_next so the value is visible to the downstream endpoint
-        # and its loggers (the reliable direction for BaseHTTPMiddleware + contextvars).
-        incoming = request.headers.get(self._header)
-        cid = incoming or new_id()
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        cid = adopt_or_new_id(Headers(scope=scope).get(self._header))
+
+        async def send_with_id(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                MutableHeaders(scope=message)[self._header] = cid
+            await send(message)
+
         token = correlation_id_var.set(cid)
         try:
-            response = await call_next(request)
+            await self.app(scope, receive, send_with_id)
         finally:
             correlation_id_var.reset(token)
-        response.headers[self._header] = cid
-        return response
 
 
 _timing_log = logging.getLogger(__name__)

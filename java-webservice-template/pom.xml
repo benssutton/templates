@@ -19,20 +19,43 @@
     <release.version>25</release.version>
     <maven.compiler.release>25</maven.compiler.release>
     <micronaut.version>5.2.5</micronaut.version>
-    <!-- Override the platform BOM's testcontainers.version (2.0.5), which is not
-         published to Maven Central; only the 1.x line exists. -->
+    <!-- The platform BOM manages Testcontainers 2.0.5, whose modules are renamed
+         (testcontainers-postgresql, ...); this project uses the 1.x module names
+         (postgresql, clickhouse, junit-jupiter), so it pins the 1.x line. -->
     <testcontainers.version>1.21.4</testcontainers.version>
-    <!-- Security bumps over the 5.0.2 platform BOM's pins (drop once the BOM catches up):
-         micrometer 1.16.5 -> 1.16.6 fixes CVE-2026-40983 / CVE-2026-40984;
-         postgres driver 42.7.11 -> 42.7.12 fixes CVE-2026-54291. -->
-    <micrometer.version>1.16.6</micrometer.version>
-    <postgres.driver.version>42.7.12</postgres.driver.version>
     <micronaut.runtime>netty</micronaut.runtime>
     <micronaut.aot.enabled>false</micronaut.aot.enabled>
-    <micronaut.aot.packageName>com.example.template.aot.generated</micronaut.aot.packageName>
     <exec.mainClass>com.example.template.Application</exec.mainClass>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- JaCoCo line-coverage gate for `verify` (all tests, Solace included). -->
+    <jacoco.minimum.line.coverage>0.90</jacoco.minimum.line.coverage>
+    <!-- Arrow needs direct nio access on modern JDKs; @{argLine} carries the JaCoCo agent. -->
+    <test.argLine>@{argLine} --add-opens=java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow</test.argLine>
   </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- Over the platform's OpenTelemetry 1.64.0 / instrumentation 2.30.0 for
+           GHSA-ccrj-gw8r-854m (tracestate parsing DoS, fixed in API 1.67.0). Instrumentation
+           2.34.0 is the release built on SDK 1.68.0, and its BOMs import the matching core
+           BOMs, so core and instrumentation move together (mixing them silently turns the
+           tracer into a no-op). Drop once the Micronaut platform BOM manages a fixed version. -->
+      <dependency>
+        <groupId>io.opentelemetry.instrumentation</groupId>
+        <artifactId>opentelemetry-instrumentation-bom</artifactId>
+        <version>2.34.0</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>io.opentelemetry.instrumentation</groupId>
+        <artifactId>opentelemetry-instrumentation-bom-alpha</artifactId>
+        <version>2.34.0-alpha</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
 
   <repositories>
     <repository>
@@ -40,7 +63,6 @@
       <url>https://repo.maven.apache.org/maven2</url>
     </repository>
   </repositories>
-
 
   <dependencies>
 
@@ -86,6 +108,41 @@
       <scope>runtime</scope>
     </dependency>
 
+    <!-- Postgres schema migrations, applied at startup (Flyway takes an advisory lock,
+         so replicas starting together are safe). -->
+    <dependency>
+      <groupId>io.micronaut.flyway</groupId>
+      <artifactId>micronaut-flyway</artifactId>
+      <scope>compile</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- Bearer-JWT auth seam; off unless AUTH_ENABLED=true. -->
+    <dependency>
+      <groupId>io.micronaut.security</groupId>
+      <artifactId>micronaut-security-jwt</artifactId>
+      <scope>compile</scope>
+    </dependency>
+
+    <!-- OpenTelemetry tracing with W3C traceparent propagation; exporting is off unless
+         OTEL_TRACES_EXPORTER=otlp. -->
+    <dependency>
+      <groupId>io.micronaut.tracing</groupId>
+      <artifactId>micronaut-tracing-opentelemetry-http</artifactId>
+      <scope>compile</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-exporter-otlp</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
     <dependency>
       <groupId>ch.qos.logback</groupId>
       <artifactId>logback-classic</artifactId>
@@ -119,7 +176,7 @@
     <dependency>
       <groupId>com.clickhouse</groupId>
       <artifactId>clickhouse-jdbc</artifactId>
-      <version>0.7.1</version>
+      <version>0.11.2</version>
       <classifier>all</classifier>
       <scope>runtime</scope>
     </dependency>
@@ -152,9 +209,24 @@
       <scope>compile</scope>
     </dependency>
 
+    <!-- MCP server: Micronaut's integration of the official MCP Java SDK (stateless
+         Streamable HTTP on Netty; the SDK owns the protocol). -->
+    <dependency>
+      <groupId>io.micronaut.mcp</groupId>
+      <artifactId>micronaut-mcp-server-java-sdk</artifactId>
+    </dependency>
+
     <dependency>
       <groupId>io.micronaut</groupId>
       <artifactId>micronaut-http-client</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- SDK client pointed at the embedded server (qualifier "embeddedServer"): the MCP
+         tests drive the real handshake with the official client. -->
+    <dependency>
+      <groupId>io.micronaut.mcp</groupId>
+      <artifactId>micronaut-mcp-client-java-sdk</artifactId>
       <scope>test</scope>
     </dependency>
 
@@ -173,6 +245,12 @@
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-engine</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-sdk-testing</artifactId>
       <scope>test</scope>
     </dependency>
 
@@ -221,34 +299,18 @@
       <plugin>
         <groupId>io.micronaut.maven</groupId>
         <artifactId>micronaut-maven-plugin</artifactId>
-        <configuration>
-          <configFile>aot-${packaging}.properties</configFile>
-<configurationValidation>
-    <enabled>false</enabled>
-
-    <suppressions>
-        <suppression>datasources.default.db-type</suppression>
-    </suppressions>
-    <failOnNotPresent>true</failOnNotPresent>
-    <validateDependencyInjection>false</validateDependencyInjection>
-    <cacheEnabled>true</cacheEnabled>
-
-</configurationValidation>
-
-        </configuration>
       </plugin>
 
+      <!-- Listing it activates the parent's rules (requireJavaVersion, checkSnakeYaml). -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-enforcer-plugin</artifactId>
       </plugin>
+
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
         <configuration>
-          <!-- Uncomment to enable incremental compilation -->
-          <!-- <useIncrementalCompilation>false</useIncrementalCompilation> -->
-
           <annotationProcessorPaths combine.self="override">
             <path>
               <groupId>io.micronaut</groupId>
@@ -265,11 +327,6 @@
                   <artifactId>micronaut-inject</artifactId>
                 </exclusion>
               </exclusions>
-            </path>
-            <path>
-              <groupId>io.micronaut</groupId>
-              <artifactId>micronaut-graal</artifactId>
-              <version>${micronaut.core.version}</version>
             </path>
             <path>
               <groupId>io.micronaut</groupId>
@@ -299,6 +356,11 @@
               </exclusions>
             </path>
             <path>
+              <groupId>io.micronaut.security</groupId>
+              <artifactId>micronaut-security-annotations</artifactId>
+              <version>${micronaut.security.version}</version>
+            </path>
+            <path>
               <groupId>io.micronaut.openapi</groupId>
               <artifactId>micronaut-openapi</artifactId>
               <version>${micronaut.openapi.version}</version>
@@ -312,31 +374,61 @@
         </configuration>
       </plugin>
 
+      <!-- Formatting gate: `spotless:check` (CI) / `spotless:apply` (fix). AOSP style keeps
+           4-space indentation. -->
+      <plugin>
+        <groupId>com.diffplug.spotless</groupId>
+        <artifactId>spotless-maven-plugin</artifactId>
+        <version>3.10.4</version>
+        <configuration>
+          <java>
+            <googleJavaFormat>
+              <style>AOSP</style>
+              <reflowLongStrings>false</reflowLongStrings>
+            </googleJavaFormat>
+            <removeUnusedImports/>
+          </java>
+        </configuration>
+      </plugin>
+
       <!--
-        Testcontainers + Docker Engine 29 / Docker Desktop API-version pin.
+        Tests are split by the standard Maven naming so the common loop needs no Solace broker:
+        - surefire (`./mvnw test`): *Test classes; still needs Docker for the
+          Postgres/ClickHouse/Redis Testcontainers.
+        - failsafe (`./mvnw verify`): *IT classes, the ones that need the Solace broker (one
+          per JVM, ~1 min start), then the JaCoCo gate over both runs.
 
-        Docker Engine 29 (Docker Desktop 4.74) dropped legacy Docker API versions and
-        now reports MinAPIVersion 1.40. Testcontainers 1.21.3 probes the daemon with a
-        hard-coded fallback of API v1.32 whenever the resolved docker-java config has no
-        explicit api version, so its /v1.32/info ping is rejected with HTTP 400 and it
-        reports "Could not find a valid Docker environment" even though the daemon is
-        healthy. Setting the docker-java "api.version" system property to a supported
-        version (1.43) makes Testcontainers probe /v1.43/info, which the engine accepts.
-
-        DOCKER_HOST pins the named pipe to the engine pipe (//./pipe/docker_engine);
-        the active docker context's advertised "docker_cli" pipe answers /_ping but not
-        /info, so relying on context auto-detection is non-deterministic here.
+        Docker Engine 29 dropped API v1.32, which Testcontainers 1.21.x falls back to when
+        no API version is configured; the docker-java "api.version" property makes it probe
+        a supported version instead. Harmless on Linux/CI.
       -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
-          <!-- @{argLine} carries the JaCoCo agent (prepended by jacoco:prepare-agent);
-               the rest gives Apache Arrow direct nio access on modern JDKs. -->
-          <argLine>@{argLine} --add-opens=java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow</argLine>
+          <argLine>${test.argLine}</argLine>
           <systemPropertyVariables>
-            <!-- Probe a Docker API version the engine accepts (Docker 29 dropped v1.32,
-                 which Testcontainers 1.21.3 falls back to). Harmless on Linux/CI. -->
+            <api.version>1.43</api.version>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <argLine>${test.argLine}</argLine>
+          <!-- Test the compiled classes, not the shaded fat jar. -->
+          <classesDirectory>${project.build.outputDirectory}</classesDirectory>
+          <systemPropertyVariables>
             <api.version>1.43</api.version>
           </systemPropertyVariables>
         </configuration>
@@ -366,18 +458,14 @@
                 <rule>
                   <element>BUNDLE</element>
                   <limits>
-                    <!-- Floor set just below current line coverage (integration-heavy;
-                         resilience close-race/backoff branches are hard to exercise).
-                         Raise toward the Python template's gate as unit tests are added. -->
                     <limit>
                       <counter>LINE</counter>
                       <value>COVEREDRATIO</value>
-                      <minimum>0.65</minimum>
+                      <minimum>${jacoco.minimum.line.coverage}</minimum>
                     </limit>
                   </limits>
                   <excludes>
                     <exclude>com.example.template.Application</exclude>
-                    <exclude>com.example.template.publisher.ExampleSolacePublisher</exclude>
                   </excludes>
                 </rule>
               </rules>
@@ -389,6 +477,29 @@
   </build>
 
   <profiles>
+    <!-- `./mvnw -Plint test-compile`: javac lint warnings fail the build. javac lints the
+         annotation-processor output too and cannot exclude it, so the categories Micronaut's
+         generated code always trips (rawtypes, unchecked, cast, deprecation) are off, as are
+         try (the Timed try-with-resources idiom never reads its variable), processing,
+         serial and classfile. -->
+    <profile>
+      <id>lint</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-compiler-plugin</artifactId>
+            <configuration>
+              <compilerArgs combine.children="append">
+                <arg>-Xlint:all,-processing,-serial,-deprecation,-classfile,-rawtypes,-unchecked,-cast,-try</arg>
+                <arg>-Werror</arg>
+              </compilerArgs>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
     <!-- Windows + Docker Desktop only: pin DOCKER_HOST to the engine named pipe, since
          the active docker context's advertised "docker_cli" pipe answers /_ping but not
          /info, making Testcontainers' daemon discovery non-deterministic. On Linux/CI the
@@ -403,6 +514,15 @@
           <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-surefire-plugin</artifactId>
+            <configuration>
+              <systemPropertyVariables>
+                <DOCKER_HOST>npipe:////./pipe/docker_engine</DOCKER_HOST>
+              </systemPropertyVariables>
+            </configuration>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-failsafe-plugin</artifactId>
             <configuration>
               <systemPropertyVariables>
                 <DOCKER_HOST>npipe:////./pipe/docker_engine</DOCKER_HOST>

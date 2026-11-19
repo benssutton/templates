@@ -55,7 +55,7 @@ async fn get_config_returns_all_entries() {
     );
 }
 
-/// Deviation 9: `/config` and `/config/` are the same endpoint (no redirect).
+/// `/config` and `/config/` are the same endpoint (normalised, no redirect).
 #[tokio::test]
 async fn both_slash_forms_are_routed() {
     let app = TestApp::spawn(app_settings().await).await;
@@ -72,9 +72,10 @@ async fn both_slash_forms_are_routed() {
         .contains(&json!({"key": key, "value": "v"})));
 }
 
-/// Deviation 7: FastAPI answers all of these with 422; so must we.
+/// Contract: a body that parses but is invalid is 422; one that cannot be
+/// read as JSON at all is 400. Both carry `{"detail"}`.
 #[tokio::test]
-async fn malformed_bodies_are_422_with_a_detail() {
+async fn invalid_bodies_are_422_unreadable_400_and_non_json_415() {
     let app = TestApp::spawn(app_settings().await).await;
     let (status, body) = app
         .post_json("/config/", &json!({"key": "only-a-key"}))
@@ -90,7 +91,8 @@ async fn malformed_bodies_are_422_with_a_detail() {
         .send()
         .await
         .unwrap();
-    assert_eq!(not_json.status(), 422);
+    assert_eq!(not_json.status(), 400);
+    assert!(not_json.json::<serde_json::Value>().await.unwrap()["detail"].is_string());
 
     let no_content_type = app
         .client()
@@ -99,7 +101,14 @@ async fn malformed_bodies_are_422_with_a_detail() {
         .send()
         .await
         .unwrap();
-    assert_eq!(no_content_type.status(), 422);
+    assert_eq!(no_content_type.status(), 415);
+    assert!(no_content_type.json::<serde_json::Value>().await.unwrap()["detail"].is_string());
+
+    let (status, body) = app
+        .post_json("/config", &json!({"key": "k".repeat(257), "value": "v"}))
+        .await;
+    assert_eq!(status, 422, "a key over 256 chars: {body}");
+    assert!(body["detail"].as_str().unwrap().contains("key"), "{body}");
 }
 
 #[tokio::test]

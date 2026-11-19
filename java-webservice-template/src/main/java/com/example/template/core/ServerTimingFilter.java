@@ -7,9 +7,9 @@ import io.micronaut.http.annotation.ResponseFilter;
 import io.micronaut.http.annotation.ServerFilter;
 
 /**
- * Installs a request-scoped {@link BoundarySamples} holder and renders the W3C
- * {@code Server-Timing} response header from the boundaries recorded during the
- * request. Mirrors the Python ServerTimingMiddleware.
+ * Installs a request-scoped {@link BoundarySamples} holder and renders the W3C {@code
+ * Server-Timing} response header from the boundaries recorded during the request. Mirrors the
+ * Python ServerTimingMiddleware.
  */
 @ServerFilter("/**")
 public class ServerTimingFilter {

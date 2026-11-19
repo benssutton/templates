@@ -8,7 +8,7 @@ import pyarrow as pa
 
 from ingestion.base import ConnectionState, Delivery, OnBound
 from persistence.stream_store.lsm_store import LSMStore
-from services.stream_ingest import _INGEST_MAX_FAILURES, StreamIngestService
+from services.stream_ingest import StreamIngestService
 from settings import Settings
 from tests.publishers.batches import make_batch
 from tests.support.wait import eventually
@@ -211,7 +211,7 @@ async def test_successful_bind_resets_the_consecutive_failure_count():
     """A bind proves the transport works, like a delivery does: interruptions
     that each heal (bind again) must never add up to a shutdown, and the
     transport backoff stays at its base delay instead of doubling."""
-    cycles = _INGEST_MAX_FAILURES + 1
+    cycles = Settings().ingest_max_consecutive_failures + 1
     consumer = _BindsThenInterruptedConsumer(cycles)
     settings = Settings(ingest_transport="noop", ingest_max_disconnect_seconds=60.0)
     shutdowns: list[bool] = []

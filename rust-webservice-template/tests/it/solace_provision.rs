@@ -1,4 +1,4 @@
-//! [VARIANT B] SEMP provisioning against the real broker.
+//! SEMP provisioning against the real broker.
 
 use crate::support::containers::{self, Endpoint};
 use crate::support::logs;
@@ -36,7 +36,7 @@ async fn startup_provisioning_creates_the_queue_and_subscription_idempotently() 
     semp.delete_queue(&names.queue).await;
 }
 
-/// Fail fast (spec §2): SEMP unreachable -> startup fails after the budget.
+/// Fail fast: SEMP unreachable -> startup fails after the budget.
 #[tokio::test]
 async fn an_unreachable_semp_fails_after_the_retry_budget() {
     let closed = Endpoint::closed();

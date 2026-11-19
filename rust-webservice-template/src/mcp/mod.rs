@@ -1,3 +1,6 @@
+//! `/mcp`: rmcp's streamable-HTTP server, mounted as a route so it shares
+//! the app's middleware (request id, auth, JSON error bodies, metrics).
+
 pub mod tools;
 
 use std::sync::Arc;
@@ -10,31 +13,51 @@ use rmcp::transport::streamable_http_server::{
 use crate::state::AppState;
 use tools::McpHandler;
 
-pub fn build_router(state: AppState) -> Router<AppState> {
-    // SECURITY: DNS-rebinding protection. rmcp checks the Host header of every
-    // /mcp request against `mcp_allowed_hosts` and answers 403 otherwise.
-    // Default ["localhost"]; deployments list their public host names
-    // (compose adds 127.0.0.1 and app). Settings::validate() refuses an empty
-    // list, which rmcp would treat as "allow every host".
+/// `Origin` values accepted: each allowed host over http and https. An entry
+/// without a port matches any port, as for `Host`.
+pub fn allowed_origins(hosts: &[String]) -> Vec<String> {
+    hosts
+        .iter()
+        .flat_map(|h| [format!("http://{h}"), format!("https://{h}")])
+        .collect()
+}
+
+pub fn router(state: AppState) -> Router<AppState> {
+    // DNS-rebinding protection: rmcp checks the Host header against
+    // `mcp_allowed_hosts` and a browser's Origin against the same hosts,
+    // answering 403 otherwise. Settings refuses an empty host list, which
+    // rmcp would treat as "allow every host".
+    let hosts = state.settings.mcp_allowed_hosts.clone();
     let config = StreamableHttpServerConfig::default()
-        .with_allowed_hosts(state.settings.mcp_allowed_hosts.clone());
+        .with_allowed_origins(allowed_origins(&hosts))
+        .with_allowed_hosts(hosts)
+        // Open SSE streams end when shutdown starts, so they cannot hold
+        // the HTTP drain open until its grace period runs out.
+        .with_cancellation_token(state.shutdown.token().child_token());
     let service: StreamableHttpService<McpHandler, LocalSessionManager> =
         StreamableHttpService::new(
             move || Ok(McpHandler::new(state.clone())),
             Arc::new(LocalSessionManager::default()),
             config,
         );
+    // `route_service` makes it a matched route, so metrics label it
+    // `handler="/mcp"`. rmcp handles every method itself (GET/POST/DELETE).
+    Router::new().route_service("/mcp", service)
+}
 
-    // Served at both `/mcp` and `/mcp/` (Python's canonical endpoint:
-    // FastMCP `streamable_http_path="/"` mounted at `/mcp`). Both routes share
-    // this one service (cloned), hence one session manager, so a session made
-    // on either path works on the other. `route_service` (not
-    // `fallback_service`) makes them matched routes, so the metrics middleware
-    // labels them `handler="/mcp"` and `handler="/mcp/"` instead of "none".
-    // axum's `nest` cannot express the trailing-slash path, so the paths are
-    // absolute and `app::router` merges this router. rmcp still sees every
-    // method (GET/POST/DELETE, its own 405 otherwise).
-    Router::new()
-        .route_service("/mcp", service.clone())
-        .route_service("/mcp/", service)
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn origins_cover_both_schemes_of_every_host() {
+        let origins = super::allowed_origins(&["localhost".into(), "app:8443".into()]);
+        assert_eq!(
+            origins,
+            [
+                "http://localhost",
+                "https://localhost",
+                "http://app:8443",
+                "https://app:8443"
+            ]
+        );
+    }
 }

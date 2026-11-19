@@ -1,13 +1,7 @@
-import logging
-import time
-
 from clickhouse_connect.driver.asyncclient import AsyncClient
 
 from core.correlation import timed
 from schemas.data import DataRowResponse, DataRowsResponse
-from schemas.health import ProbeResult
-
-log = logging.getLogger(__name__)
 
 
 class DataService:
@@ -17,13 +11,11 @@ class DataService:
     async def get_data(self, limit: int) -> DataRowsResponse:
         async with timed("clickhouse.count"):
             count_result = await self._client.query("SELECT count() FROM items")
-        first_row = count_result.first_row
-        assert first_row is not None, "SELECT count() always returns one row"
-        total = first_row[0]
+        total = count_result.first_row[0] if count_result.first_row else 0
 
         async with timed("clickhouse.select"):
             result = await self._client.query(
-                "SELECT id, name, value FROM items LIMIT %(limit)s",
+                "SELECT id, name, value FROM items ORDER BY id LIMIT %(limit)s",
                 parameters={"limit": limit},
             )
         rows = [
@@ -32,30 +24,6 @@ class DataService:
         ]
         return DataRowsResponse(rows=rows, total=total, limit=limit)
 
-    async def health_check(self) -> ProbeResult:
-
-        start = time.perf_counter()
-        try:
-            ok = await self._client.ping()
-            latency_ms = (time.perf_counter() - start) * 1000
-            if ok:
-                return ProbeResult(
-                    name="clickhouse", status="up", latency_ms=round(latency_ms, 2)
-                )
-            # Generic token, consistent with the exception path below and the
-            # documented health-probe contract (never a probe-specific string).
-            return ProbeResult(
-                name="clickhouse",
-                status="down",
-                latency_ms=round(latency_ms, 2),
-                error="unavailable",
-            )
-        except Exception as exc:
-            latency_ms = (time.perf_counter() - start) * 1000
-            log.error("clickhouse health check failed: %s", exc)
-            return ProbeResult(
-                name="clickhouse",
-                status="down",
-                latency_ms=round(latency_ms, 2),
-                error="unavailable",
-            )
+    async def ping(self) -> None:
+        if not await self._client.ping():
+            raise ConnectionError("ClickHouse ping returned False")

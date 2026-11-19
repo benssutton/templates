@@ -21,7 +21,7 @@ async fn connects_and_answers_the_probe() {
 }
 
 /// Python `test_stock_redis_without_json_module_aborts_startup`, at store level
-/// (Task 11 repeats it through `create_app`).
+/// (`stores.rs` repeats it through `create_app`).
 #[tokio::test]
 async fn stock_redis_without_redisjson_is_rejected() {
     let stock = containers::stock_redis().await;

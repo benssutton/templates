@@ -27,7 +27,7 @@ impl GatedStore {
 
 #[async_trait::async_trait]
 impl StreamStore for GatedStore {
-    async fn ingest(&self, batch: RecordBatch) -> Result<(), StoreError> {
+    async fn ingest(&self, batch: RecordBatch) -> Result<u64, StoreError> {
         self.entered.notify_one();
         let _permit = self.gate.acquire().await.expect("gate open");
         self.inner.ingest(batch).await

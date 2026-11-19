@@ -16,12 +16,16 @@ import java.util.regex.Pattern;
 /** Thin SEMP v2 client (mirrors python tests/support/semp.py): broker-side facts for assertions. */
 public final class Semp {
     private static final Pattern MSG_ID = Pattern.compile("\"msgId\"\\s*:");
-    private static final Pattern SUB_TOPIC = Pattern.compile("\"subscriptionTopic\"\\s*:\\s*\"([^\"]+)\"");
+    private static final Pattern SUB_TOPIC =
+            Pattern.compile("\"subscriptionTopic\"\\s*:\\s*\"([^\"]+)\"");
     private static final Pattern CLIENT_NAME = Pattern.compile("\"clientName\"\\s*:");
     private static final Pattern FLOW_ID = Pattern.compile("\"flowId\"\\s*:");
     private static final Pattern UNACKED = Pattern.compile("\"unackedMsgCount\"\\s*:\\s*(\\d+)");
+
     /** {@code meta.error.status} of a SEMP error body; the error object's only "status" key. */
-    private static final Pattern NOT_FOUND = Pattern.compile("\"error\"\\s*:\\s*\\{[^}]*\"status\"\\s*:\\s*\"NOT_FOUND\"");
+    private static final Pattern NOT_FOUND =
+            Pattern.compile("\"error\"\\s*:\\s*\\{[^}]*\"status\"\\s*:\\s*\"NOT_FOUND\"");
+
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(TIMEOUT).build();
@@ -30,16 +34,25 @@ public final class Semp {
 
     public Semp(String baseUrl) {
         this.base = baseUrl + "/SEMP/v2";
-        this.auth = "Basic " + Base64.getEncoder().encodeToString("admin:admin".getBytes(StandardCharsets.UTF_8));
+        this.auth =
+                "Basic "
+                        + Base64.getEncoder()
+                                .encodeToString("admin:admin".getBytes(StandardCharsets.UTF_8));
     }
 
-    private static String enc(String s) { return URLEncoder.encode(s, StandardCharsets.UTF_8); }
+    private static String enc(String s) {
+        return URLEncoder.encode(s, StandardCharsets.UTF_8);
+    }
 
     private HttpResponse<String> send(String method, String path, String json) {
-        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(base + path))
-            .timeout(TIMEOUT)
-            .header("Authorization", auth);
-        HttpRequest.BodyPublisher body = json == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(json);
+        HttpRequest.Builder b =
+                HttpRequest.newBuilder(URI.create(base + path))
+                        .timeout(TIMEOUT)
+                        .header("Authorization", auth);
+        HttpRequest.BodyPublisher body =
+                json == null
+                        ? HttpRequest.BodyPublishers.noBody()
+                        : HttpRequest.BodyPublishers.ofString(json);
         if (json != null) b.header("Content-Type", "application/json");
         try {
             return http.send(b.method(method, body).build(), HttpResponse.BodyHandlers.ofString());
@@ -49,13 +62,15 @@ public final class Semp {
     }
 
     private HttpResponse<String> ok(HttpResponse<String> r) {
-        if (r.statusCode() / 100 != 2) throw new IllegalStateException("SEMP " + r.statusCode() + ": " + r.body());
+        if (r.statusCode() / 100 != 2)
+            throw new IllegalStateException("SEMP " + r.statusCode() + ": " + r.body());
         return r;
     }
 
     /**
-     * SEMP v2 reports a missing object as HTTP 400 with {@code meta.error.status == "NOT_FOUND"} (not 404).
-     * Anything else that isn't a 200 (auth failure, 5xx) throws rather than reading as "absent".
+     * SEMP v2 reports a missing object as HTTP 400 with {@code meta.error.status == "NOT_FOUND"}
+     * (not 404). Anything else that isn't a 200 (auth failure, 5xx) throws rather than reading as
+     * "absent".
      */
     public boolean queueExists(String queue) {
         HttpResponse<String> r = send("GET", "/config/msgVpns/default/queues/" + enc(queue), null);
@@ -65,7 +80,15 @@ public final class Semp {
     }
 
     public List<String> queueSubscriptions(String queue) {
-        Matcher m = SUB_TOPIC.matcher(ok(send("GET", "/config/msgVpns/default/queues/" + enc(queue) + "/subscriptions", null)).body());
+        Matcher m =
+                SUB_TOPIC.matcher(
+                        ok(send(
+                                        "GET",
+                                        "/config/msgVpns/default/queues/"
+                                                + enc(queue)
+                                                + "/subscriptions",
+                                        null))
+                                .body());
         List<String> out = new ArrayList<>();
         while (m.find()) out.add(m.group(1));
         return out;
@@ -90,7 +113,15 @@ public final class Semp {
 
     /** Messages delivered to the queue's consumer flows but not yet settled. */
     public int queueUnackedCount(String queue) {
-        Matcher m = UNACKED.matcher(ok(send("GET", "/monitor/msgVpns/default/queues/" + enc(queue) + "/txFlows", null)).body());
+        Matcher m =
+                UNACKED.matcher(
+                        ok(send(
+                                        "GET",
+                                        "/monitor/msgVpns/default/queues/"
+                                                + enc(queue)
+                                                + "/txFlows",
+                                        null))
+                                .body());
         int n = 0;
         while (m.find()) n += Integer.parseInt(m.group(1));
         return n;
@@ -98,15 +129,30 @@ public final class Semp {
 
     /** Connected clients with exactly this client name. */
     public int clientCount(String clientName) {
-        return count(CLIENT_NAME, "/monitor/msgVpns/default/clients?where=" + enc("clientName==" + clientName));
+        return count(
+                CLIENT_NAME,
+                "/monitor/msgVpns/default/clients?where=" + enc("clientName==" + clientName));
     }
 
     public void createEndpointDeniedUser(String profile, String user, String password) {
-        ok(send("POST", "/config/msgVpns/default/clientProfiles",
-            "{\"clientProfileName\":\"" + profile + "\",\"allowGuaranteedMsgReceiveEnabled\":true,"
-                + "\"allowGuaranteedMsgSendEnabled\":true,\"allowGuaranteedEndpointCreateEnabled\":false}"));
-        ok(send("POST", "/config/msgVpns/default/clientUsernames",
-            "{\"clientUsername\":\"" + user + "\",\"password\":\"" + password + "\",\"clientProfileName\":\""
-                + profile + "\",\"aclProfileName\":\"default\",\"enabled\":true}"));
+        ok(
+                send(
+                        "POST",
+                        "/config/msgVpns/default/clientProfiles",
+                        "{\"clientProfileName\":\""
+                                + profile
+                                + "\",\"allowGuaranteedMsgReceiveEnabled\":true,"
+                                + "\"allowGuaranteedMsgSendEnabled\":true,\"allowGuaranteedEndpointCreateEnabled\":false}"));
+        ok(
+                send(
+                        "POST",
+                        "/config/msgVpns/default/clientUsernames",
+                        "{\"clientUsername\":\""
+                                + user
+                                + "\",\"password\":\""
+                                + password
+                                + "\",\"clientProfileName\":\""
+                                + profile
+                                + "\",\"aclProfileName\":\"default\",\"enabled\":true}"));
     }
 }

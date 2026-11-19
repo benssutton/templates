@@ -40,3 +40,9 @@ async def test_get_config_returns_all_entries(test_client: AsyncClient):
     response = await test_client.get("/config/")
     assert response.status_code == 200
     assert {"key": key, "value": "value1"} in response.json()
+
+
+async def test_config_answers_with_and_without_trailing_slash(test_client: AsyncClient):
+    for path in ("/config", "/config/"):
+        response = await test_client.get(path)
+        assert response.status_code == 200, path

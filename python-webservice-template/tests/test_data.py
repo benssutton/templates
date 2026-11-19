@@ -17,3 +17,8 @@ async def test_get_data(test_client: AsyncClient):
     assert body["total"] == 3
     assert len(body["rows"]) == 3
     assert body["limit"] == 10
+
+
+async def test_get_data_is_ordered_by_id(test_client: AsyncClient):
+    ids = [row["id"] for row in (await test_client.get("/data")).json()["rows"]]
+    assert ids == sorted(ids)

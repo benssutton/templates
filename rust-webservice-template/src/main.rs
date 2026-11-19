@@ -1,19 +1,40 @@
-//! Thin entry point (spec §8: keep main.rs a thin call into the library).
-//! settings -> create_app -> bind -> signals -> serve; any startup error
+//! Thin entry point: settings -> telemetry -> bind -> create_app -> signals
+//! -> serve. The port is bound before the stores connect, so a port clash
+//! fails at once instead of after the connect retries. Any startup error
 //! exits non-zero with a readable message.
+//!
+//! `rust-template healthcheck` probes the running server instead (the
+//! container healthcheck; the runtime image has no curl).
 
-use rust_template::{app::create_app, server, settings::Settings};
+use rust_template::{app::create_app, core::telemetry, server, settings::Settings};
 use std::process::ExitCode;
-use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
-    match run().await {
+    let settings = match Settings::from_env() {
+        Ok(settings) => settings,
+        Err(err) => {
+            eprintln!("fatal: {err:#}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
+        return match server::healthcheck(&settings).await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("unhealthy: {err:#}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    let _telemetry = match telemetry::init(&settings) {
+        Ok(guard) => guard,
+        Err(err) => {
+            eprintln!("fatal: {err:#}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match run(settings).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             tracing::error!("fatal: {err:#}");
@@ -23,8 +44,7 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn run() -> anyhow::Result<()> {
-    let settings = Settings::from_env()?;
+async fn run(settings: Settings) -> anyhow::Result<()> {
     tracing::info!(
         app_title = %settings.app_title,
         app_version = %settings.app_version,

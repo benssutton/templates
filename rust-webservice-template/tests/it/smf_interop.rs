@@ -1,6 +1,6 @@
 //! Spec §6 SMF interop: Python's SMF publisher -> the Rust AMQP consumer.
 //! Needs $SMF_PYTHON: a Python with solace-pubsubplus and pyarrow
-//! (Deviation 11). run_CICD.py sets it to its own interpreter; without it
+//! run_CICD.py sets it to its own interpreter; without it
 //! the test is skipped with a message on stderr,
 //! except under CI=true, where it fails.
 

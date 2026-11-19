@@ -1,15 +1,26 @@
-//! Python `schemas/cache.py`. `value` is any JSON value (Python's `Any`).
+//! `/cache` bodies. `value` is any JSON value.
 
+use garde::Validate;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-#[derive(Debug, Clone, PartialEq, Deserialize, ToSchema)]
+/// Longest cache key accepted (Redis allows far more; a bound keeps keys
+/// out of log-line and memory abuse).
+pub const MAX_KEY_LEN: usize = 512;
+
+#[derive(Debug, Clone, PartialEq, Deserialize, ToSchema, Validate)]
 pub struct CacheSetRequest {
+    #[schema(min_length = 1, max_length = 512)]
+    #[garde(length(min = 1, max = MAX_KEY_LEN))]
     pub key: String,
+    #[garde(skip)]
     pub value: Value,
-    /// Seconds until expiry; omitted or null means no expiry.
+    /// Seconds until expiry (at least 1; Redis `EXPIRE` with 0 or less
+    /// deletes the key at once); omitted or null means no expiry.
     #[serde(default)]
+    #[schema(minimum = 1)]
+    #[garde(range(min = 1))]
     pub ttl_seconds: Option<i64>,
 }
 
@@ -36,11 +47,37 @@ mod tests {
             value: json!("v"),
             ttl_seconds: None,
         };
-        // Python returns `"ttl_seconds": null`, not a missing field.
         assert_eq!(
             serde_json::to_value(entry).unwrap(),
             json!({"key": "k", "value": "v", "ttl_seconds": null})
         );
+    }
+
+    fn request(key: &str, ttl_seconds: Option<i64>) -> CacheSetRequest {
+        CacheSetRequest {
+            key: key.into(),
+            value: json!(1),
+            ttl_seconds,
+        }
+    }
+
+    #[test]
+    fn a_key_with_positive_or_no_ttl_is_valid() {
+        assert!(request("k", None).validate().is_ok());
+        assert!(request("k", Some(1)).validate().is_ok());
+        assert!(request(&"k".repeat(MAX_KEY_LEN), None).validate().is_ok());
+    }
+
+    #[test]
+    fn empty_or_long_keys_and_ttl_below_one_are_invalid() {
+        for bad in [
+            request("", None),
+            request(&"k".repeat(MAX_KEY_LEN + 1), None),
+            request("k", Some(0)),
+            request("k", Some(-1)),
+        ] {
+            assert!(bad.validate().is_err(), "{bad:?}");
+        }
     }
 
     #[test]

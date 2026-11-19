@@ -1,5 +1,5 @@
 # Files executed or parsed inside Linux containers (the image build runs
-# certs/generate_self_signed_cert.sh; R2/R3 mount init scripts into stores).
+# certs/generate_self_signed_cert.sh; compose mounts SQL into the stores).
 # CRLF breaks the shebang ("/bin/bash^M: bad interpreter"), so force LF
 # regardless of the developer's core.autocrlf.
 *.sh text eol=lf

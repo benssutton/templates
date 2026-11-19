@@ -1,11 +1,7 @@
-import logging
-
 from fastapi import APIRouter, Response
 
 from core.dependencies import HealthServiceDep
 from schemas.health import DetailedStatusResponse, LivenessResponse, ReadinessResponse
-
-log = logging.getLogger(__name__)
 
 TAG = "Application Health"
 TAG_METADATA = {

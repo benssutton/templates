@@ -4,9 +4,9 @@ use rust_template::app::create_app;
 use rust_template::settings::Settings;
 use std::time::{Duration, Instant};
 
-/// Spec §3 "startup failure", app half (Deviation 1): invalid config makes
+/// Startup failure, app half: invalid config makes
 /// create_app return Err with a readable message; main turns it into a
-/// non-zero exit. R2 adds the closed-store-port case.
+/// non-zero exit.
 #[tokio::test]
 async fn create_app_rejects_invalid_settings() {
     let err = create_app(Settings {
@@ -31,7 +31,7 @@ async fn create_app_rejects_invalid_settings() {
     );
 }
 
-/// Spec §3 "startup failure", store half (R1 hand-off): real Postgres and
+/// Startup failure, store half: real Postgres and
 /// Redis connect at once; ClickHouse points at a closed port. With a tiny
 /// retry budget, create_app must retry, then fail; never hang.
 #[tokio::test]

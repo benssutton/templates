@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import random
 import signal
 import threading
 from datetime import datetime, timezone
@@ -11,6 +10,7 @@ from typing import Callable
 import pyarrow as pa
 
 from core.correlation import correlation_id_var, new_id, set_correlation_id, timed
+from core.retry import jittered
 from ingestion.base import BatchConsumer, ConnectionState, Delivery
 from persistence.stream_store.lsm_store import InvalidBatchError, LSMStore
 from schemas.data import DataRowResponse, DataRowsResponse
@@ -19,24 +19,21 @@ from settings import Settings
 
 log = logging.getLogger(__name__)
 
-_INGEST_BASE_DELAY = 1.0  # seconds before first retry
-_INGEST_MAX_DELAY = 60.0  # seconds — retry cap
-_INGEST_MAX_FAILURES = 5  # consecutive deliveries() failures before shutdown
-_JOIN_TIMEOUT = 10.0  # seconds to wait for ingest thread on shutdown
+
+class BatchTooLargeError(ValueError):
+    """A decoded batch exceeds max_ingest_batch_bytes. Like InvalidBatchError,
+    retrying cannot help, so it is refused rather than redelivered."""
 
 
 class _Outcome(Enum):
-    ACCEPT = "accept"
-    FAIL = "fail"
-    REJECT = "reject"
+    # Values double as the `outcome` label of ingest_outcomes_total.
+    ACCEPT = "accepted"
+    FAIL = "failed"
+    REJECT = "rejected"
 
 
 def _default_shutdown() -> None:
     os.kill(os.getpid(), signal.SIGTERM)
-
-
-def _jittered(delay: float) -> float:
-    return delay + delay * 0.25 * random.random()
 
 
 class StreamIngestService:
@@ -57,7 +54,10 @@ class StreamIngestService:
         self._watchdog_task: asyncio.Task | None = None
         self._last_batch_at: datetime | None = None
         self._started_at: datetime = datetime.now(timezone.utc)
+        # Counters written by the ingest thread and HTTP worker threads alike.
+        self._counts_lock = threading.Lock()
         self._rows_total = 0
+        self._outcomes = {outcome.value: 0 for outcome in _Outcome}
 
     async def __aenter__(self) -> "StreamIngestService":
         self._thread = threading.Thread(target=self._ingest_loop, daemon=True)
@@ -78,55 +78,52 @@ class StreamIngestService:
         # close() may block in the SDK (receiver terminate, disconnect): off-loop.
         await asyncio.to_thread(self._consumer.close)
         if self._thread is not None:
-            await asyncio.to_thread(self._thread.join, _JOIN_TIMEOUT)
+            join_timeout = self._settings.ingest_join_timeout_seconds
+            await asyncio.to_thread(self._thread.join, join_timeout)
             if self._thread.is_alive():
                 log.error(
-                    "ingest thread did not stop within %.0fs; abandoning", _JOIN_TIMEOUT
+                    "ingest thread did not stop within %.0fs; abandoning", join_timeout
                 )
             self._thread = None
 
-    def _oversized(self, batch: pa.RecordBatch) -> bool:
-        """True (and logged) if the decoded batch exceeds max_ingest_batch_bytes.
-        Measures decoded Arrow nbytes per batch (Java measures the encoded payload)."""
+    def _check(self, batch: pa.RecordBatch) -> None:
+        """Raise BatchTooLargeError or InvalidBatchError if the batch must be
+        refused. Measures decoded Arrow nbytes (Java measures the encoded payload)."""
         max_bytes = self._settings.max_ingest_batch_bytes
         if batch.nbytes > max_bytes:
             log.error(
-                "dropping ingest batch: %d bytes exceeds max_ingest_batch_bytes (%d)",
+                "refusing ingest batch: %d bytes exceeds max_ingest_batch_bytes (%d)",
                 batch.nbytes,
                 max_bytes,
             )
-            return True
-        return False
+            raise BatchTooLargeError(
+                f"batch of {batch.nbytes} bytes exceeds the {max_bytes}-byte limit"
+            )
+        self._store.validate(batch)
 
     def _write(self, batch: pa.RecordBatch) -> None:
         self._store.ingest(batch)
         self._last_batch_at = datetime.now(timezone.utc)
-        self._rows_total += batch.num_rows
+        with self._counts_lock:
+            self._rows_total += batch.num_rows
         log.debug("ingested batch: rows=%d", batch.num_rows)
 
-    def _record_ingest(self, batch: pa.RecordBatch) -> bool:
-        """Write one batch. False = refused as oversized (logged). Raises
-        InvalidBatchError for an unmergeable batch; anything else is unexpected."""
-        if self._oversized(batch):
-            return False
-        self._write(batch)
-        return True
+    def _write_all(self, batches: list[pa.RecordBatch]) -> None:
+        """All-or-nothing for refusals: every batch is checked before any is
+        written. An unexpected write error can still leave earlier batches
+        written; a retry re-applies them, harmless under newest-wins merge."""
+        for batch in batches:
+            self._check(batch)
+        for batch in batches:
+            self._write(batch)
 
     def _decide(self, delivery: Delivery) -> _Outcome:
         """Write every batch and decide the outcome. Never settles: the caller
         settles exactly once, so a raising callback can't cause a second one."""
-        # One message may carry several batches; settle once, after all of them.
-        # All-or-nothing: validate EVERY batch (size + the store's own rules)
-        # before writing any, so a REJECTED message leaves nothing in the store.
-        # A FAILED message is redelivered whole, so batches written before an
-        # unexpected write error are re-applied - harmless under newest-wins merge.
         try:
-            for batch in delivery.batches:
-                if self._oversized(batch):
-                    return _Outcome.REJECT
-                self._store.validate(batch)
-            for batch in delivery.batches:
-                self._write(batch)
+            self._write_all(delivery.batches)
+        except BatchTooLargeError:
+            return _Outcome.REJECT  # already logged by _check
         except InvalidBatchError:
             log.exception("rejecting unmergeable message")
             return _Outcome.REJECT
@@ -138,6 +135,7 @@ class StreamIngestService:
     def _settle(self, delivery: Delivery) -> _Outcome:
         """Settle once. A raising callback propagates to the ingest loop."""
         outcome = self._decide(delivery)
+        self._count(outcome)
         if outcome is _Outcome.ACCEPT:
             delivery.accept()
         elif outcome is _Outcome.FAIL:
@@ -147,14 +145,17 @@ class StreamIngestService:
         return outcome
 
     def _ingest_loop(self) -> None:
+        base_delay = self._settings.ingest_retry_base_delay
+        max_delay = self._settings.ingest_retry_max_delay
+        max_failures = self._settings.ingest_max_consecutive_failures
         consecutive_failures = 0
-        delay = _INGEST_BASE_DELAY
+        delay = base_delay
         # Settlement backoff, separate from the transport backoff (`delay`): fail()
         # makes the broker redeliver immediately (CREATE_ON_START queues have
         # unlimited max-redelivery and no DMQ), so a persistent store error
         # would otherwise spin. This only prevents a hot loop; production
         # queues should set max-redelivery + a DMQ (see Delivery docstring).
-        settle_delay = _INGEST_BASE_DELAY
+        settle_delay = base_delay
         # ingest_max_disconnect_seconds=None disables *all* automatic shutdown:
         # the watchdog (see __aenter__) and this consecutive-failure trigger.
         shutdown_on_failure = self._settings.ingest_max_disconnect_seconds is not None
@@ -164,7 +165,7 @@ class StreamIngestService:
             # interruptions on a quiet queue would add up to a shutdown over time.
             nonlocal consecutive_failures, delay
             consecutive_failures = 0
-            delay = _INGEST_BASE_DELAY
+            delay = base_delay
 
         while True:
             try:
@@ -191,29 +192,29 @@ class StreamIngestService:
                         # are not mis-attributed to the last message's ID.
                         correlation_id_var.reset(token)
                     if outcome is _Outcome.FAIL:
-                        if self._stop.wait(_jittered(settle_delay)):
+                        if self._stop.wait(jittered(settle_delay)):
                             return  # shutting down
-                        settle_delay = min(settle_delay * 2, _INGEST_MAX_DELAY)
+                        settle_delay = min(settle_delay * 2, max_delay)
                     elif outcome is not None:
-                        settle_delay = _INGEST_BASE_DELAY
+                        settle_delay = base_delay
                 return  # deliveries() returned cleanly - consumer was closed
             except Exception:
                 consecutive_failures += 1
                 log.exception(
                     "consumer deliveries() failed (failure %d/%d)",
                     consecutive_failures,
-                    _INGEST_MAX_FAILURES,
+                    max_failures,
                 )
-                if shutdown_on_failure and consecutive_failures >= _INGEST_MAX_FAILURES:
+                if shutdown_on_failure and consecutive_failures >= max_failures:
                     log.critical(
                         "ingest: %d consecutive failures; requesting shutdown",
                         consecutive_failures,
                     )
                     self._request_shutdown()
                     return
-                if self._stop.wait(_jittered(delay)):
+                if self._stop.wait(jittered(delay)):
                     return  # shutting down
-                delay = min(delay * 2, _INGEST_MAX_DELAY)
+                delay = min(delay * 2, max_delay)
 
     async def _disconnect_watchdog(self) -> None:
         threshold = self._settings.ingest_max_disconnect_seconds
@@ -277,6 +278,25 @@ class StreamIngestService:
             rows=[DataRowResponse(**r) for r in rows], total=total, limit=limit
         )
 
-    async def ingest_batch(self, batch: pa.RecordBatch) -> None:
-        async with timed("ingest.lsm_write"):
-            await asyncio.to_thread(self._record_ingest, batch)
+    async def ingest_batches(self, batches: list[pa.RecordBatch]) -> None:
+        """Check every batch, then write them all (see _write_all). Raises
+        BatchTooLargeError or InvalidBatchError with nothing written."""
+        try:
+            async with timed("ingest.lsm_write"):
+                await asyncio.to_thread(self._write_all, batches)
+        except (BatchTooLargeError, InvalidBatchError):
+            self._count(_Outcome.REJECT)
+            raise
+        except Exception:
+            self._count(_Outcome.FAIL)
+            raise
+        self._count(_Outcome.ACCEPT)
+
+    def _count(self, outcome: _Outcome) -> None:
+        with self._counts_lock:
+            self._outcomes[outcome.value] += 1
+
+    def counts(self) -> tuple[int, dict[str, int]]:
+        """(rows ingested, outcome -> count) since start, for the metrics scrape."""
+        with self._counts_lock:
+            return self._rows_total, dict(self._outcomes)

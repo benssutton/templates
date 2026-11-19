@@ -3,6 +3,7 @@ name = "rust-template"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.94"
+publish = false
 
 [lib]
 name = "rust_template"
@@ -15,6 +16,14 @@ path = "src/main.rs"
 [[bin]]
 name = "demo-publisher"
 path = "src/bin/demo_publisher.rs"
+required-features = ["solace"]
+
+[features]
+default = []
+# Solace Guaranteed-messaging ingest over AMQP 1.0 (INGEST_TRANSPORT=solace),
+# SEMP provisioning and the compose demo publisher. Off by default: most
+# services built from this template ingest over HTTP or another broker.
+solace = ["dep:fe2o3-amqp"]
 
 [[bench]]
 name = "lsm"
@@ -38,33 +47,45 @@ clickhouse = { version = "=0.15.3", default-features = false }
 dotenvy = "=0.15.7"
 envy = "=0.4.2"
 fastrand = "=2.5.0"
-# AMQP 1.0 client for Solace (spec §6). No TLS features: plain amqp:// on the
-# private network. Its `rustls` feature would bring its own provider stack.
-fe2o3-amqp = { version = "=0.18.4", default-features = false }
+# AMQP 1.0 client for Solace. No TLS features: plain amqp:// on the private
+# network. Its `rustls` feature would bring its own provider stack.
+fe2o3-amqp = { version = "=0.18.4", default-features = false, optional = true }
+garde = { version = "=0.23.0", default-features = false, features = ["derive"] }
+# 9.x signs and verifies with ring; 10+ offers only aws-lc-rs or RustCrypto.
+jsonwebtoken = { version = "=12.0.0", default-features = false, features = ["rust_crypto"] }
 metrics = "=0.24.6"
 # default features pull an HTTP listener + push gateway (and aws-lc-rs); we only render.
 metrics-exporter-prometheus = { version = "=0.18.3", default-features = false }
+# Trace export over OTLP/HTTP, off unless OTEL_EXPORTER_OTLP_ENDPOINT is set.
+# The blocking reqwest client suits the SDK's batch processor thread.
+opentelemetry = { version = "=0.33.1", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "=0.33.1", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace"] }
+opentelemetry_sdk = { version = "=0.33.1", default-features = false, features = ["trace"] }
 # ConnectionManager reconnects by itself. RedisJSON is driven with redis::cmd
 # (JSON.SET / JSON.GET), so the `json` feature is not needed.
 redis = { version = "=1.8.1", default-features = false, features = ["tokio-comp", "connection-manager"] }
-# Variant (b): SEMP v2 provisioning at startup. rustls with the ring provider
-# that server::install_crypto_provider installs (no aws-lc).
+# SEMP v2 provisioning and the container healthcheck. rustls with the ring
+# provider that core::install_crypto_provider installs (no aws-lc).
 reqwest = { version = "=0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
 rmcp = { version = "=2.2.0", features = ["server", "transport-streamable-http-server"] }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 secrecy = { version = "=0.10.3", features = ["serde"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
-# Runtime queries only (no compile-time macros, no DATABASE_URL at build time). No TLS.
-sqlx = { version = "=0.9.0", default-features = false, features = ["runtime-tokio", "postgres"] }
+# Runtime-checked queries; `macros` only for `migrate!`, which embeds
+# migrations/postgres at compile time (no DATABASE_URL needed). No TLS.
+sqlx = { version = "=0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "migrate", "macros"] }
 sysinfo = "=0.39.6"
 thiserror = "=2.0.21"
 tokio = { version = "=1.54.1", features = ["full"] }
 tokio-util = "=0.7.20"
-tower-http = { version = "=0.6.11", features = ["cors", "limit"] }
+tower = { version = "=0.5.3", default-features = false, features = ["limit", "load-shed", "util"] }
+tower-http = { version = "=0.6.11", features = ["compression-gzip", "cors", "limit", "normalize-path", "request-id", "timeout", "trace", "util"] }
 tracing = "=0.1.44"
-tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
+tracing-opentelemetry = { version = "=0.34.0", default-features = false }
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "json"] }
 utoipa = { version = "=6.0.0", features = ["axum_extras", "chrono"] }
+utoipa-axum = "=0.3.0"
 utoipa-swagger-ui = { version = "=10.0.2", features = ["axum"] }
 uuid = { version = "=1.29.2", features = ["v4"] }
 
@@ -82,3 +103,18 @@ testcontainers = { version = "=0.27.3", default-features = false }
 testcontainers-modules = { version = "=0.15.0", default-features = false, features = ["postgres", "redis"] }
 # Paused-clock tests for the ingest backoff, watchdog and consecutive-failure paths.
 tokio = { version = "=1.54.1", features = ["full", "test-util"] }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+# Errors are values: a panic in a handler would drop the connection with no
+# response. clippy.toml allows them inside #[test] code, and the test and
+# bench crates allow them at their root.
+unwrap_used = "deny"
+expect_used = "deny"

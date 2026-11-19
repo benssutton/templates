@@ -1,25 +1,27 @@
-//! Typed configuration, mirroring python-webservice-template/settings.py
-//! (all fields except `flight_*`, same names, same defaults except the
-//! service-identity strings).
+//! Typed configuration. Every field can be overridden by the env var of the
+//! same name in upper case (`POSTGRES_URL`, `INGEST_TRANSPORT`, ...);
+//! `from_env` loads `.env` first. List fields accept a JSON array
+//! (`["a","b"]`) or comma-separated values. Optional numbers accept an empty
+//! string, `none` or `null` to mean "unset".
 //!
-//! Every field can be overridden by the env var of the same name in upper
-//! case (`POSTGRES_URL`, `INGEST_TRANSPORT`, ...). `from_env` loads `.env`
-//! first. List fields accept Python's JSON form (`["a","b"]`) or
-//! comma-separated values. Optional seconds accept an empty string, `none`
-//! or `null` to mean "disabled".
+//! Validation is declared on the fields (garde) and runs once, in
+//! `from_vars`; `Settings::validate` is the same check for settings built
+//! in code (tests), and `create_app` calls it for that reason.
 
 use axum::http::HeaderName;
-use secrecy::SecretString;
-use serde::{Deserialize, Deserializer};
+use garde::Validate;
+use secrecy::{ExposeSecret, SecretString};
+use serde::{Deserialize, Deserializer, Serialize};
 
-/// The streaming-ingest transport. Read by R3. In R1 the ingest seam is
-/// the noop default whatever this says.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+/// The streaming-ingest transport. `noop` (the default) consumes nothing;
+/// `/data/ingest` over HTTP still feeds the store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum IngestTransport {
     #[default]
-    Solace,
     Noop,
+    /// Needs the `solace` Cargo feature.
+    Solace,
 }
 
 impl IngestTransport {
@@ -31,6 +33,14 @@ impl IngestTransport {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogFormat {
+    #[default]
+    Json,
+    Text,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsError {
     #[error("invalid environment configuration: {0}")]
@@ -39,10 +49,13 @@ pub enum SettingsError {
     Invalid(String),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Validate)]
 #[serde(default)]
+#[garde(allow_unvalidated)]
 pub struct Settings {
+    #[garde(length(min = 1, max = 128))]
     pub app_title: String,
+    #[garde(length(min = 1, max = 64))]
     pub app_version: String,
     pub app_description: String,
     pub status: String,
@@ -53,63 +66,135 @@ pub struct Settings {
     pub ssl_keyfile: String,
     pub ssl_certfile: String,
 
+    /// `EnvFilter` directive, e.g. `info` or `info,rust_template=debug`.
+    #[garde(length(min = 1))]
+    pub log_level: String,
+    pub log_format: LogFormat,
+    /// OTLP/HTTP collector base URL (`http://collector:4318`). Unset = no
+    /// trace export; spans still feed the logs.
+    #[serde(deserialize_with = "optional_string")]
+    #[garde(inner(custom(http_url)))]
+    pub otel_exporter_otlp_endpoint: Option<String>,
+    #[garde(length(min = 1))]
+    pub otel_service_name: String,
+
+    #[garde(length(min = 1, max = 128))]
     pub mcp_name: String,
     pub mcp_instructions: String,
-    /// `Host` header values the /mcp endpoint accepts (DNS-rebinding
-    /// protection). An entry without a port matches any port. Must not be
-    /// empty: rmcp treats an empty list as "allow every host".
+    /// `Host` values the /mcp endpoint accepts, and the hosts whose
+    /// `http(s)://` origins it accepts (DNS-rebinding protection). An entry
+    /// without a port matches any port. Must not be empty: rmcp treats an
+    /// empty list as "allow every host".
     #[serde(deserialize_with = "string_list")]
+    #[garde(length(min = 1))]
     pub mcp_allowed_hosts: Vec<String>,
 
+    // Authentication seam: off by default. When on, every route except
+    // /health/live and /health/ready needs an HS256 bearer token.
+    pub auth_enabled: bool,
+    #[garde(custom(secret_when(self.auth_enabled)))]
+    pub auth_jwt_secret: SecretString,
+    #[serde(deserialize_with = "optional_string")]
+    pub auth_jwt_issuer: Option<String>,
+    #[serde(deserialize_with = "optional_string")]
+    pub auth_jwt_audience: Option<String>,
+
     pub postgres_url: SecretString,
+    #[garde(range(max = self.postgres_pool_max_size))]
     pub postgres_pool_min_size: u32,
+    #[garde(range(min = 1))]
     pub postgres_pool_max_size: u32,
+    /// How long a query waits for a pooled connection.
+    #[garde(custom(positive))]
+    pub postgres_acquire_timeout_seconds: f64,
+    /// Server-side `statement_timeout` for every pooled connection.
+    #[garde(custom(positive))]
+    pub postgres_statement_timeout_seconds: f64,
 
     pub clickhouse_host: String,
     pub clickhouse_port: u16,
     pub clickhouse_user: String,
     pub clickhouse_password: SecretString,
     pub clickhouse_database: String,
+    /// Client-side bound on every query (the HTTP client has none), also
+    /// sent as `max_execution_time`.
+    #[garde(custom(positive))]
+    pub clickhouse_query_timeout_seconds: f64,
 
     pub redis_url: SecretString,
+    #[garde(custom(positive))]
+    pub redis_connection_timeout_seconds: f64,
+    #[garde(custom(positive))]
+    pub redis_response_timeout_seconds: f64,
 
     /// memtable -> run threshold
+    #[garde(range(min = 1))]
     pub lsm_flush_rows: usize,
     /// run count -> compaction threshold
+    #[garde(range(min = 1))]
     pub lsm_compaction_runs: usize,
-    /// merge partition key; single extension point
+    /// Memory bound: rows held across memtable and runs. Over it, the store
+    /// compacts first and only then evicts the oldest rows.
+    #[garde(range(min = self.lsm_flush_rows))]
+    pub lsm_max_rows: usize,
+    /// Merge partition key: the single extension point for a composite key.
     #[serde(deserialize_with = "string_list")]
+    #[garde(length(min = 1))]
     pub lsm_key_columns: Vec<String>,
 
+    #[garde(custom(transport_compiled_in))]
     pub ingest_transport: IngestTransport,
 
     // Connection retry/backoff (every store and the Solace connect).
+    #[garde(range(min = 1))]
     pub connect_max_attempts: u32,
     /// seconds
+    #[garde(custom(non_negative))]
     pub connect_base_delay: f64,
     /// seconds
+    #[garde(custom(non_negative))]
     pub connect_max_delay: f64,
 
     // Observability
     pub metrics_enabled: bool,
     /// per-dependency probe timeout, seconds
+    #[garde(custom(positive))]
     pub health_check_timeout_seconds: f64,
+    /// How long probe results are reused by /health and /metrics; 0 probes
+    /// on every call.
+    #[garde(custom(non_negative))]
+    pub health_cache_ttl_seconds: f64,
     /// None = staleness never reported
     #[serde(deserialize_with = "optional_seconds")]
+    #[garde(inner(custom(positive)))]
     pub ingest_staleness_threshold_seconds: Option<f64>,
     /// stale -> 503 only if true
     pub ingest_stale_fails_readiness: bool,
     /// non-CONNECTED longer than this -> shutdown; None disables
     #[serde(deserialize_with = "optional_seconds")]
+    #[garde(inner(custom(positive)))]
     pub ingest_max_disconnect_seconds: Option<f64>,
 
-    // Inbound size limits
+    // Request handling
+    /// A request still without a response after this is answered 503.
+    #[garde(custom(positive))]
+    pub request_timeout_seconds: f64,
+    /// Requests in flight across the app; over it, new ones are shed with 503.
+    #[garde(range(min = 1))]
+    pub max_concurrent_requests: usize,
+    /// `POST /data/ingest` requests in flight; over it, shed with 503 so
+    /// decoded bodies cannot pile up behind the single LSM writer.
+    #[garde(range(min = 1))]
+    pub ingest_max_in_flight: usize,
     /// over-limit HTTP body -> 413
+    #[garde(range(min = 1))]
     pub max_request_body_bytes: usize,
-    /// over-limit decoded stream batch -> rejected/dropped + logged (R3)
+    /// over-limit decoded batch -> 413 over HTTP, rejected on the stream
+    #[garde(range(min = 1))]
     pub max_ingest_batch_bytes: usize,
 
-    /// Correlation ID header name (inbound adoption + response echo).
+    /// Request-id header name (inbound adoption + response echo).
+    #[garde(custom(header_name))]
     pub correlation_id_header: String,
 
     // CORS: permissive by default for local UI dev; tighten per deployment.
@@ -120,9 +205,10 @@ pub struct Settings {
     #[serde(deserialize_with = "string_list")]
     pub cors_allow_headers: Vec<String>,
     /// must stay false while origins contains "*"
+    #[garde(custom(credentials_need_explicit_origins(&self.cors_allow_origins)))]
     pub cors_allow_credentials: bool,
 
-    // Solace: only used when ingest_transport = solace (R3).
+    // Solace: only used when ingest_transport = solace.
     pub solace_host: String,
     pub solace_port: u16,
     pub solace_vpn: String,
@@ -135,8 +221,9 @@ pub struct Settings {
     /// the LSM store is a per-instance cache, and an exclusive queue delivers
     /// to one consumer only.
     pub solace_queue: String,
-    /// Variant (b): SEMP v2 base URL used at startup to provision
-    /// `solace_queue` and its `solace_topic` subscription (idempotent).
+    /// SEMP v2 base URL used at startup to provision `solace_queue` and its
+    /// `solace_topic` subscription (idempotent).
+    #[garde(custom(http_url))]
     pub solace_semp_url: String,
     pub solace_semp_username: String,
     pub solace_semp_password: SecretString,
@@ -151,33 +238,51 @@ impl Default for Settings {
                 .into(),
             status: "running".into(),
             server_host: "0.0.0.0".into(),
-            server_port: 443,
+            server_port: 8443,
             ssl_keyfile: "./certs/key.pem".into(),
             ssl_certfile: "./certs/cert.pem".into(),
+            log_level: "info".into(),
+            log_format: LogFormat::Json,
+            otel_exporter_otlp_endpoint: None,
+            otel_service_name: "rust-template".into(),
             mcp_name: "rust-template".into(),
             mcp_instructions: "Tools for this template application.".into(),
             mcp_allowed_hosts: vec!["localhost".into()],
+            auth_enabled: false,
+            auth_jwt_secret: SecretString::from(""),
+            auth_jwt_issuer: None,
+            auth_jwt_audience: None,
             postgres_url: SecretString::from("postgresql://appuser:password@localhost:5432/appdb"),
             postgres_pool_min_size: 2,
             postgres_pool_max_size: 10,
+            postgres_acquire_timeout_seconds: 5.0,
+            postgres_statement_timeout_seconds: 10.0,
             clickhouse_host: "localhost".into(),
             clickhouse_port: 8123,
             clickhouse_user: "default".into(),
             clickhouse_password: SecretString::from(""),
             clickhouse_database: "default".into(),
+            clickhouse_query_timeout_seconds: 10.0,
             redis_url: SecretString::from("redis://localhost:6379/0"),
+            redis_connection_timeout_seconds: 2.0,
+            redis_response_timeout_seconds: 5.0,
             lsm_flush_rows: 1000,
             lsm_compaction_runs: 4,
+            lsm_max_rows: 1_000_000,
             lsm_key_columns: vec!["id".into()],
-            ingest_transport: IngestTransport::Solace,
+            ingest_transport: IngestTransport::Noop,
             connect_max_attempts: 5,
             connect_base_delay: 1.0,
             connect_max_delay: 30.0,
             metrics_enabled: true,
             health_check_timeout_seconds: 2.0,
+            health_cache_ttl_seconds: 2.0,
             ingest_staleness_threshold_seconds: None,
             ingest_stale_fails_readiness: false,
             ingest_max_disconnect_seconds: Some(60.0),
+            request_timeout_seconds: 30.0,
+            max_concurrent_requests: 1024,
+            ingest_max_in_flight: 4,
             max_request_body_bytes: 16 * 1024 * 1024,
             max_ingest_batch_bytes: 16 * 1024 * 1024,
             correlation_id_header: "X-Request-ID".into(),
@@ -186,13 +291,12 @@ impl Default for Settings {
             cors_allow_headers: vec!["*".into()],
             cors_allow_credentials: false,
             solace_host: "localhost".into(),
-            // AMQP 1.0 plain-text listener (Deviation 3). The VPN is chosen by
+            // AMQP 1.0 plain-text listener. The message VPN is chosen by
             // this port, so `solace_vpn` is only used in SEMP paths.
             solace_port: 5672,
             solace_vpn: "default".into(),
             // Empty = SASL ANONYMOUS, the only AMQP mechanism an auth-`none`
-            // VPN offers; set a username to use SASL PLAIN. Divergence:
-            // Python defaults to admin/admin over SMF.
+            // VPN offers; set a username to use SASL PLAIN.
             solace_username: String::new(),
             solace_password: SecretString::from(""),
             solace_topic: "ingest/batches".into(),
@@ -218,97 +322,82 @@ impl Settings {
         I: IntoIterator<Item = (String, String)>,
     {
         let settings: Settings = envy::from_iter(vars)?;
-        settings.validate()?;
+        settings.check()?;
         Ok(settings)
     }
 
-    /// Cross-field and numeric-bound checks (Python's `@model_validator`
-    /// and `Field(ge=...)`). Collects every problem into one message.
-    pub fn validate(&self) -> Result<(), SettingsError> {
-        let mut problems: Vec<String> = Vec::new();
-        if self.cors_allow_credentials && self.cors_allow_origins.iter().any(|o| o == "*") {
-            problems.push(
-                "cors_allow_credentials=true is incompatible with cors_allow_origins=[\"*\"]; \
-                 specify explicit origins when enabling credentials"
-                    .into(),
-            );
-        }
-        if self.connect_max_attempts < 1 {
-            problems.push("connect_max_attempts must be >= 1".into());
-        }
-        for (name, value) in [
-            ("connect_base_delay", self.connect_base_delay),
-            ("connect_max_delay", self.connect_max_delay),
-        ] {
-            if !value.is_finite() || value < 0.0 {
-                problems.push(format!("{name} must be a finite number >= 0"));
-            }
-        }
-        if !self.health_check_timeout_seconds.is_finite()
-            || self.health_check_timeout_seconds <= 0.0
-        {
-            problems.push("health_check_timeout_seconds must be > 0".into());
-        }
-        for (name, value) in [
-            (
-                "ingest_staleness_threshold_seconds",
-                self.ingest_staleness_threshold_seconds,
-            ),
-            (
-                "ingest_max_disconnect_seconds",
-                self.ingest_max_disconnect_seconds,
-            ),
-        ] {
-            if let Some(v) = value {
-                if !v.is_finite() || v <= 0.0 {
-                    problems.push(format!("{name} must be > 0 when set"));
-                }
-            }
-        }
-        if self.postgres_pool_max_size < 1 {
-            problems.push("postgres_pool_max_size must be >= 1".into());
-        }
-        if self.postgres_pool_min_size > self.postgres_pool_max_size {
-            problems.push("postgres_pool_min_size must be <= postgres_pool_max_size".into());
-        }
-        if self.lsm_flush_rows < 1 {
-            problems.push("lsm_flush_rows must be >= 1".into());
-        }
-        if self.lsm_compaction_runs < 1 {
-            problems.push("lsm_compaction_runs must be >= 1".into());
-        }
-        if self.lsm_key_columns.is_empty() {
-            problems.push("lsm_key_columns must name at least one column".into());
-        }
-        if self.max_request_body_bytes < 1 {
-            problems.push("max_request_body_bytes must be >= 1".into());
-        }
-        if self.max_ingest_batch_bytes < 1 {
-            problems.push("max_ingest_batch_bytes must be >= 1".into());
-        }
-        if HeaderName::from_bytes(self.correlation_id_header.as_bytes()).is_err() {
-            problems.push("correlation_id_header must be a valid HTTP header name".into());
-        }
-        if !(self.solace_semp_url.starts_with("http://")
-            || self.solace_semp_url.starts_with("https://"))
-        {
-            problems.push("solace_semp_url must start with http:// or https://".into());
-        }
-        if self.mcp_allowed_hosts.is_empty() {
-            problems.push(
-                "mcp_allowed_hosts must name at least one host (an empty list would disable the /mcp DNS-rebinding protection)"
-                    .into(),
-            );
-        }
-        if problems.is_empty() {
-            Ok(())
+    /// Every rule declared on the fields; all problems in one message.
+    pub fn check(&self) -> Result<(), SettingsError> {
+        self.validate()
+            .map_err(|report| SettingsError::Invalid(report.to_string().replace('\n', "; ")))
+    }
+}
+
+fn positive(value: &f64, _: &()) -> garde::Result {
+    if value.is_finite() && *value > 0.0 {
+        Ok(())
+    } else {
+        Err(garde::Error::new("must be a finite number > 0"))
+    }
+}
+
+fn non_negative(value: &f64, _: &()) -> garde::Result {
+    if value.is_finite() && *value >= 0.0 {
+        Ok(())
+    } else {
+        Err(garde::Error::new("must be a finite number >= 0"))
+    }
+}
+
+fn http_url(value: &str, _: &()) -> garde::Result {
+    if value.starts_with("http://") || value.starts_with("https://") {
+        Ok(())
+    } else {
+        Err(garde::Error::new("must start with http:// or https://"))
+    }
+}
+
+fn header_name(value: &str, _: &()) -> garde::Result {
+    HeaderName::from_bytes(value.as_bytes())
+        .map(|_| ())
+        .map_err(|_| garde::Error::new("must be a valid HTTP header name"))
+}
+
+fn secret_when(enabled: bool) -> impl FnOnce(&SecretString, &()) -> garde::Result {
+    move |secret, _| {
+        if enabled && secret.expose_secret().is_empty() {
+            Err(garde::Error::new("must be set when auth_enabled is true"))
         } else {
-            Err(SettingsError::Invalid(problems.join("; ")))
+            Ok(())
         }
     }
 }
 
-/// `["a","b"]` (Python / pydantic-settings) or `a,b` (envy native).
+fn credentials_need_explicit_origins(
+    origins: &[String],
+) -> impl FnOnce(&bool, &()) -> garde::Result + '_ {
+    move |credentials, _| {
+        if *credentials && origins.iter().any(|o| o == "*") {
+            Err(garde::Error::new(
+                "true is incompatible with cors_allow_origins=[\"*\"]; list explicit origins",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn transport_compiled_in(transport: &IngestTransport, _: &()) -> garde::Result {
+    if *transport == IngestTransport::Solace && !cfg!(feature = "solace") {
+        Err(garde::Error::new(
+            "solace needs a build with the `solace` Cargo feature",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// `["a","b"]` (JSON) or `a,b`.
 fn string_list<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
     let raw = String::deserialize(d)?;
     let trimmed = raw.trim();
@@ -324,18 +413,26 @@ fn string_list<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error>
         .collect())
 }
 
-/// Seconds, or "" / "none" / "null" (any case) for disabled.
+fn is_unset(raw: &str) -> bool {
+    raw.is_empty() || raw.eq_ignore_ascii_case("none") || raw.eq_ignore_ascii_case("null")
+}
+
+/// Seconds, or "" / "none" / "null" (any case) for unset.
 fn optional_seconds<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
     let raw = String::deserialize(d)?;
     let trimmed = raw.trim();
-    if trimmed.is_empty()
-        || trimmed.eq_ignore_ascii_case("none")
-        || trimmed.eq_ignore_ascii_case("null")
-    {
+    if is_unset(trimmed) {
         return Ok(None);
     }
     trimmed
         .parse::<f64>()
         .map(Some)
         .map_err(|e| serde::de::Error::custom(format!("invalid seconds value {raw:?}: {e}")))
+}
+
+/// A string, or "" / "none" / "null" (any case) for unset.
+fn optional_string<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    let raw = String::deserialize(d)?;
+    let trimmed = raw.trim();
+    Ok((!is_unset(trimmed)).then(|| trimmed.to_owned()))
 }

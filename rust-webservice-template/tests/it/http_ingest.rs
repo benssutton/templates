@@ -4,8 +4,11 @@
 use crate::support::batches::{batch_without_id, make_batch, serialize_batch};
 use crate::support::logs;
 use crate::support::{app_settings, TestApp};
+use arrow::array::{ArrayRef, Int64Array, RecordBatch, StringArray};
+use rust_template::ingestion::ipc::{batch_bytes, encode_stream};
 use rust_template::settings::Settings;
 use serde_json::Value;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const ARROW_STREAM: &str = "application/vnd.apache.arrow.stream";
@@ -43,6 +46,49 @@ async fn settings() -> Settings {
         lsm_flush_rows: 2,
         lsm_compaction_runs: 2,
         ..app_settings().await
+    }
+}
+
+#[tokio::test]
+async fn ingest_accepts_both_arrow_media_types() {
+    let app = TestApp::spawn(settings().await).await;
+    for content_type in [ARROW_STREAM, "application/octet-stream"] {
+        let body = serialize_batch(&make_batch(&[(101, "http", "v1", "upsert")]));
+        let r = app
+            .client()
+            .post(app.url("/data/ingest"))
+            .header("content-type", content_type)
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 202, "{content_type}");
+        let body: Value = r.json().await.unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({"accepted": true}),
+            "{content_type}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn ingest_with_another_content_type_is_415() {
+    let app = TestApp::spawn(settings().await).await;
+    for content_type in [Some("text/plain"), Some("application/json"), None] {
+        let mut request = app
+            .client()
+            .post(app.url("/data/ingest"))
+            .body(serialize_batch(&make_batch(&[(
+                102, "http", "v1", "upsert",
+            )])));
+        if let Some(ct) = content_type {
+            request = request.header("content-type", ct);
+        }
+        let r = request.send().await.unwrap();
+        assert_eq!(r.status(), 415, "{content_type:?}");
+        let body: Value = r.json().await.unwrap();
+        assert!(body["detail"].is_string(), "{body}");
     }
 }
 
@@ -165,34 +211,66 @@ Connection: close
     );
 }
 
+/// A stream whose second batch is over `max_ingest_batch_bytes` is refused
+/// whole: 413, and the first (small) batch is not written either.
 #[tokio::test]
-async fn an_oversized_decoded_batch_is_dropped_but_accepted() {
-    let (logs, _guard) = logs::capture();
+async fn an_oversized_decoded_batch_is_413_and_nothing_is_written() {
+    let small = make_batch(&[(300, "small", "v1", "upsert")]);
+    let rows: Vec<(i64, &str, &str, &str)> =
+        (301..400).map(|id| (id, "big", "v1", "upsert")).collect();
+    let big = make_batch(&rows);
     let app = TestApp::spawn(Settings {
-        max_ingest_batch_bytes: 1,
+        max_ingest_batch_bytes: batch_bytes(&small),
         ..settings().await
     })
     .await;
-    let response = post_ipc(
-        &app,
-        serialize_batch(&make_batch(&[(300, "big", "v1", "upsert")])),
-        None,
+    let response = post_ipc(&app, encode_stream(&[small, big]).unwrap(), None).await;
+    assert_eq!(response.status(), 413);
+    let body: Value = response.json().await.unwrap();
+    assert!(
+        body["detail"]
+            .as_str()
+            .unwrap()
+            .contains("max_ingest_batch_bytes"),
+        "{body}"
+    );
+    assert_eq!(cache(&app).await["total"], 0, "no batch may be written");
+}
+
+/// A batch the read model cannot serve (no `name`/`value`, or a null in
+/// them) is refused at ingest instead of breaking every later read.
+#[tokio::test]
+async fn a_batch_the_read_model_cannot_serve_is_422_and_reads_still_work() {
+    let app = TestApp::spawn(settings().await).await;
+    let without_value = make_batch(&[(400, "x", "v", "upsert")])
+        .project(&[0, 1, 3])
+        .unwrap();
+    let response = post_ipc(&app, serialize_batch(&without_value), None).await;
+    assert_eq!(response.status(), 422);
+    let (status, body) = app.get_json("/data/cache").await;
+    assert_eq!(status, 200, "{body}");
+}
+
+/// Every batch of a stream is validated before any is written: a valid
+/// batch followed by an invalid one leaves nothing behind.
+#[tokio::test]
+async fn a_stream_with_one_invalid_batch_writes_nothing() {
+    let app = TestApp::spawn(settings().await).await;
+    let good = make_batch(&[(410, "good", "v1", "upsert")]);
+    let schema = good.schema();
+    let null_name = RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(Int64Array::from(vec![411])) as ArrayRef,
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(StringArray::from(vec!["v1"])),
+            Arc::new(StringArray::from(vec!["upsert"])),
+        ],
     )
-    .await;
-    assert_eq!(response.status(), 202, "the endpoint accepts the request");
-    assert_eq!(cache(&app).await["total"], 0, "but the batch was dropped");
-    assert!(
-        logs.contains("exceeds max_ingest_batch_bytes"),
-        "{}",
-        logs.text()
-    );
-    // Python asserts at caplog level ERROR.
-    assert!(
-        logs.line_with(&["ERROR", "exceeds max_ingest_batch_bytes"])
-            .is_some(),
-        "{}",
-        logs.text()
-    );
+    .unwrap();
+    let response = post_ipc(&app, encode_stream(&[good, null_name]).unwrap(), None).await;
+    assert_eq!(response.status(), 422);
+    assert_eq!(cache(&app).await["total"], 0);
 }
 
 /// Python test_http_ingest_propagates_request_id_to_store_write.

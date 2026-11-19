@@ -1,4 +1,4 @@
-//! [VARIANT B] SEMP v2 provisioning (spec §4 fallback): an exclusive durable
+//! SEMP v2 provisioning: an exclusive durable
 //! queue that non-owners may consume, plus its topic subscription. A 400 with
 //! `ALREADY_EXISTS` is success, so provisioning is idempotent.
 
@@ -31,7 +31,7 @@ pub fn enc(name: &str) -> String {
 
 impl SempProvisioner {
     pub fn from_settings(s: &Settings) -> anyhow::Result<Self> {
-        crate::server::install_crypto_provider(); // reqwest is built with rustls-no-provider
+        crate::core::install_crypto_provider(); // reqwest is built with rustls-no-provider
         Ok(Self {
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
@@ -65,7 +65,7 @@ impl SempProvisioner {
 
     /// The error text carries the SEMP path, the HTTP status and the broker's
     /// error object only. The password travels in the `Authorization` header,
-    /// never in a URL or a message (spec §2 "Secrets").
+    /// never in a URL or a message.
     async fn create(&self, path: &str, body: Value) -> anyhow::Result<bool> {
         let response = self
             .http

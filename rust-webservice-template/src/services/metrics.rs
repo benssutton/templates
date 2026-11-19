@@ -1,8 +1,9 @@
-//! Per-app Prometheus metrics (Python services/metrics.py). The recorder is
-//! owned by the app and used via `metrics::with_local_recorder`, never
-//! installed globally, so isolated apps in one test process cannot collide.
+//! Per-app Prometheus metrics. The recorder is owned by the app and used via
+//! `metrics::with_local_recorder`, never installed globally, so isolated
+//! apps in one test process cannot collide.
 
-use crate::schemas::health::DetailedStatusResponse;
+use crate::ingestion::ConnectionState;
+use crate::schemas::health::{DetailedStatusResponse, Status};
 use crate::services::health::HealthService;
 use crate::settings::Settings;
 use axum::{
@@ -17,9 +18,23 @@ use metrics_exporter_prometheus::{
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// Buckets (seconds) for `http_request_duration_seconds` (instrumentator's
-/// low-resolution default; `+Inf` is implicit).
-pub const HTTP_DURATION_BUCKETS: &[f64] = &[0.1, 0.5, 1.0];
+/// Buckets (seconds) for `http_request_duration_seconds`, per route: fine
+/// below 100 ms, where a healthy API answers, then coarse up to the request
+/// timeout. `+Inf` is implicit.
+pub const HTTP_DURATION_BUCKETS: &[f64] = &[
+    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0,
+];
+
+/// Buckets (bytes) for the request and response size histograms.
+pub const HTTP_SIZE_BUCKETS: &[f64] = &[
+    100.0,
+    1_000.0,
+    10_000.0,
+    100_000.0,
+    1_000_000.0,
+    10_000_000.0,
+    100_000_000.0,
+];
 
 /// Buckets (seconds) for the label-free `http_request_duration_highr_seconds`.
 pub const HTTP_DURATION_HIGHR_BUCKETS: &[f64] = &[
@@ -44,6 +59,8 @@ impl MetricsService {
                 Matcher::Full("http_request_duration_highr_seconds".to_owned()),
                 HTTP_DURATION_HIGHR_BUCKETS,
             )
+            .map_err(|e| anyhow::anyhow!("invalid prometheus buckets: {e}"))?
+            .set_buckets_for_metric(Matcher::Suffix("_size_bytes".to_owned()), HTTP_SIZE_BUCKETS)
             .map_err(|e| anyhow::anyhow!("invalid prometheus buckets: {e}"))?
             .build_recorder();
         let handle = recorder.handle();
@@ -83,18 +100,20 @@ impl MetricsService {
         self.with(|| counter!("ingest_rows_total").increment(rows));
     }
 
-    /// Python's size Summaries (no quantiles) render only `_count` and `_sum`;
-    /// the `metrics` crate has no summary type, so emit two counters.
+    /// Live rows the LSM memory bound evicted.
+    pub fn record_evicted_rows(&self, rows: u64) {
+        if rows > 0 {
+            self.with(|| counter!("lsm_evicted_rows_total").increment(rows));
+        }
+    }
+
     pub fn record_sizes(&self, handler: &str, request_bytes: u64, response_bytes: u64) {
         let handler = handler.to_owned();
         self.with(|| {
-            for (name, bytes) in [
-                ("http_request_size_bytes", request_bytes),
-                ("http_response_size_bytes", response_bytes),
-            ] {
-                counter!(format!("{name}_count"), "handler" => handler.clone()).increment(1);
-                counter!(format!("{name}_sum"), "handler" => handler.clone()).increment(bytes);
-            }
+            histogram!("http_request_size_bytes", "handler" => handler.clone())
+                .record(request_bytes as f64);
+            histogram!("http_response_size_bytes", "handler" => handler)
+                .record(response_bytes as f64);
         });
     }
 
@@ -102,13 +121,13 @@ impl MetricsService {
     pub fn refresh(&self, status: &DetailedStatusResponse) {
         self.with(|| {
             for dep in &status.dependencies {
-                let up = if dep.status == "up" { 1.0 } else { 0.0 };
+                let up = if dep.status == Status::Up { 1.0 } else { 0.0 };
                 gauge!("dependency_up", "name" => dep.name.clone()).set(up);
                 gauge!("dependency_check_latency_seconds", "name" => dep.name.clone())
                     .set(dep.latency_ms / 1000.0);
             }
             let ingest = &status.ingest;
-            for state in ["connected", "reconnecting", "down"] {
+            for state in ConnectionState::ALL {
                 let active = if ingest.connection_state == state {
                     1.0
                 } else {
@@ -116,14 +135,16 @@ impl MetricsService {
                 };
                 gauge!(
                     "ingest_connection_state",
-                    "transport" => ingest.transport.clone(),
-                    "state" => state
+                    "transport" => ingest.transport.as_str(),
+                    "state" => state.as_str()
                 )
                 .set(active);
             }
             gauge!("ingest_seconds_since_last_batch")
                 .set(ingest.seconds_since_last_batch.unwrap_or(f64::NAN));
             gauge!("ingest_rows_ingested").set(ingest.rows_ingested_total as f64);
+            gauge!("lsm_rows").set(ingest.store.rows as f64);
+            gauge!("lsm_max_rows").set(ingest.store.max_rows as f64);
 
             let (process, host) = (&status.system.process, &status.system.host);
             gauge!("process_cpu_percent").set(process.cpu_percent);
@@ -184,8 +205,8 @@ pub async fn middleware(
         response.status().as_u16(),
         started.elapsed(),
     );
-    // Python reads the Content-Length header (default 0); hyper adds it only
-    // after this layer, so fall back to the body's exact size hint.
+    // hyper adds Content-Length only after this layer, so fall back to the
+    // body's exact size hint (0 for a streamed body).
     let response_bytes = content_length(response.headers())
         .or_else(|| axum::body::HttpBody::size_hint(response.body()).exact())
         .unwrap_or(0);

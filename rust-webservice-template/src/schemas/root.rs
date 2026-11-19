@@ -1,7 +1,7 @@
 use serde::Serialize;
 use utoipa::ToSchema;
 
-/// `GET /` (Python main.py `get_root`).
+/// `GET /`. The `MCP` key is upper case in the shared contract.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct RootResponse {
     pub title: String,

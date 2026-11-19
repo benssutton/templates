@@ -1,11 +1,7 @@
-import logging
-
 from fastapi import APIRouter, HTTPException
 
 from core.dependencies import CacheServiceDep
 from schemas.cache import CacheEntry, CacheSetRequest
-
-log = logging.getLogger(__name__)
 
 TAG = "Cache"
 TAG_METADATA = {
@@ -16,7 +12,8 @@ TAG_METADATA = {
 router = APIRouter(tags=[TAG])
 
 
-@router.post("/", response_model=CacheEntry, status_code=201)
+@router.post("", response_model=CacheEntry, status_code=201)
+@router.post("/", response_model=CacheEntry, status_code=201, include_in_schema=False)
 async def set_cache(body: CacheSetRequest, cache_service: CacheServiceDep):
     return await cache_service.set(body.key, body.value, body.ttl_seconds)
 

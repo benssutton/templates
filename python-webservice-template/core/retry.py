@@ -10,10 +10,14 @@ log = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-def _backoff_delay(attempt: int, base_delay: float, max_delay: float) -> float:
-    """base_delay * 2^(attempt-1), capped at max_delay, plus up to 25% jitter."""
-    delay = min(base_delay * 2 ** (attempt - 1), max_delay)
+def jittered(delay: float) -> float:
+    """delay plus up to 25% random jitter, so replicas do not retry in lockstep."""
     return delay + delay * 0.25 * random.random()
+
+
+def backoff_delay(attempt: int, base_delay: float, max_delay: float) -> float:
+    """base_delay * 2^(attempt-1), capped at max_delay, plus jitter."""
+    return jittered(min(base_delay * 2 ** (attempt - 1), max_delay))
 
 
 def _log_retry(
@@ -50,7 +54,7 @@ async def connect_with_backoff(
             if attempt == max_attempts:
                 log.error("%s: all %d connection attempts failed", label, max_attempts)
                 raise
-            delay = _backoff_delay(attempt, base_delay, max_delay)
+            delay = backoff_delay(attempt, base_delay, max_delay)
             _log_retry(label, attempt, max_attempts, delay, exc)
             await asyncio.sleep(delay)
     # Only reachable when max_attempts < 1 (Settings enforces ge=1); makes the
@@ -85,7 +89,7 @@ def connect_with_backoff_sync(
             if attempt == max_attempts:
                 log.error("%s: all %d connection attempts failed", label, max_attempts)
                 raise
-            delay = _backoff_delay(attempt, base_delay, max_delay)
+            delay = backoff_delay(attempt, base_delay, max_delay)
             _log_retry(label, attempt, max_attempts, delay, exc)
             if wait(delay):
                 raise

@@ -1,54 +1,54 @@
 package com.example.template.config;
 
 import io.micronaut.context.annotation.ConfigurationProperties;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 
-/** Ingest/transport configuration (mirrors the Python ingest settings). */
+/**
+ * Immutable ingest/transport configuration ({@code template.ingest.*}); defaults in
+ * application.yml.
+ *
+ * @param transport {@code noop} (default: HTTP ingest only) or {@code solace}
+ * @param maxBatchBytes largest accepted batch: the encoded payload of a Solace message, the decoded
+ *     Arrow buffers of each HTTP batch
+ * @param maxDisconnectSeconds the watchdog exits the process when the transport has been
+ *     disconnected this long; 0 disables the watchdog
+ * @param maxConsecutiveFailures the ingest loop exits the process after this many transport
+ *     failures in a row without a successful bind; 0 disables it
+ * @param decoderMemoryBytes bound on direct memory held by all concurrent Arrow decodes
+ * @param retryBaseDelaySeconds first transport/settlement backoff, doubled per failure
+ * @param retryMaxDelaySeconds backoff ceiling
+ */
 @ConfigurationProperties("template.ingest")
-public class IngestSettings {
-    private String transport = "solace";
-    private long maxBatchBytes = 16L * 1024 * 1024;
-    private long maxDisconnectSeconds = 60;
-    private double stalenessThresholdSeconds = 0;
-    private Solace solace = new Solace();
+public record IngestSettings(
+        @NotNull @Pattern(regexp = "noop|solace") String transport,
+        @Positive long maxBatchBytes,
+        @PositiveOrZero long maxDisconnectSeconds,
+        @PositiveOrZero int maxConsecutiveFailures,
+        @PositiveOrZero double stalenessThresholdSeconds,
+        @Min(1) int lsmMaxRows,
+        @Positive long decoderMemoryBytes,
+        @Positive double retryBaseDelaySeconds,
+        @Positive double retryMaxDelaySeconds,
+        @NotNull @Valid Solace solace) {
 
-    public String getTransport() { return transport; }
-    public void setTransport(String v) { this.transport = v; }
-    public long getMaxBatchBytes() { return maxBatchBytes; }
-    public void setMaxBatchBytes(long v) { this.maxBatchBytes = v; }
-    public long getMaxDisconnectSeconds() { return maxDisconnectSeconds; }
-    public void setMaxDisconnectSeconds(long v) { this.maxDisconnectSeconds = v; }
-    public double getStalenessThresholdSeconds() { return stalenessThresholdSeconds; }
-    public void setStalenessThresholdSeconds(double v) { this.stalenessThresholdSeconds = v; }
-    public Solace getSolace() { return solace; }
-    public void setSolace(Solace v) { this.solace = v; }
-
+    /**
+     * @param queue durable exclusive queue the consumer binds, created on start with the topic
+     *     subscription added. One queue per replica: the LSM store is a per-instance cache.
+     */
     @ConfigurationProperties("solace")
-    public static class Solace {
-        private String host = "localhost";
-        private int port = 55555;
-        private String vpn = "default";
-        private String username = "admin";
-        private String password = "admin";
-        private String topic = "ingest/batches";
-        /**
-         * Name of the durable exclusive queue the consumer binds to. It is created on
-         * start, with the topic subscription added. One queue per replica, because the
-         * LSM store is a per-instance cache.
-         */
-        private String queue = "java-template/ingest";
-        public String getHost() { return host; }
-        public void setHost(String v) { this.host = v; }
-        public int getPort() { return port; }
-        public void setPort(int v) { this.port = v; }
-        public String getVpn() { return vpn; }
-        public void setVpn(String v) { this.vpn = v; }
-        public String getUsername() { return username; }
-        public void setUsername(String v) { this.username = v; }
-        public String getPassword() { return password; }
-        public void setPassword(String v) { this.password = v; }
-        public String getTopic() { return topic; }
-        public void setTopic(String v) { this.topic = v; }
-        public String getQueue() { return queue; }
-        public void setQueue(String v) { this.queue = v; }
-    }
+    public record Solace(
+            @NotBlank String host,
+            @Min(1) @Max(65535) int port,
+            @NotBlank String vpn,
+            @NotBlank String username,
+            @NotNull String password,
+            @NotBlank String topic,
+            @NotBlank String queue) {}
 }

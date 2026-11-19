@@ -88,7 +88,7 @@ async def test_ingest_health_tracks_freshness_after_ingest():
     assert before.last_batch_at is None
     assert before.rows_ingested_total == 0
 
-    await svc.ingest_batch(make_batch([(1, "a", "v1", "upsert")]))
+    await svc.ingest_batches([make_batch([(1, "a", "v1", "upsert")])])
     after = await svc.health_check()
     assert after.rows_ingested_total == 1
     assert after.last_batch_at is not None

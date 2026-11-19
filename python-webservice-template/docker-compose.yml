@@ -1,5 +1,9 @@
 name: python-template
 
+# `docker compose up -d --build --wait` needs no host-side step: the one-shot
+# `certs` service writes a self-signed dev certificate into the `certs` volume,
+# which the app mounts read-only, so no key material is baked into the image.
+
 services:
   db:
     image: pgvector/pgvector:0.8.4-pg18
@@ -18,13 +22,15 @@ services:
       retries: 10
 
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:26.8.40.7
     ports:
       - "8123:8123"
     environment:
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
-      - ./scripts/clickhouse-init.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      # The app applies migrations itself at startup; the schema is also run here
+      # so the seed script (performance-test data) has a table to load into.
+      - ./migrations/clickhouse/001_create_items.sql:/docker-entrypoint-initdb.d/01-schema.sql
       - ./tests/performance/data/clickhouse-seed.sh:/docker-entrypoint-initdb.d/02-seed.sh
       - ./tests/test_data/clickhouse_seed_data.ipc:/tmp/clickhouse_seed_data.ipc
     healthcheck:
@@ -34,7 +40,7 @@ services:
       retries: 10
 
   redis:
-    image: redis/redis-stack-server:latest
+    image: redis/redis-stack-server:7.4.0-v8
     ports:
       - "6379:6379"
     healthcheck:
@@ -77,6 +83,13 @@ services:
     # The broker's health check reports active before the message VPN accepts
     # clients, and this demo publisher doesn't retry its connect: restart it.
     restart: on-failure
+    # The image's HEALTHCHECK probes the app's HTTPS port, which this container
+    # does not serve; without this, `compose up --wait` reports it unhealthy.
+    healthcheck:
+      disable: true
+    volumes:
+      # The image ships no tests; the demo publisher runs them from the checkout.
+      - ./tests:/app/tests:ro
     environment:
       # Running a script puts its own folder on sys.path; the `tests.` imports
       # need the project root.
@@ -92,17 +105,36 @@ services:
       solace:
         condition: service_healthy
 
+  # One-shot: writes the dev key/cert only if absent. Runs as root because a new
+  # named volume is root-owned; the files are handed to the app user (uid 10001).
+  certs:
+    image: python:3.12.16-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+    volumes:
+      - certs:/certs
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        test -s /certs/key.pem && test -s /certs/cert.pem ||
+        (openssl req -x509 -newkey rsa:4096 -nodes -days 365 -subj /CN=localhost
+        -addext subjectAltName=DNS:localhost,DNS:app,IP:127.0.0.1
+        -keyout /certs/key.pem -out /certs/cert.pem &&
+        chown 10001:10001 /certs/key.pem /certs/cert.pem && chmod 600 /certs/key.pem)
+
   app:
     build: .
     ports:
-      # HTTPS on the default port, matching `python main.py` (Settings.server_port=443).
-      - "443:443"
+      # The container listens on 8443 (Dockerfile); the host keeps the default HTTPS port.
+      - "443:8443"
+    volumes:
+      - certs:/app/certs:ro
     environment:
       POSTGRES_URL: postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-appdb}
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"
       REDIS_URL: redis://redis:6379/0
-      INGEST_TRANSPORT: ${INGEST_TRANSPORT:-solace}
+      # The demo stack streams from Solace; the application default is noop.
+      INGEST_TRANSPORT: solace
       SOLACE_HOST: solace
       SOLACE_PORT: "55555"
       SOLACE_VPN: default
@@ -110,7 +142,13 @@ services:
       SOLACE_PASSWORD: admin
       SOLACE_TOPIC: "ingest/batches"
       SOLACE_QUEUE: python-template/ingest
+      # /mcp Host allow-list: the published port (localhost, 127.0.0.1) and the
+      # compose service name (app), as other containers (k6) address it. JSON
+      # array or comma-separated.
+      MCP_ALLOWED_HOSTS: localhost,127.0.0.1,app
     depends_on:
+      certs:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       clickhouse:
@@ -119,21 +157,11 @@ services:
         condition: service_healthy
       solace:
         condition: service_healthy
-      # Solace is a required dependency (default transport): even with
-      # INGEST_TRANSPORT=noop, `up app` starts the broker and waits for it.
-      # For HTTP-only ingest without a broker, skip the dependency:
-      #   docker compose up -d db clickhouse redis && INGEST_TRANSPORT=noop docker compose up -d --no-deps app
-    healthcheck:
-      # HTTPS with an unverified context — the cert is self-signed (dev only).
-      test: ["CMD-SHELL", "python -c \"import ssl, urllib.request; urllib.request.urlopen('https://localhost/health/live', context=ssl._create_unverified_context())\""]
-      interval: 5s
-      timeout: 10s
-      retries: 12
-      start_period: 15s
+    # Health check: the image's HEALTHCHECK (GET /health/live on 8443).
 
   prometheus:
     profiles: [observability]
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.8.0
     ports:
       - "9090:9090"
     volumes:
@@ -144,7 +172,7 @@ services:
 
   grafana:
     profiles: [observability]
-    image: grafana/grafana:latest
+    image: grafana/grafana:12.3.0
     ports:
       - "3000:3000"
     environment:
@@ -158,3 +186,4 @@ services:
 
 volumes:
   postgres_data:
+  certs:

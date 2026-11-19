@@ -1,9 +1,31 @@
 use async_trait::async_trait;
-use rust_template::health::ingest::{IngestHealthProvider, NoopIngestHealth};
+use rust_template::health::ingest::IngestHealthProvider;
 use rust_template::health::probe::{HealthProbe, ProbeError};
 use rust_template::health::registry::ProbeRegistry;
+use rust_template::ingestion::ConnectionState;
+use rust_template::schemas::health::{IngestHealth, ProbeFailure, Status};
+use rust_template::settings::IngestTransport;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// Ingest health of an idle noop transport: always connected, never ingests.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoopIngestHealth;
+
+impl IngestHealthProvider for NoopIngestHealth {
+    fn ingest_health(&self) -> IngestHealth {
+        IngestHealth {
+            transport: IngestTransport::Noop,
+            connection_state: ConnectionState::Connected,
+            thread_alive: true,
+            last_batch_at: None,
+            seconds_since_last_batch: None,
+            rows_ingested_total: 0,
+            stale: false,
+            store: Default::default(),
+        }
+    }
+}
 
 pub struct StaticProbe {
     pub name: &'static str,
@@ -53,12 +75,9 @@ async fn results_keep_registration_order_and_shapes() {
     let results = registry.run_all(Duration::from_secs(1)).await;
     let names: Vec<_> = results.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(names, ["postgres", "redis", "clickhouse"]);
-    assert_eq!(
-        (results[0].status.as_str(), results[0].error.as_deref()),
-        ("up", None)
-    );
-    assert_eq!(results[1].status, "down");
-    assert_eq!(results[1].error.as_deref(), Some("unavailable")); // never the raw detail
+    assert_eq!((results[0].status, results[0].error), (Status::Up, None));
+    assert_eq!(results[1].status, Status::Down);
+    assert_eq!(results[1].error, Some(ProbeFailure::Unavailable)); // never the raw detail
     assert_eq!(results[1].latency_ms, 0.0);
 }
 
@@ -77,20 +96,10 @@ async fn slow_probe_times_out_and_probes_run_concurrently() {
         started.elapsed()
     );
     for r in &results {
-        assert_eq!(r.status, "down");
-        assert_eq!(r.error.as_deref(), Some("timeout"));
+        assert_eq!(r.status, Status::Down);
+        assert_eq!(r.error, Some(ProbeFailure::Timeout));
         assert_eq!(r.latency_ms, 200.0);
     }
-}
-
-#[test]
-fn noop_ingest_health_reports_connected_noop() {
-    let h = NoopIngestHealth.ingest_health();
-    assert_eq!(h.transport, "noop");
-    assert_eq!(h.connection_state, "connected");
-    assert!(h.thread_alive);
-    assert_eq!(h.rows_ingested_total, 0);
-    assert!(h.last_batch_at.is_none() && h.seconds_since_last_batch.is_none() && !h.stale);
 }
 
 pub struct PanicProbe;
@@ -110,8 +119,8 @@ async fn panicking_probe_fails_closed() {
     let registry = ProbeRegistry::new(vec![probe("ok", Ok(()), 0), Arc::new(PanicProbe)]);
     let results = registry.run_all(Duration::from_secs(1)).await;
     assert_eq!(results.len(), 2);
-    assert_eq!(results[0].status, "up");
+    assert_eq!(results[0].status, Status::Up);
     assert_eq!(results[1].name, "panicky");
-    assert_eq!(results[1].status, "down");
-    assert_eq!(results[1].error.as_deref(), Some("unavailable"));
+    assert_eq!(results[1].status, Status::Down);
+    assert_eq!(results[1].error, Some(ProbeFailure::Unavailable));
 }

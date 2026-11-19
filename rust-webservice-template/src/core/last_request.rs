@@ -1,4 +1,4 @@
-//! Last-request tracker (Python: `container.last_request_at` set by the
+//! Last-request tracker, reported by `/health/status` (set by the
 //! `_track_last_request` middleware). Lock-free: unix micros in an atomic.
 
 use axum::{extract::Request, extract::State, middleware::Next, response::Response};

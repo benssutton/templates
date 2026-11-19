@@ -1,6 +1,6 @@
-//! Stores (Python `persistence/`). Each store connects through
-//! `core::retry::connect_with_backoff`, is smoke-tested inside that retry,
-//! and implements `HealthProbe` (registered only after it connected).
+//! Stores. Each store connects through `core::retry::connect_with_backoff`,
+//! is smoke-tested inside that retry, and implements `HealthProbe`
+//! (registered only after it connected).
 
 pub mod analytics_store;
 pub mod cache_store;
@@ -23,10 +23,11 @@ pub struct Stores {
 }
 
 impl Stores {
-    /// Connect all three concurrently (spec §5). The first store to exhaust
-    /// its retry budget aborts startup; `try_join!` then drops (cancels) the
-    /// other attempts. Afterwards, apply the Postgres schema. A store that
-    /// had already connected when startup aborts is closed, not leaked.
+    /// Connect all three concurrently. The first store to exhaust its retry
+    /// budget aborts startup; `try_join!` then drops (cancels) the other
+    /// attempts. Afterwards, apply the Postgres and ClickHouse migrations. A
+    /// store that had already connected when startup aborts is closed, not
+    /// leaked.
     pub async fn connect(settings: &Settings) -> anyhow::Result<Self> {
         // `try_join!` discards the stores that finished before a sibling
         // failed, so the Postgres pool (the only one needing an explicit
@@ -54,7 +55,7 @@ impl Stores {
                 return Err(err);
             }
         };
-        if let Err(err) = postgres.init_schema().await {
+        if let Err(err) = tokio::try_join!(postgres.migrate(), clickhouse.migrate()) {
             postgres.close().await;
             return Err(err);
         }
@@ -66,7 +67,7 @@ impl Stores {
         })
     }
 
-    /// One readiness probe per store, in Python's order (`services/health.py`).
+    /// One readiness probe per store.
     pub fn probes(&self) -> Vec<Arc<dyn HealthProbe>> {
         vec![
             Arc::new(self.postgres.clone()) as Arc<dyn HealthProbe>,
@@ -75,7 +76,7 @@ impl Stores {
         ]
     }
 
-    /// The last step of the shutdown order (spec §2): close the Postgres
+    /// The last step of the shutdown order: close the Postgres
     /// pool. The ClickHouse HTTP client and the Redis connection close
     /// when they are dropped.
     pub async fn close(&self) {

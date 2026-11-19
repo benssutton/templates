@@ -2,7 +2,7 @@ use axum::{routing::get, Router};
 use rust_template::{core::cors, settings::Settings};
 
 /// A preflight carries Starlette's default `Access-Control-Max-Age: 600`.
-/// (Task 13 covers the rest of CORS through the real app.)
+/// (The other CORS tests below go through the real app.)
 #[tokio::test]
 async fn preflight_includes_max_age_600() {
     let router: Router = Router::new()

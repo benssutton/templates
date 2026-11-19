@@ -11,3 +11,7 @@ class DataRowsResponse(BaseModel):
     rows: list[DataRowResponse]
     total: int
     limit: int
+
+
+class IngestAccepted(BaseModel):
+    accepted: bool = True

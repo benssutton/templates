@@ -1,8 +1,9 @@
 #!/bin/sh
-# Compose one-shot: idempotent SEMP v2 broker setup (spec §4 fallback).
-# ENABLE_AMQP=true    -> PATCH the VPN so AMQP plain text listens on 5672 (spike Q1).
+# Compose one-shot: idempotent SEMP v2 broker setup.
+# ENABLE_AMQP=true    -> PATCH the VPN so AMQP plain text listens on 5672
+#                         (the default VPN already does on 10.26).
 # PROVISION_QUEUE=true -> exclusive durable SOLACE_QUEUE + SOLACE_TOPIC subscription
-#                         (variant (b); the app provisions the same at startup).
+#                         (the app provisions the same at startup).
 # ALREADY_EXISTS counts as success, so re-running is harmless.
 set -eu
 SEMP="${SEMP_URL:-http://solace:8080}/SEMP/v2/config/msgVpns/${SOLACE_VPN:-default}"

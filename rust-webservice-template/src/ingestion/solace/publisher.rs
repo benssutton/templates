@@ -1,7 +1,6 @@
-//! Persistent AMQP publisher to a topic: the tests' publisher (spec §6
-//! Tests) and the compose demo publisher (Deviation 10). Python's
-//! SolacePublisher waits for the broker's ack; here `send` returns the
-//! broker's disposition and only `accepted` counts.
+//! Persistent AMQP publisher to a topic: the tests' publisher and the
+//! compose demo publisher. `send` returns the broker's disposition and only
+//! `accepted` counts as published.
 
 use super::amqp::{self, AmqpTarget, ATTACH_TIMEOUT, TEARDOWN_TIMEOUT};
 use crate::ingestion::ipc::encode_stream;
@@ -24,7 +23,6 @@ pub struct AmqpPublisher {
 }
 
 impl AmqpPublisher {
-    /// [SPIKE-VERIFY] `Sender::attach(&mut session, name, address)`.
     pub async fn connect(target: &AmqpTarget, topic: &str) -> anyhow::Result<Self> {
         let (connection, mut session) = amqp::open(target, amqp::container_id("publisher")).await?;
         let address = amqp::topic_address(topic);
@@ -54,8 +52,7 @@ impl AmqpPublisher {
 
     /// A persistent (durable header) message with ONE data section. Returns
     /// once the broker has accepted it, i.e. spooled it on every queue whose
-    /// subscription matches the topic. [SPIKE-VERIFY] `Message::builder()
-    /// .header(..).data(Binary)`, `Sender::send -> Outcome`.
+    /// subscription matches the topic.
     pub async fn publish_bytes(&mut self, payload: Vec<u8>) -> anyhow::Result<()> {
         let message = Message::builder()
             .header(Header::builder().durable(true).build())
@@ -74,7 +71,7 @@ impl AmqpPublisher {
         }
     }
 
-    /// One batch as one Arrow IPC stream message (Python `publish_batch`).
+    /// One batch as one Arrow IPC stream message.
     pub async fn publish_batch(&mut self, batch: &RecordBatch) -> anyhow::Result<()> {
         self.publish_bytes(encode_stream(std::slice::from_ref(batch))?)
             .await

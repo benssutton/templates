@@ -6,7 +6,9 @@ pub mod batches;
 pub mod containers;
 pub mod gated_store;
 pub mod logs;
+#[cfg(feature = "solace")]
 pub mod semp;
+#[cfg(feature = "solace")]
 pub mod solace;
 
 use rust_template::app::{create_app, App};
@@ -78,7 +80,7 @@ pub async fn poll_ready(app: &TestApp, expected: u16, timeout: Duration) -> serd
 /// reqwest client for tests. `rustls-no-provider` needs a process-wide
 /// rustls provider before any client is built (installing twice is a no-op).
 pub fn client() -> reqwest::Client {
-    server::install_crypto_provider();
+    rust_template::core::install_crypto_provider();
     reqwest::Client::builder()
         .tls_danger_accept_invalid_certs(true) // self-signed dev cert (TLS test)
         .build()

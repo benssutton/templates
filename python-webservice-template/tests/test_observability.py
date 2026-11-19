@@ -9,6 +9,7 @@ from testcontainers.redis import RedisContainer
 
 from settings import Settings
 from tests.app_client import lifespan_test_client
+from tests.support.images import CH_IMAGE, REDIS_IMAGE
 from tests.publishers.batches import make_batch
 from tests.support.settings import app_settings
 from tests.support.solace import broker_paused, wait_for_queue
@@ -16,8 +17,6 @@ from tests.support.wait import check, poll_cache, poll_json, poll_ready
 
 pytestmark = pytest.mark.observability
 
-REDIS_IMAGE = "redis/redis-stack-server:latest"
-CH_IMAGE = "clickhouse/clickhouse-server:latest"
 BATCHES = [
     make_batch([(1, "a", "v1", "upsert"), (2, "b", "v1", "upsert")]),
     make_batch([(3, "c", "v1", "upsert")]),
@@ -85,7 +84,7 @@ async def test_metrics_endpoint_exposes_series(
             "dependency_up",
             "ingest_connection_state",
             "ingest_seconds_since_last_batch",
-            "process_memory_rss_bytes",
+            "app_process_memory_rss_bytes",
         ):
             assert series in resp.text
 
@@ -117,7 +116,7 @@ async def test_idle_ingest_is_stale_but_ready():
     """Connected-but-idle ingest reports stale=True without failing readiness
     when ingest_stale_fails_readiness=False. Transport-agnostic: an idle
     in-process consumer, no broker needed."""
-    from core.container import Container
+    from core.last_request import LastRequest
     from ingestion.base import ConnectionState
     from persistence.stream_store.lsm_store import LSMStore
     from services.health import HealthService
@@ -152,12 +151,12 @@ async def test_idle_ingest_is_stale_but_ready():
     assert health2.connection_state == "connected"
     assert health2.stale is True
 
-    container = Container(settings)
-    container.register_singleton(StreamIngestService, svc)
-    readiness = await HealthService(settings, container).readiness()
+    readiness = await HealthService(
+        settings, pings={}, ingest=svc, last_request=LastRequest()
+    ).readiness()
     ingest_check = next(c for c in readiness.checks if c.name == "ingest")
     assert ingest_check.status == "up"
-    assert readiness.status == "not_ready"  # deps not available, but ingest is up
+    assert readiness.status == "ready"  # stale alone does not fail readiness
 
 
 async def test_dependency_down_fails_readiness(
@@ -237,7 +236,13 @@ async def test_postgres_health_check_exception_logs_and_returns_generic_error(
     postgres_container, caplog
 ):
     import asyncpg
+
+    from core.last_request import LastRequest
+    from ingestion.noop.client import NoopBatchConsumer
+    from persistence.stream_store.lsm_store import LSMStore
     from services.config import ConfigService
+    from services.health import HealthService
+    from services.stream_ingest import StreamIngestService
 
     pg = postgres_container
     pool = await asyncpg.create_pool(
@@ -246,9 +251,17 @@ async def test_postgres_health_check_exception_logs_and_returns_generic_error(
         max_size=1,
     )
     await pool.close()  # closed pool -> acquire() raises InterfaceError
-    svc = ConfigService(pool)
-    with caplog.at_level(logging.ERROR, logger="services.config"):
-        result = await svc.health_check()
+    settings = Settings(ingest_transport="noop")
+    health = HealthService(
+        settings,
+        pings={"postgres": ConfigService(pool).ping},
+        ingest=StreamIngestService(
+            NoopBatchConsumer(settings), LSMStore(100, 4), settings
+        ),
+        last_request=LastRequest(),
+    )
+    with caplog.at_level(logging.ERROR, logger="services.health"):
+        [result] = await health.dependencies()
     assert result.status == "down"
     assert result.error == "unavailable"
     assert "postgres health check failed" in caplog.text

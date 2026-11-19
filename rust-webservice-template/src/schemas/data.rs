@@ -1,6 +1,6 @@
-//! Python `schemas/data.py`, plus the `?limit=` rule of `routers/data.py`.
+//! `/data` bodies and the `?limit=` rule.
 
-use crate::error::AppError;
+use garde::Validate;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
@@ -21,33 +21,25 @@ pub struct DataRowsResponse {
     pub limit: u32,
 }
 
-/// `POST /data/ingest` 202 body (Python returns `{"accepted": True}`).
+/// `POST /data/ingest` 202 body.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 pub struct IngestAccepted {
     pub accepted: bool,
 }
 
-/// `?limit=`: FastAPI's `Query(default=10, ge=1, le=100)`.
-#[derive(Debug, Clone, Copy, Default, Deserialize, IntoParams)]
+/// `?limit=`: 1 to 100, default 10.
+#[derive(Debug, Clone, Copy, Default, Deserialize, IntoParams, Validate)]
 #[into_params(parameter_in = Query)]
 pub struct LimitQuery {
     /// Rows to return: 1 to 100, default 10.
     #[param(minimum = 1, maximum = 100)]
-    pub limit: Option<i64>,
+    #[garde(range(min = 1, max = MAX_LIMIT))]
+    pub limit: Option<u32>,
 }
 
 impl LimitQuery {
-    /// The validated limit, or 422 (FastAPI rejects out-of-range values with 422).
-    pub fn resolve(self) -> Result<u32, AppError> {
-        let limit = self.limit.unwrap_or(i64::from(DEFAULT_LIMIT));
-        u32::try_from(limit)
-            .ok()
-            .filter(|l| (1..=MAX_LIMIT).contains(l))
-            .ok_or_else(|| {
-                AppError::Unprocessable(format!(
-                    "limit must be between 1 and {MAX_LIMIT}, got {limit}"
-                ))
-            })
+    pub fn get(self) -> u32 {
+        self.limit.unwrap_or(DEFAULT_LIMIT)
     }
 }
 
@@ -57,27 +49,22 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn limit_defaults_to_10() {
-        assert_eq!(LimitQuery { limit: None }.resolve().unwrap(), 10);
-    }
-
-    #[test]
-    fn limit_accepts_1_to_100() {
-        assert_eq!(LimitQuery { limit: Some(1) }.resolve().unwrap(), 1);
-        assert_eq!(LimitQuery { limit: Some(100) }.resolve().unwrap(), 100);
-    }
-
-    #[test]
-    fn limit_outside_1_to_100_is_unprocessable() {
-        for bad in [0, -1, 101, i64::MAX] {
-            let err = LimitQuery { limit: Some(bad) }.resolve().unwrap_err();
-            assert!(matches!(err, AppError::Unprocessable(_)), "{bad}: {err:?}");
-            assert!(err.to_string().contains("between 1 and 100"), "{err}");
+    fn limit_defaults_to_10_and_accepts_1_to_100() {
+        assert_eq!(LimitQuery { limit: None }.get(), 10);
+        for ok in [1, 100] {
+            assert!(LimitQuery { limit: Some(ok) }.validate().is_ok());
         }
     }
 
     #[test]
-    fn rows_response_has_python_shape() {
+    fn limit_outside_1_to_100_is_invalid() {
+        for bad in [0, 101, u32::MAX] {
+            assert!(LimitQuery { limit: Some(bad) }.validate().is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn rows_response_shape() {
         let body = DataRowsResponse {
             rows: vec![DataRowResponse {
                 id: 0,

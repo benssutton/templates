@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
-# Multi-stage: cargo-chef caches the dependency build; the runtime is a slim
-# Debian image with a non-root user and curl for the compose healthcheck.
+# Multi-stage: cargo-chef caches the dependency build; the runtime is
+# distroless (glibc, CA certificates, no shell, no package manager). The
+# container healthcheck is the binary itself (`rust-template healthcheck`).
+# No TLS key is baked in: compose mounts one (see the `dev-certs` service).
 
 FROM rust:1.96-trixie AS chef
 RUN cargo install cargo-chef --locked --version 0.1.78
@@ -10,6 +12,16 @@ FROM chef AS planner
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
+# One-shot dev certificate generator for compose: writes a self-signed pair
+# into /certs unless one is already there. The rust image ships openssl.
+# It runs as the app's uid: Docker seeds a new named volume from this image's
+# /certs, ownership included, so the app (also uid 10001) owns the key.
+FROM chef AS dev-certs
+COPY certs/generate_self_signed_cert.sh /generate_self_signed_cert.sh
+RUN mkdir /certs && chown 10001:10001 /certs
+USER 10001
+ENTRYPOINT ["bash", "-c", "[ -s /certs/key.pem ] || { bash /generate_self_signed_cert.sh /certs && chmod 0600 /certs/key.pem; }"]
+
 FROM chef AS builder
 # Profiling builds (docker-compose.profiling.yml) pass
 # RUSTFLAGS="-C force-frame-pointers=yes" so perf can walk whole stacks.
@@ -17,24 +29,20 @@ FROM chef AS builder
 # so the dependency layer is built with the same flags.
 ARG RUSTFLAGS=""
 ENV RUSTFLAGS=${RUSTFLAGS}
+# The image carries the Solace transport and the demo publisher, so one
+# image serves every compose service; INGEST_TRANSPORT still defaults to noop.
+ARG CARGO_FEATURES="solace"
 COPY --from=planner /build/recipe.json recipe.json
-RUN cargo chef cook --release --locked --recipe-path recipe.json
+RUN cargo chef cook --release --locked --features "${CARGO_FEATURES}" --recipe-path recipe.json
 COPY . .
-RUN cargo build --release --locked --bins
-# Self-signed dev cert for HTTPS on 443 (openssl ships with the rust image).
-RUN bash certs/generate_self_signed_cert.sh /build/certs
+RUN cargo build --release --locked --features "${CARGO_FEATURES}" --bins
 
-FROM debian:trixie-slim AS runtime
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl \
- && rm -rf /var/lib/apt/lists/*
-RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin app
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cb87acc574abe719b6e5c547384defa2f7b1f24af9605d3f618cf852495d8be2 AS runtime
 WORKDIR /app
 COPY --from=builder /build/target/release/rust-template /app/rust-template
 COPY --from=builder /build/target/release/demo-publisher /app/demo-publisher
-COPY --from=builder --chown=10001:10001 /build/certs/key.pem /build/certs/cert.pem /app/certs/
-# Non-root can bind 443: Docker sets net.ipv4.ip_unprivileged_port_start=0
-# inside containers (Docker >= 20.10).
-USER 10001
-EXPOSE 443
+USER 10001:10001
+EXPOSE 8443
+HEALTHCHECK --interval=5s --timeout=5s --retries=12 --start-period=10s \
+  CMD ["/app/rust-template", "healthcheck"]
 CMD ["/app/rust-template"]

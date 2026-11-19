@@ -1,0 +1,11 @@
+<configuration>
+  <!-- Tests log as text: readable in surefire output. -->
+  <appender name="text" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} %-5level [%X{correlationId:-}] [%thread] %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
+  <root level="${LOG_LEVEL:-INFO}">
+    <appender-ref ref="text"/>
+  </root>
+</configuration>

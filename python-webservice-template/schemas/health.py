@@ -1,24 +1,24 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
-
-class HealthStatusResponse(BaseModel):
-    status: str
+DependencyStatus = Literal["up", "down"]
+ConnectionStateName = Literal["connected", "reconnecting", "down"]
 
 
 class ProbeResult(BaseModel):
     """Result of a single dependency health probe."""
 
     name: str
-    status: str  # "up" | "down"
+    status: DependencyStatus
     latency_ms: float
     error: str | None = None
 
 
 class IngestHealth(BaseModel):
     transport: str
-    connection_state: str  # "connected" | "reconnecting" | "down"
+    connection_state: ConnectionStateName
     thread_alive: bool
     last_batch_at: datetime | None = None
     seconds_since_last_batch: float | None = None
@@ -35,10 +35,10 @@ class CheckResult(BaseModel):
     """
 
     name: str
-    status: str
+    status: DependencyStatus
     latency_ms: float | None = None
     transport: str | None = None
-    connection_state: str | None = None
+    connection_state: ConnectionStateName | None = None
     thread_alive: bool | None = None
     last_batch_at: datetime | None = None
     seconds_since_last_batch: float | None = None
@@ -46,12 +46,12 @@ class CheckResult(BaseModel):
 
 
 class LivenessResponse(BaseModel):
-    status: str = "alive"
+    status: Literal["alive"] = "alive"
     uptime_seconds: float
 
 
 class ReadinessResponse(BaseModel):
-    status: str  # "ready" | "not_ready"
+    status: Literal["ready", "not_ready"]
     checks: list[CheckResult]
 
 

@@ -11,6 +11,7 @@ from pydantic import SecretStr
 from settings import Settings
 from persistence.analytics_store.clickhouse.clickhouse_client import ClickHouseClient
 from tests.app_client import lifespan_test_client
+from tests.support.images import CH_IMAGE, PG_IMAGE, REDIS_IMAGE
 from tests.publishers.solace_publisher import SolacePublisher
 from tests.support.semp import Semp
 from tests.support.settings import (
@@ -25,11 +26,6 @@ from tests.support.solace import (
     wait_for_solace_messaging,
     wait_for_solace_ready,
 )
-
-PG_IMAGE = "pgvector/pgvector:0.8.4-pg18"
-CH_IMAGE = "clickhouse/clickhouse-server:latest"
-REDIS_IMAGE = "redis/redis-stack-server:latest"
-
 
 # ── ClickHouse fixtures ────────────────────────────────────────────────────
 
@@ -50,11 +46,8 @@ async def test_clickhouse_client(clickhouse_container):
         clickhouse_password=SecretStr(clickhouse_container.password or ""),
         clickhouse_database="default",
     )
-    schema_sql = (
-        Path(__file__).parent.parent / "scripts" / "clickhouse-init.sql"
-    ).read_text()
+    # ClickHouseClient applies migrations/clickhouse on entry, as the app does.
     async with ClickHouseClient(ch_settings) as client:
-        await client.command(schema_sql)
         with pa_ipc.open_file(
             Path(__file__).parent / "test_data" / "clickhouse_seed_data.ipc"
         ) as reader:

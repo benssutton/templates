@@ -9,12 +9,12 @@ fn vars(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
 }
 
 #[test]
-fn defaults_match_python_except_service_identity() {
+fn defaults() {
     let s = Settings::default();
     assert_eq!(s.app_title, "Rust Template Service");
     assert_eq!(s.status, "running");
     assert_eq!(s.server_host, "0.0.0.0");
-    assert_eq!(s.server_port, 443);
+    assert_eq!(s.server_port, 8443);
     assert_eq!(s.ssl_keyfile, "./certs/key.pem");
     assert_eq!(s.ssl_certfile, "./certs/cert.pem");
     assert_eq!(s.mcp_name, "rust-template");
@@ -33,7 +33,11 @@ fn defaults_match_python_except_service_identity() {
     assert_eq!(s.redis_url.expose_secret(), "redis://localhost:6379/0");
     assert_eq!((s.lsm_flush_rows, s.lsm_compaction_runs), (1000, 4));
     assert_eq!(s.lsm_key_columns, vec!["id".to_string()]);
-    assert_eq!(s.ingest_transport, IngestTransport::Solace);
+    assert_eq!(s.ingest_transport, IngestTransport::Noop);
+    assert!(!s.auth_enabled);
+    assert_eq!(s.lsm_max_rows, 1_000_000);
+    assert_eq!(s.request_timeout_seconds, 30.0);
+    assert_eq!(s.health_cache_ttl_seconds, 2.0);
     assert_eq!(s.connect_max_attempts, 5);
     assert_eq!((s.connect_base_delay, s.connect_max_delay), (1.0, 30.0));
     assert!(s.metrics_enabled);
@@ -46,9 +50,9 @@ fn defaults_match_python_except_service_identity() {
     assert_eq!(s.correlation_id_header, "X-Request-ID");
     assert_eq!(s.cors_allow_origins, vec!["*".to_string()]);
     assert!(!s.cors_allow_credentials);
-    // Deviation 3: AMQP 1.0 plain text, not SMF (55555).
+    // AMQP 1.0 plain text, not SMF (55555).
     assert_eq!((s.solace_host.as_str(), s.solace_port), ("localhost", 5672));
-    // SASL rule (Task 0): an empty username selects SASL ANONYMOUS, the only
+    // SASL rule: an empty username selects SASL ANONYMOUS, the only
     // mechanism an auth-`none` VPN offers over AMQP. Python defaults to
     // admin/admin, which SMF accepts on such a VPN but AMQP does not.
     assert_eq!(s.solace_username, "");
@@ -59,7 +63,7 @@ fn defaults_match_python_except_service_identity() {
     assert_eq!(s.solace_semp_url, "http://localhost:8080");
     assert_eq!(s.solace_semp_username, "admin");
     assert_eq!(s.solace_semp_password.expose_secret(), "admin");
-    assert!(s.validate().is_ok());
+    assert!(s.check().is_ok());
 }
 
 #[test]
@@ -230,7 +234,7 @@ fn secrets_stay_out_of_errors() {
         connect_max_attempts: 0,
         ..Settings::default()
     };
-    let err = s.validate().unwrap_err();
+    let err = s.check().unwrap_err();
     assert_no_sentinel(&err, &err.to_string());
 }
 

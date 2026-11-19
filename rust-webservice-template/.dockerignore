@@ -2,7 +2,7 @@ target/
 lcov.info
 .env
 .envrc
-# The image mints its own cert (see Dockerfile); never ship a dev key in the context.
+# Never ship a dev key in the build context: compose mounts one at run time.
 certs/*.pem
 tests/performance/
 *.md

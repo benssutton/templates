@@ -1,4 +1,4 @@
-FROM grafana/k6:latest
+FROM grafana/k6:2.4.0
 # k6 runs as the non-root 'k6' user (uid/gid 12345). Own the scripts dir so
 # handleSummary can write attribution.json next to the scripts (otherwise the
 # root-owned WORKDIR denies the write).

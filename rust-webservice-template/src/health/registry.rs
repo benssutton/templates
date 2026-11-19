@@ -1,5 +1,5 @@
 use super::probe::HealthProbe;
-use crate::schemas::health::ProbeResult;
+use crate::schemas::health::{ProbeFailure, ProbeResult, Status};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::task::JoinSet;
@@ -32,7 +32,7 @@ impl ProbeRegistry {
         let mut task_index = std::collections::HashMap::new();
         for (index, probe) in self.probes.iter().cloned().enumerate() {
             let name = probe.name().to_owned();
-            // Carry the caller's span (correlation_id) into the spawned task.
+            // Carry the caller's span (request_id) into the spawned task.
             let handle = set.spawn(
                 async move { (index, run_one(probe, timeout).await) }
                     .instrument(tracing::Span::current()),
@@ -51,9 +51,9 @@ impl ProbeRegistry {
                             index,
                             ProbeResult {
                                 name,
-                                status: "down".into(),
+                                status: Status::Down,
                                 latency_ms: 0.0,
-                                error: Some("unavailable".into()),
+                                error: Some(ProbeFailure::Unavailable),
                             },
                         ));
                     }
@@ -75,7 +75,7 @@ async fn run_one(probe: Arc<dyn HealthProbe>, timeout: Duration) -> ProbeResult 
     match tokio::time::timeout(timeout, probe.check()).await {
         Ok(Ok(())) => ProbeResult {
             name,
-            status: "up".into(),
+            status: Status::Up,
             latency_ms: round2(started.elapsed().as_secs_f64() * 1000.0),
             error: None,
         },
@@ -83,16 +83,16 @@ async fn run_one(probe: Arc<dyn HealthProbe>, timeout: Duration) -> ProbeResult 
             tracing::error!(probe = %name, error = %err, "health check failed");
             ProbeResult {
                 name,
-                status: "down".into(),
+                status: Status::Down,
                 latency_ms: 0.0,
-                error: Some("unavailable".into()),
+                error: Some(ProbeFailure::Unavailable),
             }
         }
         Err(_) => ProbeResult {
             name,
-            status: "down".into(),
+            status: Status::Down,
             latency_ms: round2(timeout.as_secs_f64() * 1000.0),
-            error: Some("timeout".into()),
+            error: Some(ProbeFailure::Timeout),
         },
     }
 }

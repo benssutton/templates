@@ -1,9 +1,9 @@
-"""The Rust k6 suite is Python's, byte for byte.
+"""The Java and Rust k6 suites are Python's, byte for byte.
 
-Spec (rust parity §2): the Python k6 scripts must run unchanged against Rust
-apart from BASE_URL (passed with -e by cicd/steps/images.py) and the compose
-network (cicd/services.py). If a Python script changes, copy it to Rust in the
-same change, or this test fails.
+The k6 scripts, including the shared HTTP contract (contract.js), run unchanged
+against every service apart from BASE_URL (passed with -e by
+cicd/steps/images.py) and the compose network (cicd/services.py). If a Python
+script changes, copy it to Java and Rust in the same change, or this test fails.
 """
 
 from pathlib import Path
@@ -12,10 +12,14 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 PYTHON = ROOT / "python-webservice-template" / "tests" / "performance"
-RUST = ROOT / "rust-webservice-template" / "tests" / "performance"
+COPIES = {
+    "java": ROOT / "java-webservice-template" / "tests" / "performance",
+    "rust": ROOT / "rust-webservice-template" / "tests" / "performance",
+}
 
 SHARED = [
     "Dockerfile",
+    "contract.js",
     "lib/checks.js",
     "lib/serverTiming.js",
     "lib/thresholds.js",
@@ -31,19 +35,20 @@ SHARED = [
 ]
 
 
+@pytest.mark.parametrize("service", sorted(COPIES))
 @pytest.mark.parametrize("name", SHARED)
-def test_rust_k6_file_is_pythons(name: str) -> None:
-    rust, python = RUST / name, PYTHON / name
+def test_k6_file_is_pythons(service: str, name: str) -> None:
+    copy, python = COPIES[service] / name, PYTHON / name
     assert python.is_file(), f"reference file vanished: {python.relative_to(ROOT)}"
-    assert rust.is_file(), f"missing {rust.relative_to(ROOT)} (copy it from Python)"
-    # Compare as git stores them: a Windows checkout with core.autocrlf gives
-    # Python's copy CRLF on disk while Rust's .gitattributes pins LF. Binary
-    # fixtures (.ipc) are compared exactly.
-    rust_bytes, python_bytes = rust.read_bytes(), python.read_bytes()
+    assert copy.is_file(), f"missing {copy.relative_to(ROOT)} (copy it from Python)"
+    # Compare as git stores them: a Windows checkout with core.autocrlf gives a
+    # copy CRLF on disk where a .gitattributes pins LF. Binary fixtures (.ipc)
+    # are compared exactly.
+    copy_bytes, python_bytes = copy.read_bytes(), python.read_bytes()
     if not name.endswith(".ipc"):
-        rust_bytes = rust_bytes.replace(b"\r\n", b"\n")
+        copy_bytes = copy_bytes.replace(b"\r\n", b"\n")
         python_bytes = python_bytes.replace(b"\r\n", b"\n")
-    assert rust_bytes == python_bytes, f"{name} differs from Python's copy"
+    assert copy_bytes == python_bytes, f"{service}: {name} differs from Python's copy"
 
 
 def test_every_python_k6_script_is_shared_or_deliberately_skipped() -> None:
@@ -62,4 +67,6 @@ def test_every_python_k6_script_is_shared_or_deliberately_skipped() -> None:
         if p.is_file() and "__pycache__" not in p.parts and "artifacts" not in p.parts
     }
     unaccounted = found - set(SHARED) - python_only
-    assert not unaccounted, f"new Python k6 files to copy to Rust or list as Python-only: {unaccounted}"
+    assert not unaccounted, (
+        f"new Python k6 files to copy to Java and Rust or list as Python-only: {unaccounted}"
+    )

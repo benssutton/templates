@@ -1,69 +1,87 @@
 package com.example.template.ingestion;
 
-import com.example.template.persistence.streamstore.LsmRow;
-import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.vector.BigIntVector;
-import org.apache.arrow.vector.VarCharVector;
-import org.apache.arrow.vector.VectorSchemaRoot;
-import org.apache.arrow.vector.ipc.ArrowStreamWriter;
-import org.apache.arrow.vector.types.pojo.ArrowType;
-import org.apache.arrow.vector.types.pojo.Field;
-import org.apache.arrow.vector.types.pojo.FieldType;
-import org.apache.arrow.vector.types.pojo.Schema;
-import org.junit.jupiter.api.Test;
+import static com.example.template.support.ArrowBatches.row;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.io.ByteArrayOutputStream;
-import java.nio.channels.Channels;
+import com.example.template.persistence.streamstore.LsmRow;
+import com.example.template.support.ArrowBatches;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-
-import static org.assertj.core.api.Assertions.assertThat;
+import org.apache.arrow.memory.OutOfMemoryException;
+import org.junit.jupiter.api.Test;
 
 class ArrowDecoderTest {
 
-    @Test
-    void decodesIpcBytesToRows() throws Exception {
-        byte[] ipc;
-        try (RootAllocator allocator = new RootAllocator()) {
-            Schema schema = new Schema(List.of(
-                new Field("id", FieldType.notNullable(new ArrowType.Int(64, true)), null),
-                new Field("name", FieldType.notNullable(new ArrowType.Utf8()), null),
-                new Field("value", FieldType.notNullable(new ArrowType.Utf8()), null),
-                new Field("op", FieldType.notNullable(new ArrowType.Utf8()), null)));
-            try (VectorSchemaRoot root = VectorSchemaRoot.create(schema, allocator)) {
-                BigIntVector id = (BigIntVector) root.getVector("id");
-                VarCharVector name = (VarCharVector) root.getVector("name");
-                VarCharVector value = (VarCharVector) root.getVector("value");
-                VarCharVector op = (VarCharVector) root.getVector("op");
-                id.allocateNew(2);
-                name.allocateNew();
-                value.allocateNew();
-                op.allocateNew();
-                id.set(0, 1);
-                name.setSafe(0, "a".getBytes(StandardCharsets.UTF_8));
-                value.setSafe(0, "x".getBytes(StandardCharsets.UTF_8));
-                op.setSafe(0, "insert".getBytes(StandardCharsets.UTF_8));
-                id.set(1, 2);
-                name.setSafe(1, "b".getBytes(StandardCharsets.UTF_8));
-                value.setSafe(1, "y".getBytes(StandardCharsets.UTF_8));
-                op.setSafe(1, "delete".getBytes(StandardCharsets.UTF_8));
-                root.setRowCount(2);
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                try (ArrowStreamWriter w = new ArrowStreamWriter(root, null, Channels.newChannel(out))) {
-                    w.start();
-                    w.writeBatch();
-                    w.end();
-                }
-                ipc = out.toByteArray();
-            }
-        }
+    private static final long MIB = 1024 * 1024;
 
-        List<LsmRow> rows;
-        try (ArrowDecoder decoder = new ArrowDecoder()) {
-            rows = decoder.decodeAll(ipc);
+    @Test
+    void decodesIpcBytesToRows() {
+        byte[] ipc =
+                ArrowBatches.encode(
+                        List.of(
+                                new LsmRow(1, "a", "x", 0, "upsert"),
+                                new LsmRow(2, null, "y", 0, "delete")));
+        try (ArrowDecoder decoder = new ArrowDecoder(MIB, 16 * MIB)) {
+            List<LsmRow> rows = decoder.decodeAll(ipc);
+            assertThat(rows).extracting(LsmRow::id).containsExactly(1L, 2L);
+            assertThat(rows).extracting(LsmRow::op).containsExactly("upsert", "delete");
+            assertThat(rows.get(1).name()).isNull();
+            assertThat(rows.get(1).value()).isEqualTo("y");
+            assertThat(decoder.allocatedBytes()).as("buffers released").isZero();
         }
-        assertThat(rows).extracting(LsmRow::id).containsExactly(1L, 2L);
-        assertThat(rows).extracting(LsmRow::op).containsExactly("insert", "delete");
-        assertThat(rows.get(1).value()).isEqualTo("y");
+    }
+
+    @Test
+    void emptyOrGarbageBytesAreUnreadable() {
+        try (ArrowDecoder decoder = new ArrowDecoder(MIB, 16 * MIB)) {
+            for (byte[] bad :
+                    List.of(new byte[0], "not arrow ipc".getBytes(StandardCharsets.UTF_8))) {
+                assertThatThrownBy(() -> decoder.decodeAll(bad))
+                        .isInstanceOf(MalformedBatchException.Unreadable.class);
+            }
+            assertThat(decoder.allocatedBytes()).isZero();
+        }
+    }
+
+    @Test
+    void unknownOpIsInvalid() {
+        try (ArrowDecoder decoder = new ArrowDecoder(MIB, 16 * MIB)) {
+            assertThatThrownBy(
+                            () -> decoder.decodeAll(ArrowBatches.encode(List.of(row(1, "insert")))))
+                    .isInstanceOf(MalformedBatchException.Invalid.class)
+                    .hasMessageContaining("op");
+        }
+    }
+
+    /** Any batch of the stream over the limit fails the whole stream, before rows are returned. */
+    @Test
+    void batchOverMaxBatchBytesIsTooLarge() {
+        byte[] ipc =
+                ArrowBatches.encodeBatches(
+                        List.of(
+                                List.of(row(1, "upsert")),
+                                java.util.stream.LongStream.range(0, 2000)
+                                        .mapToObj(i -> row(i, "upsert"))
+                                        .toList()));
+        try (ArrowDecoder decoder = new ArrowDecoder(4096, 16 * MIB)) {
+            assertThatThrownBy(() -> decoder.decodeAll(ipc))
+                    .isInstanceOf(MalformedBatchException.TooLarge.class);
+            assertThat(decoder.allocatedBytes()).isZero();
+        }
+    }
+
+    /** The shared allocator is bounded: decoding beyond it fails instead of exhausting memory. */
+    @Test
+    void sharedAllocatorIsBounded() {
+        byte[] ipc =
+                ArrowBatches.encode(
+                        java.util.stream.LongStream.range(0, 2000)
+                                .mapToObj(i -> row(i, "upsert"))
+                                .toList());
+        try (ArrowDecoder decoder = new ArrowDecoder(MIB, 1024)) {
+            assertThatThrownBy(() -> decoder.decodeAll(ipc))
+                    .isInstanceOf(OutOfMemoryException.class);
+        }
     }
 }

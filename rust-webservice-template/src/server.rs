@@ -1,10 +1,13 @@
 //! Serving over plain HTTP (tests, local-dev override) or rustls HTTPS
-//! (default: 443 + ./certs/*.pem, Python's self-signed pattern), with
-//! graceful shutdown driven by the app's `Shutdown` handle.
+//! (default: 8443 + ./certs/*.pem), with graceful shutdown driven by the
+//! app's `Shutdown` handle.
 
 use crate::app::App;
+use crate::core::install_crypto_provider;
 use crate::settings::Settings;
 use anyhow::Context;
+use axum::http::Request;
+use axum::ServiceExt;
 use axum_server::{tls_rustls::RustlsConfig, Handle};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -12,12 +15,6 @@ use std::time::Duration;
 
 /// How long in-flight requests get to finish once shutdown starts.
 pub const DRAIN_GRACE: Duration = Duration::from_secs(10);
-
-/// rustls needs one process-wide crypto provider (Deviation 4: ring).
-/// Safe to call repeatedly.
-pub fn install_crypto_provider() {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tls {
@@ -61,9 +58,9 @@ pub async fn serve(listener: std::net::TcpListener, app: App, tls: Tls) -> anyho
         drain.graceful_shutdown(Some(DRAIN_GRACE));
     });
 
-    let service = app.router.clone().into_make_service();
-    // Every exit, including early setup errors, must reach `app.close()`
-    // (which releases the store pools from R2 on).
+    let service = ServiceExt::<Request<_>>::into_make_service(app.service());
+    // Every exit, including early setup errors, must reach `app.close()`,
+    // which releases the store pools.
     let served: anyhow::Result<()> = async {
         match tls {
             Tls::Disabled => {
@@ -99,4 +96,35 @@ pub async fn serve(listener: std::net::TcpListener, app: App, tls: Tls) -> anyho
     .await;
     app.close().await;
     served
+}
+
+/// `rust-template healthcheck`: GET `/health/live` on this container's own
+/// listener, for a container healthcheck in an image without curl. Exits
+/// non-zero unless the answer is 2xx. Certificate checks are skipped: the
+/// target is this process's own loopback listener, nothing read back is
+/// trusted beyond the status code, and a real deployment certificate would not
+/// name 127.0.0.1, so verifying it would make the check fail in production.
+pub async fn healthcheck(settings: &Settings) -> anyhow::Result<()> {
+    install_crypto_provider();
+    let scheme = match Tls::from_settings(settings) {
+        Tls::Disabled => "http",
+        Tls::Pem { .. } => "https",
+    };
+    let url = format!("{scheme}://127.0.0.1:{}/health/live", settings.server_port);
+    // nosemgrep: rust.lang.security.reqwest-accept-invalid.reqwest-accept-invalid -- loopback self-probe, see the doc comment
+    let response = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .timeout(Duration::from_secs(3))
+        .build()
+        .context("building the healthcheck client")?
+        .get(&url)
+        .send()
+        .await
+        .with_context(|| format!("GET {url}"))?;
+    anyhow::ensure!(
+        response.status().is_success(),
+        "GET {url} answered {}",
+        response.status()
+    );
+    Ok(())
 }

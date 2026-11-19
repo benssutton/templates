@@ -7,15 +7,15 @@ use secrecy::SecretString;
 use std::time::{Duration, Instant};
 
 #[tokio::test]
-async fn connects_runs_the_schema_and_answers_the_probe() {
+async fn connects_runs_the_migrations_and_answers_the_probe() {
     let store = PostgresStore::connect(&app_settings().await)
         .await
         .expect("connect");
-    store.init_schema().await.expect("schema");
+    store.migrate().await.expect("migrations");
     store
-        .init_schema()
+        .migrate()
         .await
-        .expect("the schema script is idempotent");
+        .expect("an applied migration is not run again");
     let tables: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM information_schema.tables WHERE table_name = 'configuration'",
     )
@@ -27,14 +27,14 @@ async fn connects_runs_the_schema_and_answers_the_probe() {
     store.check().await.expect("probe is up");
 }
 
-/// Spec §5 `test_pgvector_extension_present`: guards against a revert to a
+/// Guards against a revert to a
 /// non-pgvector image (CREATE EXTENSION would fail there and abort startup).
 #[tokio::test]
 async fn pgvector_extension_present() {
     let store = PostgresStore::connect(&app_settings().await)
         .await
         .expect("connect");
-    store.init_schema().await.expect("schema");
+    store.migrate().await.expect("migrations");
     let version: Option<String> =
         sqlx::query_scalar("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
             .fetch_optional(store.pool())
@@ -48,7 +48,7 @@ async fn pgvector_extension_present() {
 
 /// Python `test_postgres_health_check_exception_logs_and_returns_generic_error`:
 /// a closed pool makes the probe fail. The registry turns the detail into
-/// "unavailable" for clients (R1 Task 8).
+/// "unavailable" for clients.
 #[tokio::test]
 async fn probe_fails_once_the_pool_is_closed() {
     let store = PostgresStore::connect(&app_settings().await)

@@ -1,20 +1,18 @@
-//! Stream store (Python `persistence/stream_store/`): the in-memory LSM that
-//! backs `/data/cache`. `StreamIngestService` writes through the
-//! `StreamStore` trait. That trait is a real seam (spec §6 Tests): the
-//! store-error test supplies a store whose write always fails, as the Python
-//! plan's raising `LSMStore` subclass does, with no patching.
+//! Stream store: the in-memory LSM that backs `/data/cache`.
+//! `StreamIngestService` writes through the `StreamStore` trait, a real
+//! seam: tests supply a store whose write fails or blocks, with no patching.
 
 pub mod lsm;
 
+use crate::schemas::health::StreamStoreStats;
 use arrow::array::RecordBatch;
 use arrow::error::ArrowError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
-    /// Python's `InvalidBatchError`: the batch can never be merged (a
-    /// missing key or `op` column, or a schema that conflicts with the
-    /// store). Retrying cannot succeed, so transports reject it and never
-    /// redeliver it; HTTP answers 422.
+    /// The batch can never be merged (a missing key or `op` column, or a
+    /// schema that conflicts with the store). Retrying cannot succeed, so
+    /// transports reject it and never redeliver it; HTTP answers 422.
     #[error("{0}")]
     InvalidBatch(String),
     /// Anything else. It may be transient, so a transport fails the delivery
@@ -40,20 +38,25 @@ pub struct QueryResult {
 
 #[async_trait::async_trait]
 pub trait StreamStore: Send + Sync + 'static {
-    /// Write one batch. Implementations serialise concurrent callers: there
-    /// is a single logical writer (spec §6, "Concurrency").
-    async fn ingest(&self, batch: RecordBatch) -> Result<(), StoreError>;
+    /// Write one batch; returns how many live rows a memory bound evicted to
+    /// make room. Implementations serialise concurrent callers: there is a
+    /// single logical writer.
+    async fn ingest(&self, batch: RecordBatch) -> Result<u64, StoreError>;
 
-    /// Check a whole message before writing any of it (Python
-    /// `LSMStore.validate`): every batch in order, by the rules `ingest`
-    /// applies, against the store's fixed schema or, if none is fixed yet,
-    /// the first non-empty batch of the slice. Returns the first
-    /// `InvalidBatch`. Synchronous, no side effects; `ingest` still checks
-    /// its own batch, and may still refuse a batch if a concurrent write
-    /// fixed the schema in between.
+    /// Check a whole message before writing any of it: every batch in order,
+    /// by the rules `ingest` applies, against the store's fixed schema or, if
+    /// none is fixed yet, the first non-empty batch of the slice. Returns the
+    /// first `InvalidBatch`. Synchronous, no side effects; `ingest` still
+    /// checks its own batch, and may still refuse a batch if a concurrent
+    /// write fixed the schema in between.
     fn validate(&self, batches: &[RecordBatch]) -> Result<(), StoreError>;
 
     /// Lock-free read of the latest snapshot. It is CPU-bound, so async
     /// callers run it with `spawn_blocking`.
     fn query(&self, limit: usize) -> Result<QueryResult, StoreError>;
+
+    /// Size and eviction counters, for health and metrics. Cheap, no I/O.
+    fn stats(&self) -> StreamStoreStats {
+        StreamStoreStats::default()
+    }
 }

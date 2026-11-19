@@ -1,4 +1,4 @@
-//! Business logic (Python `services/`). Concrete structs held in `Arc`.
+//! Business logic. Concrete structs held in `Arc`.
 
 pub mod cache;
 pub mod config;

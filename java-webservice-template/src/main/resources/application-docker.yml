@@ -2,7 +2,7 @@ micronaut:
   server:
     ssl:
       enabled: true
-      port: 443
+      port: 8443   # published as 443 by compose
       key-store:
         path: file:/app/certs/keystore.p12
         type: PKCS12

@@ -11,7 +11,7 @@ use crate::support::solace::{
 };
 use arrow::array::AsArray;
 use arrow::datatypes::Int64Type;
-use rust_template::ingestion::solace::{provision, SolaceBatchConsumer, RECONNECT_INTERVAL};
+use rust_template::ingestion::solace::{SolaceBatchConsumer, RECONNECT_INTERVAL};
 use rust_template::ingestion::{BatchConsumer, ConnectionState, Delivery};
 use rust_template::settings::Settings;
 use std::sync::Arc;
@@ -133,7 +133,7 @@ async fn fail_redelivers_the_message_marked_redelivered() {
     let again = delivered(spawn_next(&c)).await;
     assert!(
         again.redelivered,
-        "D5: delivery-count incremented by modified(delivery_failed)"
+        "delivery-count incremented by modified(delivery_failed)"
     );
     assert_eq!(first_id(&again), 1);
     again.settle.accept().await.unwrap();
@@ -192,7 +192,7 @@ async fn a_malformed_payload_is_rejected_by_the_consumer_and_never_handed_out() 
     assert_eq!(
         semp.queue_stats(&names.queue).await.unwrap().redelivered,
         0,
-        "D8"
+        "the broker counted the redelivery"
     );
     assert!(
         logs.contains("WARN") && logs.contains("malformed IPC message rejected"),
@@ -206,20 +206,15 @@ async fn a_malformed_payload_is_rejected_by_the_consumer_and_never_handed_out() 
 #[tokio::test]
 async fn close_before_the_first_delivery_returns_none_promptly() {
     let lease = containers::solace().await;
-    let semp = Semp::new(&lease.endpoints.semp_url());
     let names = SolaceNames::new();
     let c = consumer(&consumer_settings(&lease.endpoints, &names)).await;
     c.close().await;
     let started = Instant::now();
     assert!(c.next_delivery().await.unwrap().is_none());
     assert!(started.elapsed() < Duration::from_secs(5));
-    if provision::SELF_PROVISIONING {
-        // Variant (a): no attach ever happened, so no queue was created.
-        assert!(!semp.queue_exists(&names.queue).await.unwrap());
-    }
 }
 
-/// Spec §6 "Queue bind denied" at the consumer level (Deviation 8): a queue
+/// Queue bind denied, at the consumer level: a queue
 /// the client may not consume from refuses the attach (UnauthorizedAccess,
 /// "403 Permission Not Allowed"). The error is returned and the link is torn
 /// down (the next call reopens it); the transport was never lost, so the
@@ -229,8 +224,8 @@ async fn a_denied_bind_is_an_error_and_the_link_is_torn_down() {
     let lease = containers::solace().await;
     let semp = Semp::new(&lease.endpoints.semp_url());
     let names = SolaceNames::new();
-    // Deviation 8: owner-less no-access queue; we bind anonymously as
-    // `default`, a non-owner. [SPIKE-VERIFY] fallback owner: Some("nobody").
+    // An owner-less no-access queue; we bind anonymously as `default`, a
+    // non-owner.
     semp.create_queue(&names.queue, "no-access", None)
         .await
         .unwrap();
