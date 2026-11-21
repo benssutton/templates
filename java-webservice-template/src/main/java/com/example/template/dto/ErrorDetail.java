@@ -2,6 +2,6 @@ package com.example.template.dto;
 
 import io.micronaut.serde.annotation.Serdeable;
 
-/** Error body {@code {"detail": ...}}, the shape FastAPI and the Rust template return. */
+/** Error body {@code {"detail": ...}}. */
 @Serdeable
 public record ErrorDetail(String detail) {}

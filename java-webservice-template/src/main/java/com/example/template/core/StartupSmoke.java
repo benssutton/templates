@@ -13,9 +13,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Fail-fast startup smoke-test (mirrors the Python eager smoke-test). Retries each dependency probe
- * with backoff and aborts boot if any stays down. Disabled under the test environment so per-test
- * containers are not gated by it.
+ * Fail-fast startup smoke-test: retries each dependency probe with backoff and aborts boot if any
+ * stays down. Disabled under the test environment so per-test containers are not gated by it.
  */
 @Singleton
 @Requires(notEnv = Environment.TEST)

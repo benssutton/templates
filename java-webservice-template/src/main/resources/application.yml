@@ -17,8 +17,8 @@ micronaut:
     graceful-shutdown:
       enabled: true
       grace-period: ${SHUTDOWN_GRACE_PERIOD:20s}
-  # Wire contract shared with the Python and Rust templates: snake_case fields, nulls
-  # and empty lists written out (the serde default NON_EMPTY would drop "rows": []).
+  # Wire format: snake_case fields; nulls and empty lists written out
+  # (the serde default NON_EMPTY would drop "rows": []).
   serde:
     property-naming-strategy: SNAKE_CASE
     serialization:
@@ -46,7 +46,7 @@ micronaut:
     token:
       jwt:
         claims-validators:
-          # Python and Rust accept tokens without sub; iss/aud come from EnvContract.
+          # A validly signed token without sub is accepted; iss/aud come from EnvContract.
           subject-not-null: false
         signatures:
           secret:
@@ -103,7 +103,7 @@ template:
     jwt-secret: ${AUTH_JWT_SECRET:}
   app-title: ${APP_TITLE:Template Micronaut Service}
   app-version: ${APP_VERSION:1.0.0}
-  app-description: ${APP_DESCRIPTION:A Java Micronaut service mirroring the Python webservice template}
+  app-description: ${APP_DESCRIPTION:A Java Micronaut service template}
   status: "running"
   correlation-id-header: ${CORRELATION_ID_HEADER:X-Request-ID}
   health-check-timeout-seconds: ${HEALTH_CHECK_TIMEOUT_SECONDS:2.0}

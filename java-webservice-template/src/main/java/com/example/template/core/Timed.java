@@ -4,9 +4,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * try-with-resources boundary timer; mirrors the Python {@code core.correlation.timed()}. Logs the
- * duration (stamped with the correlation id via MDC) and records it as a Server-Timing sample for
- * the current request.
+ * try-with-resources boundary timer. Logs the duration (stamped with the correlation id via MDC)
+ * and records it as a Server-Timing sample for the current request.
  */
 public final class Timed implements AutoCloseable {
 

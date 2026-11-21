@@ -58,7 +58,7 @@ class DataControllerTest extends IntegrationSupport {
         assertThat(r.rows()).extracting(DataRow::id).containsExactly(1L, 2L);
     }
 
-    /** FastAPI/Rust parity: an out-of-range limit is 422 {"detail": ...}, not Micronaut's 400. */
+    /** An out-of-range limit is 422 {"detail": ...}, not Micronaut's 400. */
     @ParameterizedTest
     @ValueSource(strings = {"0", "101"})
     void limitOutOfRangeIs422(String limit) {

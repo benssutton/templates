@@ -8,7 +8,7 @@ import com.example.template.persistence.analyticsstore.clickhouse.ItemRepository
 import jakarta.inject.Singleton;
 import java.util.List;
 
-/** ClickHouse analytics reads (mirrors Python services/data.py) with Server-Timing boundaries. */
+/** ClickHouse analytics reads with Server-Timing boundaries. */
 @Singleton
 public class DataService {
 

@@ -5,7 +5,7 @@ import io.micronaut.http.annotation.RequestFilter;
 import io.micronaut.http.annotation.ServerFilter;
 import io.micronaut.http.filter.ServerFilterPhase;
 
-/** Records the time of each inbound request (mirrors the Python _track_last_request middleware). */
+/** Records the time of each inbound request. */
 @ServerFilter("/**")
 public class LastRequestFilter implements Ordered {
 

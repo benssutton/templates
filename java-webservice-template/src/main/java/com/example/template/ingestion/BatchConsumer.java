@@ -4,8 +4,7 @@ import java.util.function.Consumer;
 
 /**
  * Synchronous interface run on the dedicated ingest thread. {@code consume()} blocks, delivering
- * deliveries to the sink until {@code close()} unblocks it. Mirrors the Python ingestion/base.py
- * BatchConsumer protocol.
+ * deliveries to the sink until {@code close()} unblocks it.
  */
 public interface BatchConsumer extends AutoCloseable {
 

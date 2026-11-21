@@ -14,7 +14,7 @@ import io.micronaut.scheduling.annotation.ExecuteOn;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
-/** Mirrors Python routers/health.py: liveness, readiness (503 when not ready), detailed status. */
+/** Liveness, readiness (503 when not ready) and detailed status. */
 @Controller("/health")
 @Tag(name = "health")
 @ExecuteOn(TaskExecutors.BLOCKING)

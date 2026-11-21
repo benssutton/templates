@@ -13,7 +13,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 
 /**
  * Serves the Prometheus scrape at /metrics (the built-in /prometheus endpoint is disabled). Absent
- * when {@code METRICS_ENABLED=false}, as in the Python template: /metrics is then a 404.
+ * when {@code METRICS_ENABLED=false}: /metrics is then a 404.
  */
 @Requires(property = "micronaut.metrics.enabled", notEquals = "false")
 @Controller("/metrics")

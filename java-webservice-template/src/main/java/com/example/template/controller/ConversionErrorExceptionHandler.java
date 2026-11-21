@@ -12,10 +12,7 @@ import io.micronaut.http.server.exceptions.response.ErrorContext;
 import io.micronaut.http.server.exceptions.response.ErrorResponseProcessor;
 import jakarta.inject.Singleton;
 
-/**
- * A value that cannot be converted ({@code ?limit=abc}) is a validation error: 422, as in Python
- * and Rust.
- */
+/** A value that cannot be converted ({@code ?limit=abc}) is a validation error: 422. */
 @Produces
 @Singleton
 @Replaces(ConversionErrorHandler.class)

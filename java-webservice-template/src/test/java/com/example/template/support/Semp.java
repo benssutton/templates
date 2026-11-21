@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Thin SEMP v2 client (mirrors python tests/support/semp.py): broker-side facts for assertions. */
+/** Thin SEMP v2 client: broker-side facts for assertions. */
 public final class Semp {
     private static final Pattern MSG_ID = Pattern.compile("\"msgId\"\\s*:");
     private static final Pattern SUB_TOPIC =

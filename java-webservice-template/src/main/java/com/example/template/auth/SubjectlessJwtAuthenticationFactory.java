@@ -10,8 +10,8 @@ import jakarta.inject.Singleton;
 import java.util.Optional;
 
 /**
- * Python and Rust accept a validly signed token with no {@code sub}; Micronaut's default factory
- * would turn it into "no authentication" (401). A missing subject becomes {@value #ANONYMOUS}.
+ * A validly signed token with no {@code sub} is accepted: Micronaut's default factory would turn it
+ * into "no authentication" (401). A missing subject becomes {@value #ANONYMOUS}.
  */
 @Singleton
 @Replaces(DefaultJwtAuthenticationFactory.class)

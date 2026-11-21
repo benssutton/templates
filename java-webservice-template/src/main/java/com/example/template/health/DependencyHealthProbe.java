@@ -4,8 +4,7 @@ import com.example.template.dto.health.ProbeResult;
 
 /**
  * Implemented by each store so HealthService discovers it via {@code List<DependencyHealthProbe>}.
- * Replaces the Python hardcoded _probe(ConfigService/DataService/CacheService) gather: each store
- * added in a later phase self-registers with no HealthService change.
+ * A new store registers itself by providing a probe; HealthService needs no change.
  */
 public interface DependencyHealthProbe {
     String name();

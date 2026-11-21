@@ -135,7 +135,7 @@ class AuthTest extends IntegrationSupport {
         assertNotAuthenticated(send(HttpRequest.GET("/config").bearerAuth(token)));
     }
 
-    /** Python and Rust accept a token with no sub, so Java must too. */
+    /** A validly signed token with no sub is accepted. */
     @Test
     void tokenWithoutSubIsAccepted() throws Exception {
         String token = token(SECRET, null, ISSUER, AUDIENCE, Instant.now().plusSeconds(300));
