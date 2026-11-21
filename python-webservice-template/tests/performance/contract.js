@@ -81,6 +81,41 @@ function checkError(name, r, status) {
   });
 }
 
+const MCP_TOOLS = ['get_cache', 'get_cached_data', 'get_config', 'get_data', 'get_health_status'];
+
+// A JSON-RPC response arrives as JSON or as an SSE stream; take its last data line.
+function rpcBody(r) {
+  if ((r.headers['Content-Type'] || '').includes('text/event-stream')) {
+    const lines = (r.body || '').split('\n').filter((l) => l.startsWith('data:'));
+    return lines.length ? JSON.parse(lines[lines.length - 1].slice(5)) : undefined;
+  }
+  return body(r);
+}
+
+function mcpSession() {
+  const headers = { ...JSON_HEADERS, Accept: 'application/json, text/event-stream' };
+  let id = 0;
+  const post = (msg) => http.post(`${BASE_URL}/mcp`, JSON.stringify(msg), { headers });
+  const init = post({
+    jsonrpc: '2.0', id: ++id, method: 'initialize',
+    params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'contract', version: '1' } },
+  });
+  const session = init.headers['Mcp-Session-Id'];
+  if (session) headers['Mcp-Session-Id'] = session;
+  post({ jsonrpc: '2.0', method: 'notifications/initialized' });
+  return {
+    initialized: init.status === 200,
+    request: (method, params) => rpcBody(post({ jsonrpc: '2.0', id: ++id, method, params })),
+  };
+}
+
+// A tool result must be a single text item holding the REST body as JSON.
+function toolJson(result) {
+  const content = (result && result.content) || [];
+  if (content.length !== 1 || content[0].type !== 'text') return undefined;
+  try { return JSON.parse(content[0].text); } catch { return undefined; }
+}
+
 export default function () {
   const run = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 
@@ -231,6 +266,36 @@ export default function () {
         Array.isArray(b.rows) && b.rows.every((row, i) => i === 0 || b.rows[i - 1].id < row.id),
       'data cache: newest version wins, tombstones removed': () => merged,
       'data cache: total counts live rows': () => typeof b.total === 'number' && b.total >= b.rows.length,
+    });
+  });
+
+  group('mcp', () => {
+    const mcp = mcpSession();
+    const call = (name, args) => (mcp.request('tools/call', { name, arguments: args }) || {}).result;
+    const rest = (path) => body(http.get(`${BASE_URL}${path}`));
+
+    const listed = mcp.request('tools/list', {});
+    const names = ((listed && listed.result && listed.result.tools) || []).map((t) => t.name).sort();
+
+    const key = `contract-mcp-${run}`;
+    http.post(`${BASE_URL}/cache`, JSON.stringify({ key, value: { n: 7 } }), { headers: JSON_HEADERS });
+    const missingKey = `contract-mcp-missing-${run}`;
+    const missing = call('get_cache', { key: missingKey });
+
+    check(null, {
+      'mcp: initialize 200': () => mcp.initialized,
+      'mcp: tool names': () => same(names, MCP_TOOLS),
+      'mcp: get_config = GET /config': () => same(toolJson(call('get_config', {})), rest('/config')),
+      'mcp: get_cache = GET /cache/{key}': () =>
+        same(toolJson(call('get_cache', { key })), rest(`/cache/${key}`)),
+      'mcp: get_cache missing = isError + the 404 body': () =>
+        !!missing && missing.isError === true && same(toolJson(missing), rest(`/cache/${missingKey}`)),
+      'mcp: get_data = GET /data': () =>
+        same(toolJson(call('get_data', { limit: 5 })), rest('/data?limit=5')),
+      'mcp: get_cached_data has the /data/cache keys': () =>
+        sameKeys(toolJson(call('get_cached_data', { limit: 5 })), ['rows', 'total', 'limit']),
+      'mcp: get_health_status has the /health/status keys': () =>
+        sameKeys(toolJson(call('get_health_status', {})), keys(rest('/health/status'))),
     });
   });
 
