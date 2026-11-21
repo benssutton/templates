@@ -59,3 +59,4 @@ CVE-2026-118380 exp:2026-12-14 # krb5 (libgssapi-krb5-2, libk5crypto3, libkrb5-3
 CVE-2026-119079 exp:2026-12-14 # krb5 (libgssapi-krb5-2, libk5crypto3, libkrb5-3, libkrb5support0) 1.21.3-5+deb13u1 (no fix yet)
 CVE-2026-71199 exp:2026-12-14 # krb5 (libgssapi-krb5-2, libk5crypto3, libkrb5-3, libkrb5support0) 1.21.3-5+deb13u1 (no fix yet)
 CVE-2026-71200 exp:2026-12-14 # krb5 (libgssapi-krb5-2, libk5crypto3, libkrb5-3, libkrb5support0) 1.21.3-5+deb13u1 (no fix yet)
+CVE-2026-124709 exp:2027-02-21 # openssl libssl3t64 3.5.7-1~deb13u3 QUIC stream DoS (no fix yet); not reachable: service TLS is rustls/ring, no QUIC, libssl is only a distroless base package; review 2027-02
