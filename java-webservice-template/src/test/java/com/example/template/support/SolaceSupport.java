@@ -30,14 +30,12 @@ public final class SolaceSupport {
                     .withEnv("username_admin_password", "admin")
                     .withEnv("system_scaling_maxconnectioncount", "100")
                     .withSharedMemorySize(1024L * 1024 * 1024)
-                    .withCreateContainerCmdModifier(
-                            cmd ->
-                                    cmd.getHostConfig()
-                                            .withUlimits(
-                                                    List.of(
-                                                            new Ulimit("core", -1L, -1L),
-                                                            new Ulimit(
-                                                                    "nofile", 1048576L, 1048576L))))
+                    .withCreateContainerCmdModifier(cmd ->
+                            cmd.getHostConfig()
+                                    .withUlimits(
+                                            List.of(
+                                                    new Ulimit("core", -1L, -1L),
+                                                    new Ulimit("nofile", 1048576L, 1048576L))))
                     // Readiness isn't logged to stdout; the guaranteed-messaging health port is
                     // authoritative.
                     .waitingFor(

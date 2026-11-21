@@ -113,12 +113,11 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
         thread.start();
         if (settings.maxDisconnectSeconds() > 0) {
             watchdog =
-                    Executors.newSingleThreadScheduledExecutor(
-                            r -> {
-                                Thread t = new Thread(r, "ingest-watchdog");
-                                t.setDaemon(true);
-                                return t;
-                            });
+                    Executors.newSingleThreadScheduledExecutor(r -> {
+                        Thread t = new Thread(r, "ingest-watchdog");
+                        t.setDaemon(true);
+                        return t;
+                    });
             long poll = Math.max(1, Math.min(settings.maxDisconnectSeconds() / 2, 5));
             watchdog.scheduleAtFixedRate(this::checkDisconnect, poll, poll, TimeUnit.SECONDS);
         }

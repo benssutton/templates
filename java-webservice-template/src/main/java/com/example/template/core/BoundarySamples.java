@@ -27,13 +27,12 @@ public final class BoundarySamples {
     /** Append a boundary sample to the current request's holder, if one is active. */
     public static void record(String label, double ms) {
         ServerRequestContext.currentRequest()
-                .ifPresent(
-                        req -> {
-                            Object holder = req.getAttribute(ATTR).orElse(null);
-                            if (holder instanceof BoundarySamples bs) {
-                                bs.add(label, ms);
-                            }
-                        });
+                .ifPresent(req -> {
+                    Object holder = req.getAttribute(ATTR).orElse(null);
+                    if (holder instanceof BoundarySamples bs) {
+                        bs.add(label, ms);
+                    }
+                });
     }
 
     /** Render samples (summing duplicate labels, first-seen order) plus a total. */

@@ -38,10 +38,9 @@ class StreamIngestShutdownIT extends IntegrationSupport {
         ApplicationContext context = ApplicationContext.run(Map.copyOf(props), Environment.TEST);
         try {
             await().atMost(30, TimeUnit.SECONDS)
-                    .until(
-                            () ->
-                                    SEMP.queueExists(names.queue())
-                                            && SEMP.queueBindCount(names.queue()) == 1);
+                    .until(() ->
+                            SEMP.queueExists(names.queue())
+                                    && SEMP.queueBindCount(names.queue()) == 1);
             assertThat(SEMP.clientCount(clientName)).as("connected clients").isEqualTo(1);
             StreamIngestService svc = context.getBean(StreamIngestService.class);
             assertThat(svc.currentHealth().threadAlive()).isTrue();
@@ -53,10 +52,9 @@ class StreamIngestShutdownIT extends IntegrationSupport {
                     .isFalse();
             // close() has returned, so only the broker's own bookkeeping can lag.
             await().atMost(5, TimeUnit.SECONDS)
-                    .until(
-                            () ->
-                                    SEMP.queueBindCount(names.queue()) == 0
-                                            && SEMP.clientCount(clientName) == 0);
+                    .until(() ->
+                            SEMP.queueBindCount(names.queue()) == 0
+                                    && SEMP.clientCount(clientName) == 0);
         } finally {
             if (context.isRunning()) {
                 context.close();

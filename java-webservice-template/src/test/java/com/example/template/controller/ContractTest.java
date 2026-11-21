@@ -173,19 +173,18 @@ class ContractTest extends IntegrationSupport {
         assertThat(ready).containsOnlyKeys("status", "checks");
         assertThat(ready.get("status")).isEqualTo("ready");
         assertThat(list(ready, "checks"))
-                .allSatisfy(
-                        c ->
-                                assertThat(c)
-                                        .containsOnlyKeys(
-                                                "name",
-                                                "status",
-                                                "latency_ms",
-                                                "transport",
-                                                "connection_state",
-                                                "thread_alive",
-                                                "last_batch_at",
-                                                "seconds_since_last_batch",
-                                                "error"));
+                .allSatisfy(c ->
+                        assertThat(c)
+                                .containsOnlyKeys(
+                                        "name",
+                                        "status",
+                                        "latency_ms",
+                                        "transport",
+                                        "connection_state",
+                                        "thread_alive",
+                                        "last_batch_at",
+                                        "seconds_since_last_batch",
+                                        "error"));
 
         Map<String, Object> status = object(send(HttpRequest.GET("/health/status")).body());
         assertThat(status)
@@ -197,10 +196,8 @@ class ContractTest extends IntegrationSupport {
                 .extracting(d -> d.get("name"))
                 .containsExactlyInAnyOrder("postgres", "clickhouse", "redis");
         assertThat(list(status, "dependencies"))
-                .allSatisfy(
-                        d ->
-                                assertThat(d)
-                                        .containsOnlyKeys("name", "status", "latency_ms", "error"));
+                .allSatisfy(d ->
+                        assertThat(d).containsOnlyKeys("name", "status", "latency_ms", "error"));
         assertThat(child(status, "ingest"))
                 .containsOnlyKeys(
                         "transport",

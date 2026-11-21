@@ -85,13 +85,12 @@ public class SolaceBatchConsumer implements BatchConsumer {
         svc.addReconnectionAttemptListener(
                 e -> setStateIfCurrent(svc, ConnectionState.RECONNECTING));
         svc.addReconnectionListener(e -> setStateIfCurrent(svc, ConnectionState.CONNECTED));
-        svc.addServiceInterruptionListener(
-                e -> {
-                    // Terminal: this service will never recover. Make consume() fail so the
-                    // ingest loop backs off and the next call reconnects with a fresh service.
-                    setStateIfCurrent(svc, ConnectionState.DOWN);
-                    wake.offer(INTERRUPTED);
-                });
+        svc.addServiceInterruptionListener(e -> {
+            // Terminal: this service will never recover. Make consume() fail so the
+            // ingest loop backs off and the next call reconnects with a fresh service.
+            setStateIfCurrent(svc, ConnectionState.DOWN);
+            wake.offer(INTERRUPTED);
+        });
         LOG.info(
                 "Solace: connected to {} vpn={} as {}",
                 props.getProperty("solace.messaging.transport.host"),

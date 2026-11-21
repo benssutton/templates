@@ -1,7 +1,7 @@
 name: java-template
 services:
   postgres:
-    image: pgvector/pgvector:0.8.4-pg18
+    image: pgvector/pgvector:0.8.7-pg18
     environment:
       POSTGRES_USER: appuser
       POSTGRES_PASSWORD: password
@@ -12,7 +12,7 @@ services:
       timeout: 3s
       retries: 10
   clickhouse:
-    image: clickhouse/clickhouse-server:26.8.40.7
+    image: clickhouse/clickhouse-server:26.10.4.207
     environment:
       CLICKHOUSE_PASSWORD: clickhouse   # clickhouse-jdbc rejects an empty password; set an explicit one
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1

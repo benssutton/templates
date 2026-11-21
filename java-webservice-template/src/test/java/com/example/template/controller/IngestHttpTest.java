@@ -163,11 +163,10 @@ class IngestHttpTest extends IntegrationSupport {
         assertThat(r.rows())
                 .filteredOn(r2 -> r2.id() == 7L)
                 .singleElement()
-                .satisfies(
-                        r2 -> {
-                            assertThat(r2.op()).isEqualTo("upsert");
-                            assertThat(r2.seqno()).isGreaterThanOrEqualTo(0L);
-                        });
+                .satisfies(r2 -> {
+                    assertThat(r2.op()).isEqualTo("upsert");
+                    assertThat(r2.seqno()).isGreaterThanOrEqualTo(0L);
+                });
     }
 
     @Inject LsmStore store;

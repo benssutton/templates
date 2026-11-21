@@ -10,7 +10,7 @@
   <parent>
     <groupId>io.micronaut.platform</groupId>
     <artifactId>micronaut-parent</artifactId>
-    <version>5.2.5</version>
+    <version>5.2.6</version>
   </parent>
 
   <properties>
@@ -18,7 +18,7 @@
     <jdk.version>25</jdk.version>
     <release.version>25</release.version>
     <maven.compiler.release>25</maven.compiler.release>
-    <micronaut.version>5.2.5</micronaut.version>
+    <micronaut.version>5.2.6</micronaut.version>
     <!-- The platform BOM manages Testcontainers 2.0.5, whose modules are renamed
          (testcontainers-postgresql, ...); this project uses the 1.x module names
          (postgresql, clickhouse, junit-jupiter), so it pins the 1.x line. -->
@@ -379,7 +379,7 @@
       <plugin>
         <groupId>com.diffplug.spotless</groupId>
         <artifactId>spotless-maven-plugin</artifactId>
-        <version>3.10.4</version>
+        <version>3.11.0</version>
         <configuration>
           <java>
             <googleJavaFormat>

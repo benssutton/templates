@@ -223,15 +223,14 @@ class SolaceBatchConsumerIT {
         consumer = new SolaceBatchConsumer(SolaceSupport.settings(names));
         AtomicInteger sinkCalls = new AtomicInteger();
         CountDownLatch release = new CountDownLatch(1);
-        consumeOnThread(
-                d -> {
-                    sinkCalls.incrementAndGet();
-                    try {
-                        release.await(); // a slow store write, holding the ingest thread
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                });
+        consumeOnThread(d -> {
+            sinkCalls.incrementAndGet();
+            try {
+                release.await(); // a slow store write, holding the ingest thread
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
         awaitBound();
         for (long id = 1; id <= 3; id++) SolaceSupport.publish(names.topic(), oneRow(id));
         // All 3 delivered to the client: 1 in the sink, 2 buffered behind it.
@@ -249,10 +248,9 @@ class SolaceBatchConsumerIT {
     @Test
     void consumeAfterSinkFailureReconnectsAndRebindsExclusiveQueue() throws Exception {
         consumer = new SolaceBatchConsumer(SolaceSupport.settings(names));
-        consumeOnThread(
-                d -> {
-                    throw new IllegalStateException("store down");
-                });
+        consumeOnThread(d -> {
+            throw new IllegalStateException("store down");
+        });
         awaitBound();
         SolaceSupport.publish(names.topic(), oneRow(9));
         consumeThread.join(15_000);

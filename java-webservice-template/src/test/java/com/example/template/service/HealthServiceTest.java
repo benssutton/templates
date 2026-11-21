@@ -106,11 +106,10 @@ class HealthServiceTest {
         assertThat(r.checks())
                 .filteredOn(c -> c.name().equals("clickhouse"))
                 .singleElement()
-                .satisfies(
-                        c -> {
-                            assertThat(c.status()).isEqualTo(ProbeStatus.DOWN);
-                            assertThat(c.error()).isEqualTo("unavailable");
-                        });
+                .satisfies(c -> {
+                    assertThat(c.status()).isEqualTo(ProbeStatus.DOWN);
+                    assertThat(c.error()).isEqualTo("unavailable");
+                });
         assertThat(r.checks())
                 .filteredOn(c -> !c.name().equals("clickhouse") && !c.name().equals("ingest"))
                 .extracting(CheckResult::status)
@@ -159,10 +158,9 @@ class HealthServiceTest {
             }
             assertThat(appender.list)
                     .isNotEmpty()
-                    .allSatisfy(
-                            e ->
-                                    assertThat(e.getMDCPropertyMap())
-                                            .containsEntry(CorrelationId.MDC_KEY, "cid-probe-1"));
+                    .allSatisfy(e ->
+                            assertThat(e.getMDCPropertyMap())
+                                    .containsEntry(CorrelationId.MDC_KEY, "cid-probe-1"));
         } finally {
             logger.detachAppender(appender);
         }

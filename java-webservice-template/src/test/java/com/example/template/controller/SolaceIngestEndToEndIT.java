@@ -59,14 +59,13 @@ class SolaceIngestEndToEndIT extends IntegrationSupport {
                 ArrowBatches.encode(List.of(new LsmRow(1, "alpha", "v2", 0, "upsert"))));
 
         await().atMost(30, TimeUnit.SECONDS)
-                .until(
-                        () ->
-                                client.toBlocking()
-                                                .retrieve(
-                                                        HttpRequest.GET("/data/cache?limit=100"),
-                                                        CachedDataRowsResponse.class)
-                                                .total()
-                                        == 3);
+                .until(() ->
+                        client.toBlocking()
+                                        .retrieve(
+                                                HttpRequest.GET("/data/cache?limit=100"),
+                                                CachedDataRowsResponse.class)
+                                        .total()
+                                == 3);
         await().atMost(10, TimeUnit.SECONDS)
                 .until(() -> SEMP.queueMessageCount(NAMES.queue()) == 0);
     }

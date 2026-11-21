@@ -81,12 +81,11 @@ class LsmStoreTest {
         int writers = 16, batchesPerWriter = 200;
         try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
             for (int w = 0; w < writers; w++) {
-                pool.submit(
-                        () -> {
-                            for (int b = 0; b < batchesPerWriter; b++) {
-                                store.ingest(List.of(new LsmRow(b, "n", "v", 0, "upsert")));
-                            }
-                        });
+                pool.submit(() -> {
+                    for (int b = 0; b < batchesPerWriter; b++) {
+                        store.ingest(List.of(new LsmRow(b, "n", "v", 0, "upsert")));
+                    }
+                });
             }
         }
         LsmStore.QueryResult r = store.query(Integer.MAX_VALUE);

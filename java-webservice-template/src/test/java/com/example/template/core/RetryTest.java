@@ -28,17 +28,16 @@ class RetryTest {
     @Test
     void propagatesAfterMaxAttempts() {
         AtomicInteger attempts = new AtomicInteger();
-        assertThatThrownBy(
-                        () ->
-                                Retry.connectWithBackoff(
-                                        () -> {
-                                            attempts.incrementAndGet();
-                                            throw new RuntimeException("always");
-                                        },
-                                        "test",
-                                        3,
-                                        0.001,
-                                        0.01))
+        assertThatThrownBy(() ->
+                        Retry.connectWithBackoff(
+                                () -> {
+                                    attempts.incrementAndGet();
+                                    throw new RuntimeException("always");
+                                },
+                                "test",
+                                3,
+                                0.001,
+                                0.01))
                 .isInstanceOf(RuntimeException.class);
         assertThat(attempts.get()).isEqualTo(3);
     }
