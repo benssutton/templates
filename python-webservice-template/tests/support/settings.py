@@ -18,6 +18,11 @@ class SolaceNames:
     queue: str
 
 
+def unique(prefix: str) -> str:
+    """A key no other test (or xdist worker) will use."""
+    return f"{prefix}-{uuid4().hex[:12]}"
+
+
 def new_solace_names() -> SolaceNames:
     uid = uuid4().hex[:12]
     return SolaceNames(topic=f"test/{uid}/batches", queue=f"test-{uid}")
