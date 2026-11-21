@@ -66,7 +66,14 @@ impl MetricsService {
         let handle = recorder.handle();
         let service = Self { recorder, handle };
         let (title, version) = (settings.app_title.clone(), settings.app_version.clone());
-        service.with(|| gauge!("app_info", "title" => title, "version" => version).set(1.0));
+        service.with(|| {
+            gauge!("app_info", "title" => title, "version" => version).set(1.0);
+            // Exported at 0 from startup, so rate() and absent-series alerts
+            // work before the first delivery.
+            for outcome in ["accepted", "failed", "rejected"] {
+                counter!("ingest_outcomes_total", "outcome" => outcome).absolute(0);
+            }
+        });
         Ok(service)
     }
 
@@ -90,14 +97,15 @@ impl MetricsService {
         });
     }
 
-    /// One settled delivery. `outcome`: "accepted" | "failed" | "rejected".
-    pub fn record_settlement(&self, outcome: &'static str) {
-        self.with(|| counter!("ingest_deliveries_total", "outcome" => outcome).increment(1));
+    /// One settled delivery or HTTP ingest request. `outcome`: "accepted" |
+    /// "failed" | "rejected".
+    pub fn record_outcome(&self, outcome: &'static str) {
+        self.with(|| counter!("ingest_outcomes_total", "outcome" => outcome).increment(1));
     }
 
     /// Rows written to the LSM store, by either ingest path.
     pub fn record_ingested_rows(&self, rows: u64) {
-        self.with(|| counter!("ingest_rows_total").increment(rows));
+        self.with(|| counter!("ingest_rows_ingested_total").increment(rows));
     }
 
     /// Live rows the LSM memory bound evicted.
@@ -142,16 +150,15 @@ impl MetricsService {
             }
             gauge!("ingest_seconds_since_last_batch")
                 .set(ingest.seconds_since_last_batch.unwrap_or(f64::NAN));
-            gauge!("ingest_rows_ingested").set(ingest.rows_ingested_total as f64);
             gauge!("lsm_rows").set(ingest.store.rows as f64);
             gauge!("lsm_max_rows").set(ingest.store.max_rows as f64);
 
             let (process, host) = (&status.system.process, &status.system.host);
-            gauge!("process_cpu_percent").set(process.cpu_percent);
-            gauge!("process_memory_rss_bytes").set(process.memory_rss_bytes as f64);
-            gauge!("process_num_threads").set(process.num_threads as f64);
-            gauge!("process_open_files").set(process.open_files as f64);
-            gauge!("process_uptime_seconds").set(status.uptime.process_seconds);
+            gauge!("app_process_cpu_percent").set(process.cpu_percent);
+            gauge!("app_process_memory_rss_bytes").set(process.memory_rss_bytes as f64);
+            gauge!("app_process_num_threads").set(process.num_threads as f64);
+            gauge!("app_process_open_files").set(process.open_files as f64);
+            gauge!("app_process_uptime_seconds").set(status.uptime.process_seconds);
             gauge!("system_cpu_percent").set(host.cpu_percent);
             gauge!("system_memory_total_bytes").set(host.memory_total_bytes as f64);
             gauge!("system_memory_available_bytes").set(host.memory_available_bytes as f64);

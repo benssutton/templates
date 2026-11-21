@@ -54,7 +54,7 @@ pub enum Settlement {
 }
 
 impl Settlement {
-    /// `ingest_deliveries_total{outcome=...}` label.
+    /// `ingest_outcomes_total{outcome=...}` label.
     pub fn metric_label(self) -> &'static str {
         match self {
             Self::Accept => "accepted",

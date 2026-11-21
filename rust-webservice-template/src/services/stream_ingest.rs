@@ -42,14 +42,18 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
-/// Wait before the first retry (transport errors and settlement fails).
-pub const INGEST_BASE_DELAY: Duration = Duration::from_secs(1);
-/// Retry cap.
-pub const INGEST_MAX_DELAY: Duration = Duration::from_secs(60);
-/// Consecutive `next_delivery()` failures before shutdown.
-pub const INGEST_MAX_FAILURES: u32 = 5;
 /// How long `close` waits for each task.
 pub const JOIN_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The settlement an ingest result calls for: bad data is rejected, anything
+/// else is retried.
+fn outcome_of(result: &Result<(), IngestError>) -> Settlement {
+    match result {
+        Ok(()) => Settlement::Accept,
+        Err(IngestError::TooLarge(_) | IngestError::Invalid(_)) => Settlement::Reject,
+        Err(_) => Settlement::Fail,
+    }
+}
 
 /// Why a message was not written.
 #[derive(Debug, thiserror::Error)]
@@ -255,10 +259,10 @@ impl StreamIngestService {
     }
 
     /// Write one batch, then record it (`last_batch_at`, the row total,
-    /// `ingest_rows_total`). The write and its bookkeeping are one detached
-    /// task: if this future is dropped (an HTTP client disconnects) the task
-    /// still runs to the end, so a committed batch is always counted. The
-    /// caller's span (the request id) is carried into it.
+    /// `ingest_rows_ingested_total`). The write and its bookkeeping are one
+    /// detached task: if this future is dropped (an HTTP client disconnects)
+    /// the task still runs to the end, so a committed batch is always
+    /// counted. The caller's span (the request id) is carried into it.
     async fn write(&self, batch: RecordBatch) -> Result<(), StoreError> {
         let store = self.store.clone();
         let progress = self.progress.clone();
@@ -280,19 +284,27 @@ impl StreamIngestService {
             .map_err(|e| task_failed("LSM write", e))?
     }
 
+    /// `POST /data/ingest`: ingest, then count the outcome like a delivery.
+    pub async fn ingest_http(&self, batches: Vec<RecordBatch>) -> Result<(), IngestError> {
+        let result = self.ingest(batches).await;
+        if let Some(m) = &self.metrics {
+            m.record_outcome(outcome_of(&result).metric_label());
+        }
+        result
+    }
+
     /// Write every batch and decide the settlement. Never settles.
     async fn decide(&self, batches: Vec<RecordBatch>) -> Settlement {
-        match self.ingest(batches).await {
-            Ok(()) => Settlement::Accept,
-            Err(err @ (IngestError::TooLarge(_) | IngestError::Invalid(_))) => {
+        let result = self.ingest(batches).await;
+        let outcome = outcome_of(&result);
+        if let Err(err) = &result {
+            if outcome == Settlement::Reject {
                 tracing::error!(error = %err, "rejecting message");
-                Settlement::Reject
-            }
-            Err(err) => {
+            } else {
                 tracing::error!(error = %err, "ingest failed; message will be redelivered");
-                Settlement::Fail
             }
         }
+        outcome
     }
 
     /// Decide, then settle exactly once. `None` when the settlement itself
@@ -310,7 +322,7 @@ impl StreamIngestService {
         match settled {
             Ok(()) => {
                 if let Some(m) = &self.metrics {
-                    m.record_settlement(outcome.metric_label());
+                    m.record_outcome(outcome.metric_label());
                 }
                 Some(outcome)
             }
@@ -343,12 +355,11 @@ impl StreamIngestService {
     async fn run(self: Arc<Self>) {
         let backoff = Backoff {
             max_attempts: u32::MAX,
-            base_delay: INGEST_BASE_DELAY,
-            max_delay: INGEST_MAX_DELAY,
+            base_delay: seconds(self.settings.ingest_retry_base_delay),
+            max_delay: seconds(self.settings.ingest_retry_max_delay),
         };
-        // ingest_max_disconnect_seconds=None disables *all* automatic
-        // shutdown: the watchdog and this consecutive-failure trigger.
-        let shutdown_on_failure = self.settings.ingest_max_disconnect_seconds.is_some();
+        // 0 disables the failure-count shutdown, independently of the watchdog.
+        let max_failures = self.settings.ingest_max_consecutive_failures;
         // Transport failures; also the transport backoff's attempt number.
         let mut consecutive_failures = 0_u32;
         let mut last_epoch = self.consumer.bound_epoch();
@@ -390,9 +401,9 @@ impl StreamIngestService {
                     consecutive_failures += 1;
                     tracing::error!(
                         error = %format!("{err:#}"),
-                        "consumer next_delivery() failed (failure {consecutive_failures}/{INGEST_MAX_FAILURES})"
+                        "consumer next_delivery() failed (failure {consecutive_failures}/{max_failures})"
                     );
-                    if shutdown_on_failure && consecutive_failures >= INGEST_MAX_FAILURES {
+                    if max_failures > 0 && consecutive_failures >= max_failures {
                         tracing::error!(
                             "ingest: {consecutive_failures} consecutive failures; requesting shutdown"
                         );

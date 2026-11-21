@@ -310,10 +310,10 @@ async fn health_and_metrics_report_the_solace_transport() {
     assert!(status["ingest"]["last_batch_at"].is_string(), "{status}");
     let text = app.get("/metrics").await.text().await.unwrap();
     assert!(
-        text.contains(r#"ingest_deliveries_total{outcome="accepted"} 1"#),
+        text.contains(r#"ingest_outcomes_total{outcome="accepted"} 1"#),
         "{text}"
     );
-    assert!(text.contains("ingest_rows_total 2"), "{text}");
+    assert!(text.contains("ingest_rows_ingested_total 2"), "{text}");
     let connected = text
         .lines()
         .find(|l| {

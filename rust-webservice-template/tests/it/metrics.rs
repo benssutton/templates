@@ -2,6 +2,24 @@ use crate::support::{app_settings, TestApp};
 use rust_template::settings::Settings;
 
 #[tokio::test]
+async fn fresh_app_preregisters_outcome_series_and_drops_the_duplicate_gauge() {
+    let app = TestApp::spawn(app_settings().await).await;
+    let text = app.get("/metrics").await.text().await.unwrap();
+    for outcome in ["accepted", "failed", "rejected"] {
+        let line = format!(r#"ingest_outcomes_total{{outcome="{outcome}"}} 0"#);
+        assert!(
+            text.contains(&line),
+            "missing {line} in:
+{text}"
+        );
+    }
+    assert!(
+        !text.lines().any(|l| l.starts_with("ingest_rows_ingested ")),
+        "{text}"
+    );
+}
+
+#[tokio::test]
 async fn metrics_endpoint_exposes_series() {
     let app = TestApp::spawn(app_settings().await).await;
     assert_eq!(app.get("/health/live").await.status(), 200); // one request metric
@@ -18,7 +36,7 @@ async fn metrics_endpoint_exposes_series() {
         "http_requests_total",
         "ingest_connection_state",
         "ingest_seconds_since_last_batch",
-        "process_memory_rss_bytes",
+        "app_process_memory_rss_bytes",
     ] {
         assert!(text.contains(series), "missing {series}");
     }

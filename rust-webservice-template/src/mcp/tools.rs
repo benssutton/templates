@@ -3,7 +3,7 @@
 
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, Implementation, ServerCapabilities, ServerInfo};
+use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerInfo};
 use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use serde::{Deserialize, Serialize};
 
@@ -54,10 +54,9 @@ pub struct KeyArgs {
     pub key: String,
 }
 
-fn structured<T: Serialize>(value: T) -> Result<CallToolResult, ErrorData> {
-    serde_json::to_value(value)
-        .map(CallToolResult::structured)
-        .map_err(|e| ErrorData::internal_error(e.to_string(), None))
+/// One text item holding the REST body, as every template's tools return.
+fn rest_body<T: Serialize>(value: &T) -> Result<CallToolResult, ErrorData> {
+    ContentBlock::json(value).map(|c| CallToolResult::success(vec![c]))
 }
 
 /// The same detail an HTTP client would get; a 503 or 500 never carries
@@ -80,19 +79,25 @@ fn tool_error(err: AppError) -> ErrorData {
     }
 }
 
+/// A missing resource is a tool result with `isError`, carrying the REST 404 body.
+fn not_found(err: AppError) -> Result<CallToolResult, ErrorData> {
+    ContentBlock::json(serde_json::json!({ "detail": err.to_string() }))
+        .map(|c| CallToolResult::error(vec![c]))
+}
+
 #[tool_router(router = tool_router)]
 impl McpHandler {
     #[tool(
         description = "Detailed health: app, uptime, dependencies, ingest and system (GET /health/status)"
     )]
     async fn get_health_status(&self) -> Result<CallToolResult, ErrorData> {
-        structured(self.state.health.detailed_status().await)
+        rest_body(&self.state.health.detailed_status().await)
     }
 
     #[tool(description = "Every configuration entry, ordered by key (GET /config)")]
     async fn get_config(&self) -> Result<CallToolResult, ErrorData> {
         let entries = self.state.config.get_all().await.map_err(tool_error)?;
-        structured(serde_json::json!({ "entries": entries }))
+        rest_body(&entries)
     }
 
     #[tool(description = "A cache entry and its remaining TTL (GET /cache/{key})")]
@@ -100,14 +105,12 @@ impl McpHandler {
         &self,
         Parameters(args): Parameters<KeyArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let entry = self
-            .state
-            .cache
-            .get(&args.key)
-            .await
-            .map_err(tool_error)?
-            .ok_or_else(|| tool_error(AppError::NotFound(format!("Key '{}'", args.key))))?;
-        structured(entry)
+        match self.state.cache.get(&args.key).await {
+            Ok(Some(entry)) => rest_body(&entry),
+            Ok(None) => not_found(AppError::NotFound(format!("Key '{}'", args.key))),
+            Err(err @ AppError::NotFound(_)) => not_found(err),
+            Err(err) => Err(tool_error(err)),
+        }
     }
 
     #[tool(description = "A page of ClickHouse rows ordered by id (GET /data)")]
@@ -121,7 +124,7 @@ impl McpHandler {
             .get_data(args.get()?)
             .await
             .map_err(tool_error)?;
-        structured(rows)
+        rest_body(&rows)
     }
 
     #[tool(
@@ -137,7 +140,7 @@ impl McpHandler {
             .get_data(args.get()?)
             .await
             .map_err(tool_error)?;
-        structured(rows)
+        rest_body(&rows)
     }
 }
 

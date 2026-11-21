@@ -45,6 +45,11 @@ fn defaults() {
     assert_eq!(s.ingest_staleness_threshold_seconds, None);
     assert!(!s.ingest_stale_fails_readiness);
     assert_eq!(s.ingest_max_disconnect_seconds, Some(60.0));
+    assert_eq!(s.ingest_max_consecutive_failures, 5);
+    assert_eq!(
+        (s.ingest_retry_base_delay, s.ingest_retry_max_delay),
+        (1.0, 60.0)
+    );
     assert_eq!(s.max_request_body_bytes, 16 * 1024 * 1024);
     assert_eq!(s.max_ingest_batch_bytes, 16 * 1024 * 1024);
     assert_eq!(s.correlation_id_header, "X-Request-ID");
@@ -261,6 +266,23 @@ fn remaining_bounds_are_enforced() {
             "{key}={value}: {err}"
         );
     }
+}
+
+#[test]
+fn ingest_retry_max_delay_below_base_delay_is_rejected() {
+    let err = Settings::from_vars(vars(&[
+        ("INGEST_RETRY_BASE_DELAY", "10"),
+        ("INGEST_RETRY_MAX_DELAY", "5"),
+    ]))
+    .unwrap_err();
+    assert!(err.to_string().contains("ingest_retry_max_delay"), "{err}");
+    let ok = Settings::from_vars(vars(&[
+        ("INGEST_RETRY_BASE_DELAY", "5"),
+        ("INGEST_RETRY_MAX_DELAY", "5"),
+        ("INGEST_MAX_CONSECUTIVE_FAILURES", "0"),
+    ]))
+    .unwrap();
+    assert_eq!(ok.ingest_max_consecutive_failures, 0);
 }
 
 #[test]

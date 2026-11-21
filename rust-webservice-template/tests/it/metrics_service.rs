@@ -57,9 +57,8 @@ async fn render_exposes_python_series_names() {
         "dependency_check_latency_seconds",
         "ingest_connection_state",
         "ingest_seconds_since_last_batch",
-        "ingest_rows_ingested",
-        "process_memory_rss_bytes",
-        "process_uptime_seconds",
+        "app_process_memory_rss_bytes",
+        "app_process_uptime_seconds",
         "system_memory_total_bytes",
         "system_boot_time_seconds",
     ] {

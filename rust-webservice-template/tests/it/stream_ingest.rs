@@ -216,6 +216,7 @@ fn settings() -> Settings {
     Settings {
         ingest_transport: IngestTransport::Noop,
         ingest_max_disconnect_seconds: None,
+        ingest_max_consecutive_failures: 0,
         ..Settings::default()
     }
 }
@@ -445,6 +446,7 @@ async fn five_consecutive_consumer_errors_request_shutdown() {
         lsm(),
         Settings {
             ingest_max_disconnect_seconds: Some(60.0),
+            ingest_max_consecutive_failures: 5,
             ..settings()
         },
     );
@@ -465,6 +467,7 @@ async fn a_rebind_resets_the_consecutive_failure_count() {
         lsm(),
         Settings {
             ingest_max_disconnect_seconds: Some(60.0),
+            ingest_max_consecutive_failures: 5,
             ..settings()
         },
     );
@@ -512,6 +515,7 @@ async fn a_delivery_resets_the_consecutive_failure_count() {
         lsm(),
         Settings {
             ingest_max_disconnect_seconds: Some(60.0),
+            ingest_max_consecutive_failures: 5,
             ..settings()
         },
     );
@@ -548,6 +552,7 @@ async fn a_transport_error_backs_off_then_the_next_call_delivers() {
         lsm(),
         Settings {
             ingest_max_disconnect_seconds: Some(60.0),
+            ingest_max_consecutive_failures: 5,
             ..settings()
         },
     );
@@ -630,7 +635,7 @@ async fn a_dropped_http_ingest_still_records_the_committed_rows() {
         Arc::new(NoopIngestHealth),
     );
     let text = metrics.render(&health).await;
-    assert!(text.contains("ingest_rows_total 2"), "{text}");
+    assert!(text.contains("ingest_rows_ingested_total 2"), "{text}");
     svc.close().await;
 }
 
@@ -905,9 +910,9 @@ async fn settlements_are_counted_in_metrics() {
     );
     let text = metrics.render(&health).await;
     assert!(
-        text.contains(r#"ingest_deliveries_total{outcome="accepted"} 1"#),
+        text.contains(r#"ingest_outcomes_total{outcome="accepted"} 1"#),
         "{text}"
     );
-    assert!(text.contains("ingest_rows_total 1"), "{text}");
+    assert!(text.contains("ingest_rows_ingested_total 1"), "{text}");
     svc.close().await;
 }

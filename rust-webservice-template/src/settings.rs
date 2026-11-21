@@ -174,6 +174,14 @@ pub struct Settings {
     #[serde(deserialize_with = "optional_seconds")]
     #[garde(inner(custom(positive)))]
     pub ingest_max_disconnect_seconds: Option<f64>,
+    /// Consecutive transport failures before shutdown; 0 disables.
+    pub ingest_max_consecutive_failures: u32,
+    /// First transport retry wait, seconds; doubled per failure.
+    #[garde(custom(positive))]
+    pub ingest_retry_base_delay: f64,
+    /// Transport retry wait cap, seconds; not below the base delay.
+    #[garde(custom(positive), custom(not_below(self.ingest_retry_base_delay)))]
+    pub ingest_retry_max_delay: f64,
 
     // Request handling
     /// A request still without a response after this is answered 503.
@@ -280,6 +288,9 @@ impl Default for Settings {
             ingest_staleness_threshold_seconds: None,
             ingest_stale_fails_readiness: false,
             ingest_max_disconnect_seconds: Some(60.0),
+            ingest_max_consecutive_failures: 5,
+            ingest_retry_base_delay: 1.0,
+            ingest_retry_max_delay: 60.0,
             request_timeout_seconds: 30.0,
             max_concurrent_requests: 1024,
             ingest_max_in_flight: 4,
@@ -338,6 +349,16 @@ fn positive(value: &f64, _: &()) -> garde::Result {
         Ok(())
     } else {
         Err(garde::Error::new("must be a finite number > 0"))
+    }
+}
+
+fn not_below(floor: f64) -> impl FnOnce(&f64, &()) -> garde::Result {
+    move |value, _| {
+        if *value >= floor {
+            Ok(())
+        } else {
+            Err(garde::Error::new("must be >= ingest_retry_base_delay"))
+        }
     }
 }
 

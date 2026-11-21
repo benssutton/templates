@@ -50,6 +50,40 @@ async fn settings() -> Settings {
 }
 
 #[tokio::test]
+async fn an_accepted_ingest_is_counted_in_the_outcome_metric() {
+    let app = TestApp::spawn(settings().await).await;
+    let body = serialize_batch(&make_batch(&[(101, "http", "v1", "upsert")]));
+    assert_eq!(post_ipc(&app, body, None).await.status(), 202);
+    let text = app.get("/metrics").await.text().await.unwrap();
+    assert!(
+        text.contains(r#"ingest_outcomes_total{outcome="accepted"} 1"#),
+        "{text}"
+    );
+    assert!(text.contains("ingest_rows_ingested_total 1"), "{text}");
+}
+
+/// A batch the store refuses (valid Arrow, over `max_ingest_batch_bytes`) is
+/// counted as rejected. A malformed body never reaches the service.
+#[tokio::test]
+async fn a_refused_ingest_is_counted_as_rejected() {
+    let small = make_batch(&[(102, "small", "v1", "upsert")]);
+    let rows: Vec<(i64, &str, &str, &str)> =
+        (103..200).map(|id| (id, "big", "v1", "upsert")).collect();
+    let app = TestApp::spawn(Settings {
+        max_ingest_batch_bytes: batch_bytes(&small),
+        ..settings().await
+    })
+    .await;
+    let rejected = r#"ingest_outcomes_total{outcome="rejected"}"#;
+    let before = app.get("/metrics").await.text().await.unwrap();
+    assert!(before.contains(&format!("{rejected} 0")), "{before}");
+    let body = serialize_batch(&make_batch(&rows));
+    assert_eq!(post_ipc(&app, body, None).await.status(), 413);
+    let after = app.get("/metrics").await.text().await.unwrap();
+    assert!(after.contains(&format!("{rejected} 1")), "{after}");
+}
+
+#[tokio::test]
 async fn ingest_accepts_both_arrow_media_types() {
     let app = TestApp::spawn(settings().await).await;
     for content_type in [ARROW_STREAM, "application/octet-stream"] {

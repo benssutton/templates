@@ -63,7 +63,7 @@ pub async fn ingest_batch(
     State(state): State<AppState>,
     ArrowStream(batches): ArrowStream,
 ) -> Result<(StatusCode, Json<IngestAccepted>), AppError> {
-    state.ingest.ingest(batches).await?;
+    state.ingest.ingest_http(batches).await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(IngestAccepted { accepted: true }),

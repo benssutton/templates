@@ -18,18 +18,18 @@ fn health() -> HealthService {
 #[tokio::test]
 async fn settlement_and_row_counters_are_exported() {
     let metrics = MetricsService::new(&Settings::default()).unwrap();
-    metrics.record_settlement("accepted");
-    metrics.record_settlement("accepted");
-    metrics.record_settlement("rejected");
+    metrics.record_outcome("accepted");
+    metrics.record_outcome("accepted");
+    metrics.record_outcome("rejected");
     metrics.record_ingested_rows(5);
     let text = metrics.render(&health()).await;
     assert!(
-        text.contains(r#"ingest_deliveries_total{outcome="accepted"} 2"#),
+        text.contains(r#"ingest_outcomes_total{outcome="accepted"} 2"#),
         "{text}"
     );
     assert!(
-        text.contains(r#"ingest_deliveries_total{outcome="rejected"} 1"#),
+        text.contains(r#"ingest_outcomes_total{outcome="rejected"} 1"#),
         "{text}"
     );
-    assert!(text.contains("ingest_rows_total 5"), "{text}");
+    assert!(text.contains("ingest_rows_ingested_total 5"), "{text}");
 }
