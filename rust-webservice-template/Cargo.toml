@@ -44,8 +44,9 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 # Official ClickHouse client (HTTP + RowBinary). No TLS features: the stores
 # are reached on a private network, and `rustls-tls` would pull aws-lc.
 clickhouse = { version = "0.15.3", default-features = false }
+# Env-var loader: typed deserialization, no `try_parsing` (it would turn APP_VERSION=1.0 into a float).
+config = { version = "0.15.27", default-features = false }
 dotenvy = "0.15.7"
-envy = "0.4.2"
 fastrand = "2.5.0"
 # AMQP 1.0 client for Solace. No TLS features: plain amqp:// on the private
 # network. Its `rustls` feature would bring its own provider stack.

@@ -43,8 +43,8 @@ pub enum LogFormat {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsError {
-    #[error("invalid environment configuration: {0}")]
-    Env(#[from] envy::Error),
+    #[error("could not read settings: {0}")]
+    Load(#[from] config::ConfigError),
     #[error("invalid settings: {0}")]
     Invalid(String),
 }
@@ -332,7 +332,19 @@ impl Settings {
     where
         I: IntoIterator<Item = (String, String)>,
     {
-        let settings: Settings = envy::from_iter(vars)?;
+        // Only NAME-shaped variables: the process environment also holds names
+        // such as `ProgramFiles(x86)` that are not settings and not valid keys.
+        let source = vars
+            .into_iter()
+            .filter(|(k, _)| {
+                k.bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+            })
+            .collect();
+        let settings: Settings = config::Config::builder()
+            .add_source(config::Environment::default().source(Some(source)))
+            .build()?
+            .try_deserialize()?;
         settings.check()?;
         Ok(settings)
     }
