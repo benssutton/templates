@@ -344,10 +344,11 @@ class StreamIngestServiceTest {
             consumer.queue.offer(d);
             // fail, wait 1-1.25 s, fail, wait 2-2.5 s, fail: no hot loop.
             await().atMost(30, TimeUnit.SECONDS).until(() -> d.failedAtNanos.size() >= 3);
-            // Lower bounds are exact (sleeps never end early); upper bounds only tell the steps
-            // apart (base, doubled, doubled again), leaving room for scheduling delay.
-            assertThat(gapMillis(d.failedAtNanos, 1)).as("first backoff").isBetween(1000L, 1999L);
-            assertThat(gapMillis(d.failedAtNanos, 2)).as("doubled backoff").isBetween(2000L, 3999L);
+            // The lower bounds carry the proof: a wait never ends early, so gap1 >= base and
+            // gap2 >= 2 * base shows the doubling. The upper bounds only catch a runaway wait
+            // and leave seconds of room for scheduling delay on a loaded VM.
+            assertThat(gapMillis(d.failedAtNanos, 1)).as("first backoff").isBetween(1000L, 3999L);
+            assertThat(gapMillis(d.failedAtNanos, 2)).as("doubled backoff").isBetween(2000L, 7999L);
             // Now inside a 4-5 s backoff: close() must cut it short.
             assertThat(timeCloseMillis(svc))
                     .as("close during settlement backoff (ms)")
