@@ -21,14 +21,13 @@ NAMES = {"Dockerfile"}
 SKIP_PARTS = {"target", "__pycache__", "performance", "node_modules", ".pytest_cache"}
 
 # path (relative to the service) -> reason; for a reference that must stay
-ALLOWED: dict[str, dict[str, str]] = {"python": {}, "java": {}, "rust": {}}
-
-_PENDING = pytest.mark.xfail(strict=True, reason="Phase 6 cleanup in progress")
-SERVICES = [
-    pytest.param("java", marks=_PENDING),
-    pytest.param("python"),
-    pytest.param("rust", marks=_PENDING),
-]
+ALLOWED: dict[str, dict[str, str]] = {
+    "python": {},
+    "java": {},
+    "rust": {
+        "tests/it/smf_interop.rs": "runs a real Python SMF script (SMF_PYTHON); not a cross-template comparison",
+    },
+}
 
 
 def _sources(service: str):
@@ -42,7 +41,7 @@ def _sources(service: str):
             yield base, path
 
 
-@pytest.mark.parametrize("service", SERVICES)
+@pytest.mark.parametrize("service", sorted(OTHERS))
 def test_no_reference_to_another_template(service: str) -> None:
     pattern = re.compile(rf"\b({OTHERS[service]})\b", re.IGNORECASE)
     hits = []
