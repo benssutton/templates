@@ -3,7 +3,7 @@
 TRIVY = "aquasec/trivy:0.76.2"
 OSV = "ghcr.io/google/osv-scanner:v2.7.1"
 GITLEAKS = "zricethezav/gitleaks:v8.30.1"
-SEMGREP = "semgrep/semgrep:1.184.0"
+SEMGREP = "semgrep/semgrep:1.185.0"
 SONAR_SCANNER = "sonarsource/sonar-scanner-cli:11"
 
 # Resolves the Java service's dependency tree into a CycloneDX SBOM for OSV.
