@@ -216,7 +216,7 @@ fn assert_no_sentinel(err: &impl std::fmt::Debug, display: &str) {
 
 #[test]
 fn secrets_stay_out_of_errors() {
-    // Parse failure (envy path).
+    // Parse failure (loader path).
     let mut pairs: Vec<(&str, &str)> = SECRET_VARS.to_vec();
     pairs.push(("SERVER_PORT", "not-a-port"));
     let err = Settings::from_vars(vars(&pairs)).unwrap_err();
@@ -356,4 +356,20 @@ fn empty_mcp_allowed_hosts_is_rejected() {
             "{empty:?}: {err}"
         );
     }
+}
+
+#[test]
+fn loader_edge_cases() {
+    let s = Settings::from_vars(vars(&[
+        ("APP_VERSION", "1.0"),                         // stays the string "1.0"
+        ("SERVER_PORT", "9443"),                        // parsed to a number
+        ("METRICS_ENABLED", "false"),                   // parsed to a bool
+        ("MCP_ALLOWED_HOSTS", r#"["app","api:8443"]"#), // JSON-array form
+        ("ProgramFiles(x86)", "C:/x"),                  // foreign env names are ignored
+    ]))
+    .unwrap();
+    assert_eq!(s.app_version, "1.0");
+    assert_eq!(s.server_port, 9443);
+    assert!(!s.metrics_enabled);
+    assert_eq!(s.mcp_allowed_hosts, ["app", "api:8443"]);
 }

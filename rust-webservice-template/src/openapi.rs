@@ -6,10 +6,10 @@
 
 use crate::schemas::error::ErrorResponse;
 use crate::settings::Settings;
+use utoipa::OpenApi;
 use utoipa::openapi::path::{HttpMethod, OperationBuilder};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityRequirement, SecurityScheme};
 use utoipa::openapi::{OpenApi as Document, Response};
-use utoipa::OpenApi;
 
 #[derive(OpenApi)]
 #[openapi(

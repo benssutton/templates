@@ -3,7 +3,7 @@
 //! (support/containers.rs), so this test always runs, unlike Python's.
 
 use crate::support::containers::{CH_PASSWORD, PG_PASSWORD};
-use crate::support::{app_settings, TestApp};
+use crate::support::{TestApp, app_settings};
 
 #[tokio::test]
 async fn store_passwords_never_appear_in_debug_output_or_live_responses() {

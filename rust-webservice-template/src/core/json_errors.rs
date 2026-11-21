@@ -5,8 +5,8 @@
 //! (plain text, or no content type). A short text body becomes the detail;
 //! an empty or non-text one is replaced by the status's reason phrase.
 
-use axum::body::{to_bytes, Body};
-use axum::http::{header, HeaderValue};
+use axum::body::{Body, to_bytes};
+use axum::http::{HeaderValue, header};
 use axum::response::Response;
 use serde_json::json;
 

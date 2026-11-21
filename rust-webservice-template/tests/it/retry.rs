@@ -1,4 +1,4 @@
-use rust_template::core::retry::{connect_with_backoff, Backoff};
+use rust_template::core::retry::{Backoff, connect_with_backoff};
 use rust_template::settings::Settings;
 use std::sync::atomic::{AtomicU32, Ordering::SeqCst};
 use std::sync::{Arc, Mutex};
@@ -73,11 +73,7 @@ async fn delays_respect_exponential_lower_bounds() {
         async move {
             let mut v = s.lock().unwrap();
             v.push(Instant::now());
-            if v.len() < 4 {
-                Err("not yet")
-            } else {
-                Ok(())
-            }
+            if v.len() < 4 { Err("not yet") } else { Ok(()) }
         }
     })
     .await;

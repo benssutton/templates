@@ -1,6 +1,6 @@
 //! Python tests/test_data.py and the data half of tests/test_server_timing.py.
 
-use crate::support::{app_settings, TestApp};
+use crate::support::{TestApp, app_settings};
 
 #[tokio::test]
 async fn get_data_returns_the_seeded_rows() {

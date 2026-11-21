@@ -52,7 +52,7 @@ pub fn layer(s: &Settings) -> CorsLayer {
 #[cfg(test)]
 mod tests {
     use crate::settings::Settings;
-    use axum::{routing::get, Router};
+    use axum::{Router, routing::get};
 
     /// tower-http panics at layer time on credentials + wildcard methods or
     /// headers; we mirror the request instead. Building must not panic.

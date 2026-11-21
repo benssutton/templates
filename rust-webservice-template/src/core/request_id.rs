@@ -63,9 +63,10 @@ mod tests {
     fn new_ids_are_32_lowercase_hex_and_acceptable() {
         let id = new_id();
         assert_eq!(id.len(), 32);
-        assert!(id
-            .chars()
-            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(
+            id.chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        );
         assert!(is_acceptable(id.as_bytes()));
         assert_ne!(id, new_id());
     }

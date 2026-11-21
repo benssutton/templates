@@ -1,5 +1,6 @@
 //! End to end: Solace Guaranteed message -> settle-after-write -> /data/cache.
 
+use crate::support::TestApp;
 use crate::support::batches::{batch_without_id, make_batch};
 use crate::support::containers;
 use crate::support::containers::wait_until;
@@ -7,14 +8,13 @@ use crate::support::gated_store::GatedStore;
 use crate::support::logs;
 use crate::support::semp::Semp;
 use crate::support::solace::{
-    consumer_settings, poll_cache, publisher, solace_settings, values, wait_for_bound,
-    wait_for_depth, wait_for_unbound, SolaceNames,
+    SolaceNames, consumer_settings, poll_cache, publisher, solace_settings, values, wait_for_bound,
+    wait_for_depth, wait_for_unbound,
 };
-use crate::support::TestApp;
 use rust_template::core::shutdown::Shutdown;
 use rust_template::ingestion;
-use rust_template::persistence::stream_store::lsm::LsmStore;
 use rust_template::persistence::stream_store::StreamStore;
+use rust_template::persistence::stream_store::lsm::LsmStore;
 use rust_template::services::stream_ingest::StreamIngestService;
 use rust_template::settings::Settings;
 use std::collections::HashSet;

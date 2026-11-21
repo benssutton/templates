@@ -3,7 +3,7 @@
 use crate::support::containers::{self, Endpoint};
 use crate::support::logs;
 use crate::support::semp::Semp;
-use crate::support::solace::{consumer_settings, SolaceNames};
+use crate::support::solace::{SolaceNames, consumer_settings};
 use rust_template::ingestion::solace::provision;
 use rust_template::ingestion::solace::semp::SempProvisioner;
 use rust_template::settings::Settings;

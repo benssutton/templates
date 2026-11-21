@@ -3,10 +3,10 @@
 //! `ALREADY_EXISTS` is success, so provisioning is idempotent.
 
 use crate::settings::Settings;
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use reqwest::Method;
 use secrecy::{ExposeSecret, SecretString};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 
 pub struct SempProvisioner {

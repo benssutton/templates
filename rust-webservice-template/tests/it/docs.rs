@@ -1,4 +1,4 @@
-use crate::support::{app_settings, TestApp};
+use crate::support::{TestApp, app_settings};
 
 #[tokio::test]
 async fn swagger_ui_is_served() {
@@ -25,9 +25,11 @@ async fn openapi_lists_the_service_paths() {
     ] {
         assert!(doc["paths"].get(path).is_some(), "missing {path}");
     }
-    assert!(doc["components"]["schemas"]
-        .get("DetailedStatusResponse")
-        .is_some());
+    assert!(
+        doc["components"]["schemas"]
+            .get("DetailedStatusResponse")
+            .is_some()
+    );
 }
 
 #[tokio::test]
@@ -106,7 +108,9 @@ async fn openapi_documents_errors_and_takes_identity_from_settings() {
         .as_str()
         .unwrap_or_default();
     assert!(schema.ends_with("/ErrorResponse"), "{unavailable}");
-    assert!(doc["paths"]["/data/ingest"]["post"]["responses"]
-        .get("413")
-        .is_some());
+    assert!(
+        doc["paths"]["/data/ingest"]["post"]["responses"]
+            .get("413")
+            .is_some()
+    );
 }

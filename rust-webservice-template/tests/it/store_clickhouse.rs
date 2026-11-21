@@ -1,4 +1,4 @@
-use crate::support::containers::{self, Endpoint, CH_PASSWORD};
+use crate::support::containers::{self, CH_PASSWORD, Endpoint};
 use crate::support::{app_settings, settings_for};
 use rust_template::health::probe::HealthProbe;
 use rust_template::persistence::analytics_store::clickhouse::ClickHouseStore;

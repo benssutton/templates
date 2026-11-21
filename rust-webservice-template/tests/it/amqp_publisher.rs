@@ -3,7 +3,7 @@
 use crate::support::batches::make_batch;
 use crate::support::containers;
 use crate::support::semp::Semp;
-use crate::support::solace::{publisher, wait_for_depth, SolaceNames};
+use crate::support::solace::{SolaceNames, publisher, wait_for_depth};
 
 #[tokio::test]
 async fn a_published_batch_lands_on_a_subscribed_queue() {

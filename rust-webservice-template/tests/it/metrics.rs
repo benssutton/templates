@@ -1,4 +1,4 @@
-use crate::support::{app_settings, TestApp};
+use crate::support::{TestApp, app_settings};
 use rust_template::settings::Settings;
 
 #[tokio::test]

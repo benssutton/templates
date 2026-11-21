@@ -1,4 +1,4 @@
-use axum::{routing::get, Router};
+use axum::{Router, routing::get};
 use rust_template::{core::cors, settings::Settings};
 
 /// A preflight carries Starlette's default `Access-Control-Max-Age: 600`.
@@ -23,7 +23,7 @@ async fn preflight_includes_max_age_600() {
     assert_eq!(r.headers()["access-control-max-age"], "600");
 }
 
-use crate::support::{app_settings, TestApp};
+use crate::support::{TestApp, app_settings};
 
 async fn preflight(app: &TestApp, origin: &str) -> reqwest::Response {
     app.client()

@@ -1,5 +1,5 @@
-use crate::probes::probe;
 use crate::probes::NoopIngestHealth;
+use crate::probes::probe;
 use rust_template::core::last_request::LastRequest;
 use rust_template::health::registry::ProbeRegistry;
 use rust_template::services::health::HealthService;
@@ -106,10 +106,10 @@ fn le_values(text: &str, name: &str) -> Vec<String> {
     let mut seen = Vec::new();
     for line in text.lines().filter(|l| l.starts_with(&prefix)) {
         let le = line.split("le=\"").nth(1).and_then(|r| r.split('"').next());
-        if let Some(le) = le {
-            if !seen.contains(&le.to_owned()) {
-                seen.push(le.to_owned());
-            }
+        if let Some(le) = le
+            && !seen.contains(&le.to_owned())
+        {
+            seen.push(le.to_owned());
         }
     }
     seen
@@ -153,7 +153,7 @@ async fn histograms_use_their_configured_bucket_boundaries() {
 
 #[tokio::test]
 async fn middleware_records_request_and_response_sizes() {
-    use axum::{middleware::from_fn_with_state, routing::post, Router};
+    use axum::{Router, middleware::from_fn_with_state, routing::post};
     let metrics = Arc::new(MetricsService::new(&Settings::default()).unwrap());
     let app = Router::new()
         .route("/echo", post(|| async { "twelve bytes" }))

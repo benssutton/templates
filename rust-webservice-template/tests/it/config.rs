@@ -1,6 +1,6 @@
 //! Python tests/test_config.py, plus Deviations 7 and 9.
 
-use crate::support::{app_settings, TestApp};
+use crate::support::{TestApp, app_settings};
 use serde_json::json;
 
 fn unique(name: &str) -> String {
@@ -66,10 +66,11 @@ async fn both_slash_forms_are_routed() {
     assert_eq!(status, 201);
     let (status, body) = app.get_json("/config").await;
     assert_eq!(status, 200);
-    assert!(body
-        .as_array()
-        .unwrap()
-        .contains(&json!({"key": key, "value": "v"})));
+    assert!(
+        body.as_array()
+            .unwrap()
+            .contains(&json!({"key": key, "value": "v"}))
+    );
 }
 
 /// Contract: a body that parses but is invalid is 422; one that cannot be

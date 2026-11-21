@@ -6,14 +6,14 @@
 //! for their whole run, so no other broker test runs while the broker is
 //! frozen; its drop guard unpauses the broker even when a test fails.
 
+use crate::support::TestApp;
 use crate::support::batches::make_batch;
 use crate::support::containers;
 use crate::support::logs;
 use crate::support::semp::Semp;
 use crate::support::solace::{
-    poll_cache, publisher, solace_settings, values, wait_for_bound, SolaceNames,
+    SolaceNames, poll_cache, publisher, solace_settings, values, wait_for_bound,
 };
-use crate::support::TestApp;
 use rust_template::settings::Settings;
 use serde_json::Value;
 use std::time::{Duration, Instant};

@@ -21,7 +21,7 @@ block the single writer.
   versioned migrations applied by the app), **redis** `ConnectionManager` +
   RedisJSON
 - **arrow-rs** + **arc-swap** for the LSM stream store
-- **envy + dotenvy + secrecy + garde** for typed, validated settings
+- **config + dotenvy + secrecy + garde** for typed, validated settings
 - **tracing** (JSON logs) + optional **OpenTelemetry** OTLP export,
   **metrics + metrics-exporter-prometheus**, **sysinfo**
 - **utoipa + utoipa-axum** (OpenAPI generated from the routes) + Swagger UI;

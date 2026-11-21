@@ -6,7 +6,7 @@
 
 use arrow::array::{ArrayRef, Int64Array, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
-use rust_template::core::retry::{connect_with_backoff, seconds, Backoff};
+use rust_template::core::retry::{Backoff, connect_with_backoff, seconds};
 use rust_template::ingestion::solace::amqp::AmqpTarget;
 use rust_template::ingestion::solace::publisher::AmqpPublisher;
 use rust_template::settings::Settings;

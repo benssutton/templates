@@ -59,10 +59,12 @@ pub fn probe(
 
 #[tokio::test]
 async fn empty_registry_reports_nothing() {
-    assert!(ProbeRegistry::default()
-        .run_all(Duration::from_secs(1))
-        .await
-        .is_empty());
+    assert!(
+        ProbeRegistry::default()
+            .run_all(Duration::from_secs(1))
+            .await
+            .is_empty()
+    );
 }
 
 #[tokio::test]

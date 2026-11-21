@@ -5,9 +5,9 @@
 //! outage (503) from a bug (500).
 
 use axum::{
-    http::{header, HeaderValue, StatusCode},
-    response::{IntoResponse, Response},
     Json,
+    http::{HeaderValue, StatusCode, header},
+    response::{IntoResponse, Response},
 };
 use serde_json::json;
 
@@ -55,31 +55,39 @@ impl AppError {
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
-}
 
-impl IntoResponse for AppError {
-    fn into_response(self) -> Response {
-        let status = self.status();
-        let detail = match &self {
+    /// What the client sees as `detail`: never the cause of a 5xx.
+    pub fn detail(&self) -> String {
+        match self {
             Self::NotFound(_) => self.to_string(),
             Self::BadRequest(msg)
             | Self::PayloadTooLarge(msg)
             | Self::UnsupportedMediaType(msg)
             | Self::Unprocessable(msg) => msg.clone(),
+            Self::Unauthorized(_) => UNAUTHENTICATED_DETAIL.to_owned(),
+            Self::Unavailable(_) => UNAVAILABLE_DETAIL.to_owned(),
+            Self::Internal(_) => "Internal Server Error".to_owned(),
+        }
+    }
+
+    /// Log what `detail` withholds, inside the current span.
+    pub fn log(&self) {
+        match self {
             Self::Unauthorized(reason) => {
                 tracing::info!(reason = %reason, "request not authenticated");
-                UNAUTHENTICATED_DETAIL.to_owned()
             }
-            Self::Unavailable(msg) => {
-                tracing::error!(detail = %msg, "dependency unavailable");
-                UNAVAILABLE_DETAIL.to_owned()
-            }
-            Self::Internal(err) => {
-                tracing::error!(error = ?err, "unhandled error");
-                "Internal Server Error".to_owned()
-            }
-        };
-        let mut response = (status, Json(json!({ "detail": detail }))).into_response();
+            Self::Unavailable(msg) => tracing::error!(detail = %msg, "dependency unavailable"),
+            Self::Internal(err) => tracing::error!(error = ?err, "unhandled error"),
+            _ => {}
+        }
+    }
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        self.log();
+        let status = self.status();
+        let mut response = (status, Json(json!({ "detail": self.detail() }))).into_response();
         if status == StatusCode::UNAUTHORIZED {
             response
                 .headers_mut()
@@ -213,5 +221,13 @@ mod tests {
         ));
         let io = redis::RedisError::from(std::io::Error::from(std::io::ErrorKind::ConnectionReset));
         assert!(matches!(AppError::from(io), AppError::Unavailable(_)));
+    }
+
+    #[test]
+    fn detail_hides_the_cause_of_5xx() {
+        let err = AppError::Unavailable("pg: connection refused".into());
+        assert_eq!(err.detail(), UNAVAILABLE_DETAIL);
+        let err = AppError::BadRequest("bad arrow".into());
+        assert_eq!(err.detail(), "bad arrow");
     }
 }

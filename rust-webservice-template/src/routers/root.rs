@@ -1,5 +1,5 @@
 use crate::{schemas::root::RootResponse, state::AppState};
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 
 #[utoipa::path(
     get,

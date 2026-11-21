@@ -4,12 +4,12 @@
 //! the test is skipped with a message on stderr,
 //! except under CI=true, where it fails.
 
+use crate::support::TestApp;
 use crate::support::containers;
 use crate::support::semp::Semp;
 use crate::support::solace::{
-    poll_cache, solace_settings, values, wait_for_bound, wait_for_depth, SolaceNames,
+    SolaceNames, poll_cache, solace_settings, values, wait_for_bound, wait_for_depth,
 };
-use crate::support::TestApp;
 use std::time::Duration;
 
 /// Connect plus one acknowledged publish; the SDK's own ack timeout is 15 s.

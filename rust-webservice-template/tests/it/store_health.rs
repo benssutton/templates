@@ -2,7 +2,7 @@
 //! Each test stops a container of its own, never a shared one.
 
 use crate::support::containers;
-use crate::support::{app_settings, poll_ready, settings_for, TestApp};
+use crate::support::{TestApp, app_settings, poll_ready, settings_for};
 use rust_template::settings::Settings;
 use serde_json::Value;
 use std::time::Duration;

@@ -2,7 +2,7 @@ use crate::schemas::health::{
     DetailedStatusResponse, LivenessResponse, Readiness, ReadinessResponse,
 };
 use crate::state::AppState;
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{Json, extract::State, http::StatusCode};
 
 #[utoipa::path(
     get,

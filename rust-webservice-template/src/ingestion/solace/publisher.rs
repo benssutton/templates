@@ -2,15 +2,15 @@
 //! compose demo publisher. `send` returns the broker's disposition and only
 //! `accepted` counts as published.
 
-use super::amqp::{self, AmqpTarget, ATTACH_TIMEOUT, TEARDOWN_TIMEOUT};
+use super::amqp::{self, ATTACH_TIMEOUT, AmqpTarget, TEARDOWN_TIMEOUT};
 use crate::ingestion::ipc::encode_stream;
 use anyhow::Context;
 use arrow::array::RecordBatch;
+use fe2o3_amqp::Sender;
 use fe2o3_amqp::connection::ConnectionHandle;
 use fe2o3_amqp::session::SessionHandle;
 use fe2o3_amqp::types::messaging::{Header, Message, Outcome};
 use fe2o3_amqp::types::primitives::Binary;
-use fe2o3_amqp::Sender;
 use std::time::Duration;
 
 pub const PUBLISH_TIMEOUT: Duration = Duration::from_secs(15);
