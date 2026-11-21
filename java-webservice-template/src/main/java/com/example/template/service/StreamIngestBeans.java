@@ -15,7 +15,8 @@ public class StreamIngestBeans {
 
     @Singleton
     LsmStore lsmStore(IngestSettings settings) {
-        return new LsmStore(settings.lsmMaxRows());
+        return new LsmStore(
+                settings.lsmFlushRows(), settings.lsmCompactionRuns(), settings.lsmMaxRows());
     }
 
     /**

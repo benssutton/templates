@@ -5,10 +5,12 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
+import java.util.List;
 
 /**
  * Immutable ingest/transport configuration ({@code template.ingest.*}); defaults in
@@ -21,6 +23,10 @@ import jakarta.validation.constraints.PositiveOrZero;
  *     disconnected this long; 0 disables the watchdog
  * @param maxConsecutiveFailures the ingest loop exits the process after this many transport
  *     failures in a row without a successful bind; 0 disables it
+ * @param lsmMaxRows retention cap: over it the oldest live rows are evicted and counted
+ * @param lsmFlushRows memtable size that triggers a flush to a sorted run
+ * @param lsmCompactionRuns run count that triggers a full compaction
+ * @param lsmKeyColumns merge key; only {@code id} is supported
  * @param decoderMemoryBytes bound on direct memory held by all concurrent Arrow decodes
  * @param retryBaseDelaySeconds first transport/settlement backoff, doubled per failure
  * @param retryMaxDelaySeconds backoff ceiling
@@ -33,6 +39,11 @@ public record IngestSettings(
         @PositiveOrZero int maxConsecutiveFailures,
         @PositiveOrZero double stalenessThresholdSeconds,
         @Min(1) int lsmMaxRows,
+        @Min(1) int lsmFlushRows,
+        @Min(2) int lsmCompactionRuns,
+        @NotEmpty
+                List<@Pattern(regexp = "id", message = "the Java store is keyed by id only") String>
+                        lsmKeyColumns,
         @Positive long decoderMemoryBytes,
         @Positive double retryBaseDelaySeconds,
         @Positive double retryMaxDelaySeconds,

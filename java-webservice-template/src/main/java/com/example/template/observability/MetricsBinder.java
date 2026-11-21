@@ -1,6 +1,7 @@
 package com.example.template.observability;
 
 import com.example.template.dto.health.ProbeResult;
+import com.example.template.ingestion.ConnectionState;
 import com.example.template.persistence.streamstore.LsmStore;
 import com.example.template.service.HealthService;
 import com.example.template.service.StreamIngestService;
@@ -41,14 +42,25 @@ public class MetricsBinder {
                 .description("Rows written to the LSM store (HTTP and transport)")
                 .register(registry);
         for (StreamIngestService.Outcome outcome : StreamIngestService.Outcome.values()) {
-            FunctionCounter.builder("ingest_settlements", ingest, s -> s.settlementCount(outcome))
+            FunctionCounter.builder("ingest_outcomes", ingest, s -> s.outcomeCount(outcome))
                     .tag("outcome", outcome.tag())
-                    .description("Transport deliveries settled, by outcome")
+                    .description("Ingest HTTP requests and transport deliveries, by outcome")
                     .register(registry);
         }
-        FunctionCounter.builder("lsm_rows_evicted", store, LsmStore::evictedRows)
+        FunctionCounter.builder("lsm_evicted_rows", store, LsmStore::evictedRows)
                 .description("Rows dropped by the LSM store's retention cap")
                 .register(registry);
+        String transport = ingest.currentHealth().transport();
+        for (ConnectionState state : ConnectionState.values()) {
+            Gauge.builder(
+                            "ingest_connection_state",
+                            ingest,
+                            s -> s.currentHealth().connectionState() == state ? 1.0 : 0.0)
+                    .tag("transport", transport)
+                    .tag("state", state.value())
+                    .description("1 for the transport's current connection state")
+                    .register(registry);
+        }
         Gauge.builder(
                         "ingest_seconds_since_last_batch",
                         ingest,

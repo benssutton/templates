@@ -38,8 +38,8 @@ import org.slf4j.MDC;
  *       max-consecutive-failures} failures in a row without a successful bind request shutdown.
  *   <li>Disconnect watchdog: the transport staying disconnected for {@code max-disconnect-seconds}
  *       requests shutdown.
- *   <li>Settlement backoff: after a FAIL, the same backoff before taking the next delivery, since
- *       the broker redelivers at once.
+ *   <li>Settlement backoff: after a FAILED outcome, the same backoff before taking the next
+ *       delivery, since the broker redelivers at once.
  * </ul>
  *
  * Every backoff wait is cut short by {@link #close()}.
@@ -51,9 +51,9 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
 
     /** How a delivery was settled; the lowercase name is the metric tag value. */
     public enum Outcome {
-        ACCEPT,
-        FAIL,
-        REJECT;
+        ACCEPTED,
+        FAILED,
+        REJECTED;
 
         public String tag() {
             return name().toLowerCase(Locale.ROOT);
@@ -74,7 +74,7 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
     private volatile Instant lastBatchAt;
     private final Instant startedAt = Instant.now();
     private final AtomicLong rowsTotal = new AtomicLong();
-    private final Map<Outcome, AtomicLong> settlements = new EnumMap<>(Outcome.class);
+    private final Map<Outcome, AtomicLong> outcomes = new EnumMap<>(Outcome.class);
     private volatile Instant disconnectedSince;
 
     /** The watchdog requests shutdown at most once. */
@@ -103,7 +103,7 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
         this.delay = settings.retryBaseDelaySeconds();
         this.settleDelay = settings.retryBaseDelaySeconds();
         for (Outcome o : Outcome.values()) {
-            settlements.put(o, new AtomicLong());
+            outcomes.put(o, new AtomicLong());
         }
     }
 
@@ -140,37 +140,37 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
                     "rejecting ingest message: {} bytes exceeds max-batch-bytes ({})",
                     payload.length,
                     settings.maxBatchBytes());
-            return Outcome.REJECT;
+            return Outcome.REJECTED;
         }
         List<LsmRow> rows;
         try {
             rows = decoder.decodeAll(payload);
         } catch (MalformedBatchException e) {
             LOG.warn("rejecting unstorable ingest message: {}", e.getMessage());
-            return Outcome.REJECT;
+            return Outcome.REJECTED;
         } catch (RuntimeException e) {
             // e.g. the shared decoder allocator is momentarily full: worth a redelivery.
             LOG.error("decoding failed; message will be redelivered", e);
-            return Outcome.FAIL;
+            return Outcome.FAILED;
         }
         try {
             record(rows);
         } catch (RuntimeException e) {
             LOG.error("ingest failed; message will be redelivered", e);
-            return Outcome.FAIL;
+            return Outcome.FAILED;
         }
-        return Outcome.ACCEPT;
+        return Outcome.ACCEPTED;
     }
 
     /** Settle exactly once. A raising callback propagates to the sink's handler. */
     private Outcome settle(Delivery delivery) {
         Outcome outcome = decide(delivery);
         switch (outcome) {
-            case ACCEPT -> delivery.accept();
-            case FAIL -> delivery.fail();
-            case REJECT -> delivery.reject();
+            case ACCEPTED -> delivery.accept();
+            case FAILED -> delivery.fail();
+            case REJECTED -> delivery.reject();
         }
-        settlements.get(outcome).incrementAndGet();
+        outcomes.get(outcome).incrementAndGet();
         return outcome;
     }
 
@@ -217,7 +217,7 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
                 MDC.put(CorrelationId.MDC_KEY, previous);
             }
         }
-        if (outcome == Outcome.FAIL) {
+        if (outcome == Outcome.FAILED) {
             if (backoff(settleDelay)) {
                 return; // shutting down; consume() sees the consumer closed
             }
@@ -281,21 +281,35 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
         }
     }
 
-    /** HTTP ingest path: synchronous write with a Server-Timing boundary. */
+    /**
+     * HTTP ingest path: synchronous write with a Server-Timing boundary. Counts the request as
+     * ACCEPTED, or FAILED when the store throws (the exception propagates).
+     */
     public void ingestBatch(List<LsmRow> batch) {
-        if (!batch.isEmpty()) {
-            try (Timed t = Timed.start("ingest.lsm_write")) {
-                record(batch);
+        try {
+            if (!batch.isEmpty()) {
+                try (Timed t = Timed.start("ingest.lsm_write")) {
+                    record(batch);
+                }
             }
+        } catch (RuntimeException e) {
+            outcomes.get(Outcome.FAILED).incrementAndGet();
+            throw e;
         }
+        outcomes.get(Outcome.ACCEPTED).incrementAndGet();
+    }
+
+    /** HTTP ingest path: a body the decoder refused (the 4xx responses) counts as REJECTED. */
+    public void countRejected() {
+        outcomes.get(Outcome.REJECTED).incrementAndGet();
     }
 
     public long rowsIngestedTotal() {
         return rowsTotal.get();
     }
 
-    public long settlementCount(Outcome outcome) {
-        return settlements.get(outcome).get();
+    public long outcomeCount(Outcome outcome) {
+        return outcomes.get(outcome).get();
     }
 
     @Override

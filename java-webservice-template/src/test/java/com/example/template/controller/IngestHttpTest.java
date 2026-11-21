@@ -3,7 +3,9 @@ package com.example.template.controller;
 import static com.example.template.support.ArrowBatches.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.example.template.dto.CachedDataRowsResponse;
+import com.example.template.dto.DataRow;
+import com.example.template.dto.DataRowsResponse;
+import com.example.template.persistence.streamstore.LsmRow;
 import com.example.template.persistence.streamstore.LsmStore;
 import com.example.template.support.ArrowBatches;
 import com.example.template.support.IntegrationSupport;
@@ -18,7 +20,9 @@ import jakarta.inject.Inject;
 import java.io.ByteArrayOutputStream;
 import java.nio.channels.Channels;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.VarCharVector;
@@ -36,6 +40,14 @@ class IngestHttpTest extends IntegrationSupport {
     @Inject
     @Client("/")
     HttpClient client;
+
+    /** A small max-batch-bytes so a too-large batch is cheap to build (~100 KB here). */
+    @Override
+    public Map<String, String> getProperties() {
+        Map<String, String> props = super.getProperties();
+        props.put("template.ingest.max-batch-bytes", "65536");
+        return props;
+    }
 
     /** One-row IPC stream with the given fields; a null cell value leaves that cell null. */
     private static byte[] ipc(List<Field> fields, Object... cells) throws Exception {
@@ -143,7 +155,7 @@ class IngestHttpTest extends IntegrationSupport {
     }
 
     @Test
-    void ingestAcceptsArrowAndCacheReturnsRowWithSeqnoAndOp() throws Exception {
+    void ingestAcceptsArrowAndCacheReturnsTheMergedRow() throws Exception {
         HttpStatus status =
                 client.toBlocking()
                         .exchange(
@@ -155,21 +167,92 @@ class IngestHttpTest extends IntegrationSupport {
         assertThat((Object) status).isEqualTo(HttpStatus.ACCEPTED);
 
         // The store is shared by this class's tests, so look for this test's row (id 7).
-        CachedDataRowsResponse r =
+        DataRowsResponse r =
                 client.toBlocking()
-                        .retrieve(
-                                HttpRequest.GET("/data/cache?limit=100"),
-                                CachedDataRowsResponse.class);
+                        .retrieve(HttpRequest.GET("/data/cache?limit=100"), DataRowsResponse.class);
+        assertThat(r.rows()).filteredOn(r2 -> r2.id() == 7L).hasSize(1);
+        assertThat(r.rows()).extracting(DataRow::id).isSorted();
+    }
+
+    /** Newest version per key wins and a delete removes the key; rows carry no seqno or op. */
+    @Test
+    void cacheServesTheMergedView() {
+        client.toBlocking()
+                .exchange(
+                        HttpRequest.POST(
+                                        "/data/ingest",
+                                        ArrowBatches.encodeBatches(
+                                                List.of(
+                                                        List.of(
+                                                                new LsmRow(
+                                                                        -3, "n", "old", 0,
+                                                                        "upsert"),
+                                                                row(-2, "upsert")),
+                                                        List.of(
+                                                                new LsmRow(
+                                                                        -3, "n", "new", 0,
+                                                                        "upsert"),
+                                                                row(-2, "delete")))))
+                                .contentType(MediaType.APPLICATION_OCTET_STREAM));
+        String body = client.toBlocking().retrieve(HttpRequest.GET("/data/cache?limit=100"));
+        assertThat(body).doesNotContain("seqno").doesNotContain("\"op\"");
+        DataRowsResponse r =
+                client.toBlocking()
+                        .retrieve(HttpRequest.GET("/data/cache?limit=100"), DataRowsResponse.class);
+        assertThat(r.rows()).extracting(DataRow::id).contains(-3L).doesNotContain(-2L);
         assertThat(r.rows())
-                .filteredOn(r2 -> r2.id() == 7L)
-                .singleElement()
-                .satisfies(r2 -> {
-                    assertThat(r2.op()).isEqualTo("upsert");
-                    assertThat(r2.seqno()).isGreaterThanOrEqualTo(0L);
-                });
+                .filteredOn(row -> row.id() == -3L)
+                .extracting(DataRow::value)
+                .containsExactly("new");
     }
 
     @Inject LsmStore store;
+
+    private double outcomeCount(String outcome) {
+        String body = client.toBlocking().retrieve(HttpRequest.GET("/metrics"));
+        String prefix = "ingest_outcomes_total{outcome=\"" + outcome + "\"} ";
+        return body.lines()
+                .filter(l -> l.startsWith(prefix))
+                .mapToDouble(l -> Double.parseDouble(l.substring(prefix.length())))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    /** HTTP ingest counts in ingest_outcomes_total, like a transport delivery. */
+    @Test
+    void httpIngestIsCountedByOutcome() {
+        double accepted = outcomeCount("accepted");
+        double rejected = outcomeCount("rejected");
+        assertThat(postIngest(ArrowBatches.encode(List.of(row(601, "upsert"))))[0])
+                .isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(postIngest(ArrowBatches.encode(List.of(row(602, "bogus"))))[0])
+                .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(outcomeCount("accepted")).isEqualTo(accepted + 1);
+        assertThat(outcomeCount("rejected")).isEqualTo(rejected + 1);
+    }
+
+    /** A batch over max-batch-bytes is refused by the service, so it counts as rejected. */
+    @Test
+    void tooLargeBatchIsCountedAsRejected() {
+        double rejected = outcomeCount("rejected");
+        List<LsmRow> rows = new ArrayList<>();
+        String big = "x".repeat(100);
+        for (long id = 1_000; id < 2_000; id++) {
+            rows.add(new LsmRow(id, "n", big, 0, "upsert"));
+        }
+        assertThat(postIngest(ArrowBatches.encode(rows))[0])
+                .isEqualTo(HttpStatus.REQUEST_ENTITY_TOO_LARGE);
+        assertThat(outcomeCount("rejected")).isEqualTo(rejected + 1);
+    }
+
+    /** An unreadable body is refused before the service decodes a batch: not counted. */
+    @Test
+    void unreadableBodyIsNotCountedAsRejected() {
+        double rejected = outcomeCount("rejected");
+        assertThat(postIngest("not arrow ipc".getBytes(StandardCharsets.UTF_8))[0])
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(outcomeCount("rejected")).isEqualTo(rejected);
+    }
 
     /** A stream whose second batch is invalid stores nothing from its first batch either. */
     @Test

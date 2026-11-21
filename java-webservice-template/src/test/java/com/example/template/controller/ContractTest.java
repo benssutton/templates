@@ -158,8 +158,7 @@ class ContractTest extends IntegrationSupport {
         }
         Map<String, Object> cached = object(send(HttpRequest.GET("/data/cache?limit=1")).body());
         assertThat(cached).containsOnlyKeys("rows", "total", "limit");
-        assertThat(list(cached, "rows").get(0))
-                .containsOnlyKeys("id", "name", "value", "seqno", "op");
+        assertThat(list(cached, "rows").get(0)).containsOnlyKeys("id", "name", "value");
     }
 
     @Test
