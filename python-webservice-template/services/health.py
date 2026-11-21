@@ -24,7 +24,7 @@ from settings import Settings
 
 log = logging.getLogger(__name__)
 
-# Returns when the dependency answers; raises when it does not.
+# One round trip to the store (e.g. SELECT 1); any exception marks it down.
 Ping = Callable[[], Awaitable[None]]
 
 

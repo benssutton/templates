@@ -14,24 +14,17 @@ class ConnectionState(StrEnum):
 
 @dataclass(frozen=True)
 class Delivery:
-    """One transport message: every Arrow batch decoded from it, plus the
-    broker settlement callbacks. StreamIngestService settles each delivery
-    exactly once, AFTER the store write:
+    """One transport message: its decoded Arrow batches and settlement callbacks.
 
-    accept()  -> ACCEPTED: removed from the queue
-    fail()    -> FAILED:   redelivered (after max-redelivery -> DMQ)
-    reject()  -> REJECTED: removed, to the DMQ if configured; never redelivered
+    StreamIngestService settles each delivery exactly once, AFTER the store write:
+    accept() removes it; fail() redelivers it (to the DMQ after max-redelivery);
+    reject() removes it for good (to the DMQ if configured). A raising callback is
+    logged and never followed by a second settlement; the broker redelivers.
 
-    A raising callback is logged by the ingest loop and never followed by a
-    second settlement (the broker redelivers the unsettled message).
-
-    Redelivery is bounded only by the queue: queues auto-created by the Solace
-    consumer (CREATE_ON_START) get the broker default of unlimited
-    max-redelivery and no DMQ, so a persistently failing message is retried
-    forever. StreamIngestService backs off between consecutive fail()s
-    (jittered, doubling, capped) to avoid a hot loop, but that is not a
-    substitute for policy: for production queues an operator should configure
-    max-redelivery and a dead-message queue.
+    CREATE_ON_START queues get the broker default of unlimited redelivery and no
+    DMQ, so a persistently failing message retries forever (the ingest loop backs
+    off between fail()s: jittered, doubling, capped). Production queues need
+    max-redelivery and a DMQ.
     """
 
     batches: list[pa.RecordBatch]
@@ -45,14 +38,12 @@ OnBound = Callable[[], None]
 
 
 class BatchConsumer(Protocol):
-    """Synchronous interface run on the dedicated ingest thread.
+    """Synchronous transport interface, run on the dedicated ingest thread.
 
-    deliveries() is a blocking generator; close() must be thread-safe and
-    unblock any pending deliveries() call so the ingest thread can exit.
-    It calls on_bound() (if given) once the transport is bound and ready to
-    deliver: proof the transport is healthy, so the ingest loop resets its
-    consecutive-failure count even if no message ever arrives.
-    connection_state() is a cheap, cached read (no I/O).
+    deliveries() blocks; close() must be thread-safe and unblock it so the ingest thread
+    can exit. deliveries() calls on_bound(), if given, once bound: proof of health, so
+    the ingest loop resets its failure count even if no message arrives.
+    connection_state() is a cached read (no I/O).
     """
 
     def deliveries(self, on_bound: OnBound | None = None) -> Iterator[Delivery]: ...

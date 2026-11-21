@@ -1,13 +1,9 @@
-"""JSON logging with the correlation ID on every line, uvicorn's included.
+"""JSON logging, one object per line, with the correlation ID on every line.
 
-One stream handler on the root logger writes one JSON object per line;
-CorrelationIdFilter stamps each record with the current ID. uvicorn's own
-loggers propagate to it (main.py starts uvicorn with log_config=None), and its
-access line is emitted while the response is sent, i.e. inside
-CorrelationIdMiddleware's context, so access lines carry the request's ID too.
-Logging is process-wide, so the first call configures it (handler and level) and
-later calls are no-ops: the multi-app test pattern builds many apps per process,
-and a later app must not reset a level a test has set.
+uvicorn's loggers propagate here (main.py passes log_config=None), and its access
+line is logged inside CorrelationIdMiddleware, so it carries the ID too. Only the
+first call configures logging: tests build many apps per process, and a later
+app must not reset a level a test has set.
 """
 
 import json

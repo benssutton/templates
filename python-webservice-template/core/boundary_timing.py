@@ -1,19 +1,10 @@
-"""Request-scoped capture of per-boundary wall-clock timings, surfaced as a
-W3C Server-Timing response header.
+"""Per-request boundary timings, returned as a W3C Server-Timing header.
 
-ServerTimingMiddleware installs a fresh sample list on a ContextVar at the start
-of each HTTP request; timed() appends (label, milliseconds) to
-that list as each instrumented boundary completes. On the response's
-`http.response.start` the middleware renders the samples — plus a synthetic
-`total` for the whole handler — into a Server-Timing header.
-
-Request-scoping (the same isolation model as the correlation ID) means work that
-runs outside a request — e.g. the streaming ingest thread — never pollutes a
-request's samples, and multiple isolated apps in one test process cannot collide.
-
-Implemented as pure ASGI (mirroring core.request_limits.MaxBodySizeMiddleware) so
-it does not buffer streaming responses (the /mcp mount) and propagates the
-ContextVar to the endpoint reliably.
+ServerTimingMiddleware puts a fresh sample list on a ContextVar per HTTP request
+(so the ingest thread never pollutes request samples); timed() appends
+(label, ms) and the header adds a `total` for the whole handler.
+Pure ASGI, so streaming responses (/mcp) aren't buffered and the ContextVar
+reaches the endpoint.
 """
 
 import contextvars
@@ -28,22 +19,18 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 log = logging.getLogger(__name__)
 
 # None when no HTTP request is in flight (e.g. the streaming ingest thread):
-# record_boundary becomes a no-op and timed() only logs, exactly as before.
+# record_boundary is a no-op and timed() only logs.
 boundary_samples_var: contextvars.ContextVar[list[tuple[str, float]] | None] = (
     contextvars.ContextVar("boundary_samples", default=None)
 )
 
-# Server-Timing metric names must be tokens. We deliberately normalise every
-# non-[A-Za-z0-9_] char (including hyphens) to underscore so header tokens stay
-# in lockstep with the k6 parser, which matches [A-Za-z0-9_]+.
+# Metric names must be tokens; hyphens become `_` too, so every name matches the
+# k6 parser's [A-Za-z0-9_]+.
 _TOKEN_RE = re.compile(r"[^A-Za-z0-9_]")
 
 
 def record_boundary(label: str, milliseconds: float) -> None:
-    """Append a boundary sample to the current request's list, if one is active.
-
-    No-op outside an HTTP request (the list is None), so non-request callers such
-    as the streaming ingest thread are unaffected."""
+    """Append a sample to the current request's list; no-op outside a request."""
     samples = boundary_samples_var.get()
     if samples is not None:
         samples.append((label, milliseconds))
@@ -100,11 +87,8 @@ _timing_log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def timed(label: str):
-    """Log the wall-clock duration of an awaited boundary, tagged with the
-    current correlation ID (added by CorrelationIdFilter), and record it as a
-    Server-Timing sample for the current request (added by record_boundary).
-    Structured as a context manager so an OpenTelemetry span could wrap the same
-    boundary later without changing call sites."""
+    """Log the duration of an awaited block at DEBUG and record it as a
+    Server-Timing sample."""
     start = time.perf_counter()
     try:
         yield

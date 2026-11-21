@@ -1,8 +1,7 @@
-"""OpenTelemetry tracing, wired but off until an OTLP endpoint is configured.
+"""OpenTelemetry tracing, off until an OTLP endpoint is configured.
 
 Each app gets its own TracerProvider (never the global one), so isolated apps in
-one process do not share exporters. The FastAPI instrumentation continues an
-inbound W3C `traceparent` and starts a new trace otherwise.
+one process don't share exporters. An inbound W3C `traceparent` is continued.
 """
 
 from fastapi import FastAPI

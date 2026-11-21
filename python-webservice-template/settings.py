@@ -26,10 +26,9 @@ class Settings(BaseSettings):
 
     mcp_name: str = "python-template"
     mcp_instructions: str = "Tools for this template application."
-    # /mcp DNS-rebinding protection: allowed Host header values (Origin is checked
-    # against the same hosts). An entry without a port matches any port. List every
-    # public host name per deployment. Must not be empty (same rule as Rust).
-    # The env var may be a JSON array or a comma-separated list.
+    # /mcp DNS-rebinding allow-list for Host (and Origin); an entry without a port
+    # matches any port. List every public host name. The env var may be a JSON
+    # array or a comma-separated list.
     mcp_allowed_hosts: Annotated[list[str], NoDecode] = Field(
         default=["localhost"], min_length=1
     )

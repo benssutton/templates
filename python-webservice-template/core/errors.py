@@ -1,10 +1,8 @@
-"""One error contract: every error response is application/json {"detail": ...}.
+"""Every error response is application/json {"detail": ...}.
 
-FastAPI already renders HTTPException (including routing 404/405) and request
-validation errors that way. This module adds what it does not cover: unhandled
-exceptions (500), store outages (503), and splitting FastAPI's catch-all 422 into
-the contract's 400 (malformed JSON) and 415 (not JSON), plus a wrapper that gives
-the mounted MCP app's own plain-text rejections the same shape.
+FastAPI already does this for HTTPException and validation errors. This adds 500,
+503 (store outage), 400 (malformed JSON) and 415 (not JSON) split out of FastAPI's
+422, and the same shape for the mounted MCP app's plain-text rejections.
 """
 
 import json
@@ -82,11 +80,8 @@ def register_exception_handlers(app: FastAPI) -> None:
 class JsonErrorBodyMiddleware:
     """Rewrites a non-JSON error response into {"detail": <original text>}.
 
-    For the mounted MCP app: its Host/Origin and size rejections are plain text.
-    JSON error bodies (JSON-RPC errors) are part of the MCP protocol and pass
-    through untouched. The SDK answers a foreign Host with 421; the shared
-    contract (and the Java and Rust MCP servers) use 403 for both Host and Origin.
-    """
+    For the MCP app's plain-text Host/Origin and size rejections; JSON-RPC errors
+    pass through. The SDK's 421 for a foreign Host becomes the contract's 403."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app

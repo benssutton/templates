@@ -1,10 +1,8 @@
-"""ASGI middleware enforcing a maximum inbound request body size.
+"""Caps the inbound request body size; app-wide, so future POST routes inherit it.
 
-Counts bytes as they stream from the client and aborts the read with 413 the
-moment the limit is crossed, so an oversized body is never buffered in full and
-never reaches the handler, even without Content-Length (chunked uploads).
-Mirrors tower-http's RequestBodyLimitLayer in the Rust template. Applied
-app-wide so every current and future POST route inherits the policy.
+Counts bytes as they stream and answers 413 {"detail": ...} once the limit is
+crossed, so an oversized body is never buffered or handled, even without
+Content-Length.
 """
 
 import json
@@ -19,10 +17,8 @@ _BODY = json.dumps({"detail": _DETAIL}).encode()
 class _BodyTooLarge(HTTPException):
     """Raised from receive() to unwind the handler mid-read.
 
-    An HTTPException on purpose: FastAPI's body parsing re-raises HTTPException but
-    turns any other error into 400, and the app's exception handler renders it as
-    413 {"detail": ...}.
-    """
+    An HTTPException because FastAPI's body parsing re-raises those but turns any
+    other error into 400."""
 
     def __init__(self) -> None:
         super().__init__(status_code=413, detail=_DETAIL)
