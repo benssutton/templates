@@ -24,7 +24,7 @@ class MetricsControllerTest extends IntegrationSupport {
         String body = client.toBlocking().retrieve(HttpRequest.GET("/metrics"));
         assertThat(body).contains("dependency_up");
         assertThat(body).contains("jvm_memory_used_bytes"); // standard Micrometer binder
-        // Totals are counters; settlements are split by outcome.
+        // Totals are counters; ingest outcomes are one counter labelled by outcome.
         assertThat(body).contains("# TYPE ingest_rows_ingested_total counter");
         for (String outcome : new String[] {"accepted", "failed", "rejected"}) {
             assertThat(body).contains("ingest_outcomes_total{outcome=\"" + outcome + "\"}");

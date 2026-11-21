@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.NavigableMap;
+import java.util.PriorityQueue;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
@@ -17,7 +18,10 @@ import org.slf4j.LoggerFactory;
  * <p>One writer at a time ({@code ingest} is synchronized); readers never lock, they read an
  * immutable {@link Snapshot} published at the end of every write. Delete tombstones shadow older
  * versions until a full compaction, where they are dropped. Over {@code maxRows} the writer
- * compacts everything, then evicts the oldest live rows and counts them.
+ * compacts everything, then evicts the oldest live rows (lowest seqno) and counts them.
+ *
+ * <p>Eviction policy: past {@code maxRows}, evict down to {@code maxRows - max(1, maxRows / 10)},
+ * so the next compact-and-evict is a tenth of the cap away rather than on every ingest.
  */
 public class LsmStore {
 
@@ -29,26 +33,33 @@ public class LsmStore {
      */
     public record QueryResult(List<LsmRow> rows, long total) {}
 
-    /** Frames newest first; the merged live view is built once, on the first query. */
+    /**
+     * Frames newest first; the merged live view is built lazily on the first query, without a lock:
+     * racing readers may each build it, harmlessly, since every build yields the same immutable
+     * list.
+     */
     private static final class Snapshot {
         private final List<NavigableMap<Long, LsmRow>> frames;
-        private List<LsmRow> live;
+        private volatile List<LsmRow> live;
 
         Snapshot(List<NavigableMap<Long, LsmRow>> frames) {
             this.frames = frames;
         }
 
-        synchronized List<LsmRow> live() {
-            if (live == null) {
-                live = List.copyOf(liveRows(merge(frames)));
+        List<LsmRow> live() {
+            List<LsmRow> view = live;
+            if (view == null) {
+                view = List.copyOf(liveRows(merge(frames)));
+                live = view;
             }
-            return live;
+            return view;
         }
     }
 
     private final int flushRows;
     private final int compactionRuns;
     private final int maxRows;
+    private final int lowWaterRows;
     private final AtomicLong evicted = new AtomicLong();
 
     // Writer state, guarded by `this`.
@@ -69,6 +80,7 @@ public class LsmStore {
         this.flushRows = flushRows;
         this.compactionRuns = compactionRuns;
         this.maxRows = maxRows;
+        this.lowWaterRows = Math.max(1, maxRows - Math.max(1, maxRows / 10));
     }
 
     public synchronized void ingest(List<LsmRow> batch) {
@@ -83,8 +95,7 @@ public class LsmStore {
             }
         }
         if (storedRows() > maxRows) {
-            compact();
-            evictOldest();
+            evictOldest(compact());
         }
         publish();
     }
@@ -100,7 +111,11 @@ public class LsmStore {
         return evicted.get();
     }
 
-    private void compact() {
+    /**
+     * Merges memtable and runs into one run of live rows and returns it. The map is new and not yet
+     * published, so the caller may still modify it.
+     */
+    private TreeMap<Long, LsmRow> compact() {
         if (!memtable.isEmpty()) {
             runs.addFirst(Collections.unmodifiableNavigableMap(memtable));
             memtable = new TreeMap<>();
@@ -111,23 +126,27 @@ public class LsmStore {
         if (!merged.isEmpty()) {
             runs.add(merged);
         }
+        return merged;
     }
 
-    private void evictOldest() {
-        if (runs.isEmpty()) {
-            return;
-        }
-        NavigableMap<Long, LsmRow> only = runs.getFirst();
-        int excess = only.size() - maxRows;
+    /** Drops the lowest-seqno rows of the compacted run down to the low-water mark. */
+    private void evictOldest(TreeMap<Long, LsmRow> live) {
+        int excess = live.size() - lowWaterRows;
         if (excess <= 0) {
             return;
         }
-        TreeMap<Long, LsmRow> kept = new TreeMap<>(only);
-        only.values().stream()
-                .sorted(Comparator.comparingLong(LsmRow::seqno))
-                .limit(excess)
-                .forEach(r -> kept.remove(r.id()));
-        runs.set(0, kept);
+        // The `excess` smallest seqnos, via a max-heap of that size: O(n log excess), no full sort.
+        PriorityQueue<LsmRow> oldest =
+                new PriorityQueue<>(excess, Comparator.comparingLong(LsmRow::seqno).reversed());
+        for (LsmRow row : live.values()) {
+            if (oldest.size() < excess) {
+                oldest.add(row);
+            } else if (row.seqno() < oldest.peek().seqno()) {
+                oldest.poll();
+                oldest.add(row);
+            }
+        }
+        oldest.forEach(r -> live.remove(r.id()));
         recordEvictions(excess);
     }
 

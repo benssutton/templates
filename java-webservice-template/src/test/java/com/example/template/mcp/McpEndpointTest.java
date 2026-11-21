@@ -10,11 +10,13 @@ import io.micronaut.http.MediaType;
 import io.micronaut.http.client.HttpClient;
 import io.micronaut.http.client.annotation.Client;
 import io.micronaut.http.client.exceptions.HttpClientResponseException;
+import io.micronaut.json.JsonMapper;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
+import java.io.IOException;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -36,7 +38,7 @@ class McpEndpointTest extends IntegrationSupport {
     @Client("/")
     HttpClient client;
 
-    @Inject io.micronaut.json.JsonMapper json;
+    @Inject JsonMapper json;
 
     @Test
     void sdkClientCompletesHandshakeAndCallsTool() {
@@ -57,25 +59,16 @@ class McpEndpointTest extends IntegrationSupport {
         // The detailed status, same top-level keys as GET /health/status.
         McpSchema.CallToolResult result = call("get_health_status", Map.of());
         assertThat(result.content()).hasSize(1);
-        Map<String, Object> viaMcp = parse(text(result));
-        Map<String, Object> viaRest =
-                parse(client.toBlocking().retrieve(HttpRequest.GET("/health/status")));
+        Map<?, ?> viaMcp = (Map<?, ?>) parse(text(result));
+        Map<?, ?> viaRest =
+                (Map<?, ?>) parse(client.toBlocking().retrieve(HttpRequest.GET("/health/status")));
         assertThat(viaMcp.keySet()).isEqualTo(viaRest.keySet());
     }
 
-    private Object parseJson(String body) {
+    private Object parse(String body) {
         try {
             return json.readValue(body, Object.class);
-        } catch (java.io.IOException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> parse(String body) {
-        try {
-            return json.readValue(body, Map.class);
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             throw new IllegalStateException(e);
         }
     }
@@ -98,8 +91,8 @@ class McpEndpointTest extends IntegrationSupport {
         McpSchema.CallToolResult cfg = call("get_config", Map.of());
         assertThat(cfg.content()).hasSize(1);
         assertThat(text(cfg)).startsWith("[").contains("{\"key\":\"mcp-k\",\"value\":\"mcp-v\"}");
-        assertThat(parseJson(text(cfg)))
-                .isEqualTo(parseJson(client.toBlocking().retrieve(HttpRequest.GET("/config"))));
+        assertThat(parse(text(cfg)))
+                .isEqualTo(parse(client.toBlocking().retrieve(HttpRequest.GET("/config"))));
 
         client.toBlocking()
                 .exchange(

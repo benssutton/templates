@@ -3,6 +3,7 @@ package com.example.template.persistence.streamstore;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -56,12 +57,58 @@ class LsmStoreTest {
 
     @Test
     void overTheCapTheOldestLiveRowsAreEvicted() {
-        LsmStore store = new LsmStore(1, 2, 2);
-        store.ingest(List.of(upsert(1, "a")));
-        store.ingest(List.of(upsert(2, "a")));
-        store.ingest(List.of(upsert(3, "a")));
-        assertThat(ids(store.query(10))).containsExactly(2L, 3L);
-        assertThat(store.evictedRows()).isEqualTo(1);
+        // Cap 10, low-water mark 10 - max(1, 10 / 10) = 9.
+        LsmStore store = new LsmStore(1, 2, 10);
+        for (long id = 1; id <= 10; id++) {
+            store.ingest(List.of(upsert(id, "a")));
+        }
+        assertThat(store.evictedRows()).isZero();
+
+        store.ingest(List.of(upsert(11, "a")));
+
+        LsmStore.QueryResult r = store.query(100);
+        assertThat(ids(r)).containsExactly(3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L, 11L);
+        assertThat(r.total()).isLessThanOrEqualTo(9);
+        assertThat(store.evictedRows()).isEqualTo(2);
+    }
+
+    /** Oldest-first and a re-written key is young again: its new seqno protects it. */
+    @Test
+    void evictionGoesBySeqnoNotKey() {
+        LsmStore store = new LsmStore(100, 4, 10);
+        for (long id = 1; id <= 10; id++) {
+            store.ingest(List.of(upsert(id, "a")));
+        }
+        store.ingest(List.of(upsert(1, "b"))); // still 10 live rows: no eviction
+        assertThat(store.evictedRows()).isZero();
+
+        store.ingest(List.of(upsert(11, "a")));
+
+        assertThat(ids(store.query(100))).containsExactly(1L, 4L, 5L, 6L, 7L, 8L, 9L, 10L, 11L);
+        assertThat(store.evictedRows()).isEqualTo(2);
+    }
+
+    /** Cap 100, low-water 90: one-row ingests evict 11 rows every 11th ingest, not every time. */
+    @Test
+    void evictionIsAmortisedNotPerIngest() {
+        LsmStore store = new LsmStore(1_000, 4, 100);
+        List<Long> steps = new ArrayList<>();
+        long before = 0;
+        for (long id = 1; id <= 150; id++) {
+            store.ingest(List.of(upsert(id, "a")));
+            long now = store.evictedRows();
+            if (now != before) {
+                steps.add(now - before);
+                before = now;
+            }
+            assertThat(store.query(1).total()).isLessThanOrEqualTo(100);
+        }
+        // Evictions at ids 101, 112, 123, 134 and 145.
+        assertThat(steps).containsExactly(11L, 11L, 11L, 11L, 11L);
+        assertThat(store.evictedRows()).isEqualTo(55);
+        LsmStore.QueryResult r = store.query(1);
+        assertThat(r.total()).isEqualTo(95);
+        assertThat(ids(r)).containsExactly(56L);
     }
 
     @Test

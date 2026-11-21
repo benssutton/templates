@@ -75,7 +75,8 @@ public class DataController {
         List<LsmRow> rows;
         try (Timed t = Timed.start("ingest.decode")) {
             rows = decoder.decodeAll(body);
-        } catch (MalformedBatchException e) {
+        } catch (MalformedBatchException.TooLarge | MalformedBatchException.Invalid e) {
+            // Only a decoded batch the service refuses counts; an unreadable body (400) does not.
             ingestService.countRejected();
             throw e;
         }
