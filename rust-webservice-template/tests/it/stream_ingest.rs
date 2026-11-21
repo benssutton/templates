@@ -1,7 +1,7 @@
-//! StreamIngestService decides HOW each delivery
-//! is settled, backs off, and requests shutdown. Real (non-mock) trait
-//! implementations: a scripted consumer, recording settlements, a store
-//! whose write always fails, and an LSM store behind a gate.
+//! StreamIngestService decides HOW each delivery is settled, backs off, and
+//! requests shutdown. Real (non-mock) trait implementations: a scripted
+//! consumer, recording settlements, a store whose write always fails, and an
+//! LSM store behind a gate.
 
 use crate::probes::NoopIngestHealth;
 use crate::support::batches::{batch_without_id, make_batch};
@@ -183,8 +183,7 @@ impl StreamStore for FailingStore {
     }
 }
 
-/// The first next_delivery() fails; later
-/// calls idle until closed.
+/// The first next_delivery() fails; later calls idle until closed.
 #[derive(Default)]
 struct FailsThenIdles {
     attempts: AtomicU32,
@@ -456,8 +455,8 @@ async fn five_consecutive_consumer_errors_request_shutdown() {
     svc.close().await;
 }
 
-/// A bind between failures resets the count
-/// (4 failures, a re-bind, 4 more failures) is no shutdown.
+/// A bind between failures resets the count: 4 failures, a re-bind and 4
+/// more failures request no shutdown.
 #[tokio::test(start_paused = true)]
 async fn a_rebind_resets_the_consecutive_failure_count() {
     let consumer = Arc::new(RebindingConsumer::default());
@@ -744,8 +743,8 @@ async fn ingest_health_serialises_with_the_contract_field_names() {
     svc.close().await;
 }
 
-/// An idle ingest is stale but ready: stale
-/// fails readiness only with ingest_stale_fails_readiness.
+/// An idle ingest is stale but ready: staleness fails readiness only with
+/// ingest_stale_fails_readiness.
 #[tokio::test]
 async fn staleness_fails_readiness_only_when_configured() {
     for fails_readiness in [false, true] {

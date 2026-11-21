@@ -25,7 +25,7 @@ use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::redis::Redis;
 use tokio::sync::OnceCell;
 
-/// Image tags pinned for the integration tests.
+// Image tags pinned for the integration tests.
 pub const PG_IMAGE: (&str, &str) = ("pgvector/pgvector", "0.8.4-pg18");
 pub const CH_IMAGE: (&str, &str) = ("clickhouse/clickhouse-server", "26.8.40.7");
 pub const REDIS_STACK_IMAGE: (&str, &str) = ("redis/redis-stack-server", "7.4.0-v8");

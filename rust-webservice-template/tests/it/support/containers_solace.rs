@@ -44,8 +44,8 @@ impl SolaceEndpoints {
     }
 }
 
-/// POST needs nofile >= 1048576 and ~1 GiB at the
-/// minimum scaling tier; readiness is polled (`WaitFor::Nothing`).
+/// The broker needs nofile >= 1048576 and ~1 GiB at the minimum scaling tier;
+/// readiness is polled (`WaitFor::Nothing`).
 pub fn solace_request() -> ContainerRequest<GenericImage> {
     GenericImage::new(SOLACE_IMAGE.0, SOLACE_IMAGE.1)
         .with_exposed_port(SOLACE_AMQP.tcp())

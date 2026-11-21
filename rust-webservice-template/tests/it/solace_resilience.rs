@@ -136,7 +136,8 @@ async fn a_paused_broker_reconnects_and_ingest_resumes() {
 
 /// Spec §6: broker unreachable -> the watchdog cancels Shutdown within
 /// ingest_max_disconnect_seconds. SASL rule: there is no per-test username to
-/// disabling `default` would break concurrent tests, so this takes the write lease.
+/// disable, and disabling `default` would break concurrent tests, so this
+/// takes the write lease.
 #[tokio::test]
 async fn a_paused_broker_trips_the_watchdog() {
     let (logs, _guard) = logs::capture();

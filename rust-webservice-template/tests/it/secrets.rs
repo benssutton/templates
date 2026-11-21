@@ -1,6 +1,6 @@
-//! Neither store password appears in any live endpoint. The
-//! test-container passwords are long and distinctive
-//! (support/containers.rs), so this test always runs.
+//! Neither store password appears in any live endpoint. The test-container
+//! passwords are long and distinctive (support/containers.rs), so this test
+//! always runs.
 
 use crate::support::containers::{CH_PASSWORD, PG_PASSWORD};
 use crate::support::{TestApp, app_settings};

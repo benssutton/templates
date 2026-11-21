@@ -1,5 +1,5 @@
-//! POST /data/ingest writes straight to the
-//! LSM (no Delivery); GET /data/cache reads it.
+//! POST /data/ingest writes straight to the LSM (no Delivery); GET
+//! /data/cache reads it.
 
 use crate::support::batches::{batch_without_id, make_batch, serialize_batch};
 use crate::support::logs;

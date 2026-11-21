@@ -1,5 +1,5 @@
-//! Per-test Solace names and settings,
-//! plus the polling helpers the Solace tests share.
+//! Per-test Solace names and settings, plus the polling helpers the Solace
+//! tests share.
 
 use super::containers::{SOLACE_ADMIN, SolaceEndpoints, wait_until};
 use super::semp::Semp;
