@@ -72,7 +72,8 @@ docker run --rm --network python-template_default -e BASE_URL=https://app:8443 -
 
 ## Integrating with Claude Desktop
 
-Start the app; `/mcp` is mounted at https://localhost/mcp. Add to Claude Desktop's
+Start the app with `python main.py`; `/mcp` is mounted at https://localhost:8443/mcp
+(under compose, https://localhost/mcp). Add to Claude Desktop's
 `claude_desktop_config.json`. Because the dev cert is self-signed, mcp-remote must
 be told to accept it via `NODE_TLS_REJECT_UNAUTHORIZED=0` (dev only; never against
 production endpoints):
@@ -81,12 +82,13 @@ production endpoints):
 "mcpServers": {
   "python-template": {
     "command": "npx",
-    "args": ["-y", "mcp-remote", "https://localhost/mcp"],
+    "args": ["-y", "mcp-remote", "https://localhost:8443/mcp"],
     "env": { "NODE_TLS_REJECT_UNAUTHORIZED": "0" }
   }
 }
 ```
 
-Restart Claude Desktop. The tools `get_health_status`, `list_config`,
-`get_cache_entry`, `get_data` and `get_cached_data` should appear. With
+Restart Claude Desktop. The tools `get_health_status`, `get_config`,
+`get_cache`, `get_data` and `get_cached_data` should appear; each returns the
+same JSON body as its REST endpoint. With
 `AUTH_ENABLED=true`, add `"--header", "Authorization: Bearer <jwt>"` to `args`.

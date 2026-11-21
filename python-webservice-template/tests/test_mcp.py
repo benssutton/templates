@@ -276,6 +276,24 @@ async def test_mcp_tools_mirror_rest_endpoints(test_client):
     assert cached == (await test_client.get("/data/cache", params={"limit": 5})).json()
 
 
+async def test_get_health_status_matches_rest_shape(test_client):
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    init = await test_client.post("/mcp/", headers=headers, json=_INIT)
+    headers["mcp-session-id"] = init.headers["mcp-session-id"]
+
+    # _call_tool asserts exactly one text item and parses it as JSON.
+    tool = await _call_tool(test_client, headers, "get_health_status", {})
+    rest = (await test_client.get("/health/status")).json()
+
+    # Uptime, latencies and request times differ between the two calls, so
+    # compare the top-level shape and the static `app` object only.
+    assert tool.keys() == rest.keys()
+    assert tool["app"] == rest["app"]
+
+
 async def test_mcp_tool_names(test_client):
     headers = {
         "Content-Type": "application/json",

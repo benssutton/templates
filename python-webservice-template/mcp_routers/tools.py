@@ -44,6 +44,7 @@ def register(mcp: FastMCP, services: Callable[[], AppServices]) -> None:
         """One cache entry, as GET /cache/{key}; isError with the 404 body when absent."""
         entry = await services().cache.get(key)
         if entry is None:
+            # The REST 404 body for GET /cache/{key}.
             return _text(
                 json.dumps({"detail": f"Key '{key}' not found"}), is_error=True
             )

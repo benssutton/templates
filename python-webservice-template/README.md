@@ -45,7 +45,7 @@ is what lets the whole test suite run in one pytest session.
 | **Dependency injection** | The lifespan stores a frozen `AppServices` dataclass on `app.state.services`; typed `Annotated` getters hand each route its service | [services/app_services.py](services/app_services.py), [core/dependencies.py](core/dependencies.py) |
 | **REST-first routers** | Every capability (data, config, cache, health, metrics) is a REST endpoint. Routers are thin; logic lives in services | [routers/](routers/) |
 | **Pydantic schemas** | Request/response models give validation and OpenAPI docs (`/docs`) | [schemas/](schemas/) |
-| **MCP server** | `FastMCP` mounted at `/mcp`. Its tools mirror the REST read endpoints by calling the same service methods: `get_health_status`, `list_config`, `get_cache_entry`, `get_data`, `get_cached_data` | [mcp_routers/tools.py](mcp_routers/tools.py) |
+| **MCP server** | `FastMCP` mounted at `/mcp`. Its tools mirror the REST read endpoints by calling the same service methods: `get_health_status`, `get_config`, `get_cache`, `get_data`, `get_cached_data`. Each returns the same JSON body as its REST endpoint, as one text content item (a missing cache key gives `isError: true` with the REST 404 body) | [mcp_routers/tools.py](mcp_routers/tools.py) |
 
 ---
 
