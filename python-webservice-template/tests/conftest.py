@@ -27,6 +27,7 @@ from tests.support.solace import (
     wait_for_solace_ready,
 )
 
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(items):
     # One broker per worker would cost ~60 s each, and broker_paused() would
