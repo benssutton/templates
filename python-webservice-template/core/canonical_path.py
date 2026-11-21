@@ -8,8 +8,8 @@ class CanonicalPathMiddleware:
     `/mcp/`, the path the mounted app serves, instead of redirecting.
 
     Only a literal trailing `/` is stripped. `scope["path"]` is percent-decoded, so
-    the decision is made on the still-encoded `raw_path`, where `/cache/a%2F` (key
-    `a/`) does not end in `/`. The new `raw_path` is cut from the original bytes, so
+    the decision is made on the still-encoded `raw_path`, where `/x/a%2F` (decoded
+    `/x/a/`) does not end in `/`. The new `raw_path` is cut from the original bytes, so
     it keeps its percent-encoding."""
 
     def __init__(self, app: ASGIApp, mount_roots: tuple[str, ...] = ("/mcp",)) -> None:

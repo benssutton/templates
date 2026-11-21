@@ -19,9 +19,7 @@ async def set_cache(
     return await cache_service.set(body.key, body.value, body.ttl_seconds)
 
 
-# `:path`: a key containing `/` (sent as `%2F`) reaches this handler intact,
-# instead of a 404 or a slash-redirect to a different key.
-@router.get("/{key:path}")
+@router.get("/{key}")
 async def get_cache(key: str, cache_service: CacheServiceDep) -> CacheEntry:
     entry = await cache_service.get(key)
     if entry is None:
