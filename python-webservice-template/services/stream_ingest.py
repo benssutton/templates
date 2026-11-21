@@ -77,6 +77,10 @@ class StreamIngestService:
         self._thread: threading.Thread | None = None
         # Set first thing in __aexit__: wakes any backoff wait so close is prompt.
         self._stop = threading.Event()
+        # Thread.join/is_alive can block indefinitely on Windows while the OS
+        # thread exits; this event is set when the loop returns, so liveness and
+        # shutdown wait on it instead.
+        self._loop_done = threading.Event()
         self._watchdog_task: asyncio.Task | None = None
         self._last_batch_at: datetime | None = None
         self._started_at: datetime = datetime.now(UTC)
@@ -86,7 +90,7 @@ class StreamIngestService:
         self._outcomes = {outcome.value: 0 for outcome in _Outcome}
 
     async def __aenter__(self) -> "StreamIngestService":
-        self._thread = threading.Thread(target=self._ingest_loop, daemon=True)
+        self._thread = threading.Thread(target=self._run_ingest, daemon=True)
         self._thread.start()
         if self._settings.ingest_max_disconnect_seconds is not None:
             self._watchdog_task = asyncio.create_task(self._disconnect_watchdog())
@@ -103,8 +107,7 @@ class StreamIngestService:
         await asyncio.to_thread(self._consumer.close)
         if self._thread is not None:
             join_timeout = self._settings.ingest_join_timeout_seconds
-            await asyncio.to_thread(self._thread.join, join_timeout)
-            if self._thread.is_alive():
+            if not await asyncio.to_thread(self._loop_done.wait, join_timeout):
                 log.error(
                     "ingest thread did not stop within %.0fs; abandoning", join_timeout
                 )
@@ -167,6 +170,12 @@ class StreamIngestService:
         else:
             delivery.reject()
         return outcome
+
+    def _run_ingest(self) -> None:
+        try:
+            self._ingest_loop()
+        finally:
+            self._loop_done.set()
 
     def _ingest_loop(self) -> None:
         s = self._settings
@@ -271,7 +280,7 @@ class StreamIngestService:
         return IngestHealth(
             transport=self._settings.ingest_transport,
             connection_state=state.value,
-            thread_alive=self._thread.is_alive() if self._thread is not None else False,
+            thread_alive=self._thread is not None and not self._loop_done.is_set(),
             last_batch_at=last,
             seconds_since_last_batch=(
                 round(seconds_since, 3) if seconds_since is not None else None
