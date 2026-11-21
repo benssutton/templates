@@ -30,79 +30,79 @@ name = "lsm"
 harness = false
 
 [dependencies]
-anyhow = "=1.0.104"
+anyhow = "1.0.104"
 # Atomically swapped LSM snapshot (readers never block the single writer).
-arc-swap = "=1.9.5"
+arc-swap = "1.9.5"
 # LSM store and the Arrow IPC wire format. The compute (sort/take/filter/
 # concat/cmp) and row kernels are always built; `ipc` adds the stream codec.
-arrow = { version = "=60.1.0", default-features = false, features = ["ipc"] }
-async-trait = "=0.1.92"
-axum = "=0.8.9"
-# no-provider: we install rustls' ring provider ourselves (see server::install_crypto_provider).
-axum-server = { version = "=0.8.0", features = ["tls-rustls-no-provider"] }
-chrono = { version = "=0.4.45", default-features = false, features = ["clock", "serde", "std"] }
+arrow = { version = "60.1.0", default-features = false, features = ["ipc"] }
+async-trait = "0.1.92"
+axum = "0.8.9"
+# no-provider: we install rustls' ring provider ourselves (see core::install_crypto_provider).
+axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde", "std"] }
 # Official ClickHouse client (HTTP + RowBinary). No TLS features: the stores
 # are reached on a private network, and `rustls-tls` would pull aws-lc.
-clickhouse = { version = "=0.15.3", default-features = false }
-dotenvy = "=0.15.7"
-envy = "=0.4.2"
-fastrand = "=2.5.0"
+clickhouse = { version = "0.15.3", default-features = false }
+dotenvy = "0.15.7"
+envy = "0.4.2"
+fastrand = "2.5.0"
 # AMQP 1.0 client for Solace. No TLS features: plain amqp:// on the private
 # network. Its `rustls` feature would bring its own provider stack.
-fe2o3-amqp = { version = "=0.18.4", default-features = false, optional = true }
-garde = { version = "=0.23.0", default-features = false, features = ["derive"] }
-# 9.x signs and verifies with ring; 10+ offers only aws-lc-rs or RustCrypto.
-jsonwebtoken = { version = "=12.0.0", default-features = false, features = ["rust_crypto"] }
-metrics = "=0.24.6"
+fe2o3-amqp = { version = "0.18.4", default-features = false, optional = true }
+garde = { version = "0.23.0", default-features = false, features = ["derive"] }
+# `rust_crypto` is a pure-Rust backend (RustCrypto), so no second crypto stack sits beside rustls' ring.
+jsonwebtoken = { version = "12.0.0", default-features = false, features = ["rust_crypto"] }
+metrics = "0.24.6"
 # default features pull an HTTP listener + push gateway (and aws-lc-rs); we only render.
-metrics-exporter-prometheus = { version = "=0.18.3", default-features = false }
+metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
 # Trace export over OTLP/HTTP, off unless OTEL_EXPORTER_OTLP_ENDPOINT is set.
 # The blocking reqwest client suits the SDK's batch processor thread.
-opentelemetry = { version = "=0.33.1", default-features = false, features = ["trace"] }
-opentelemetry-otlp = { version = "=0.33.1", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace"] }
-opentelemetry_sdk = { version = "=0.33.1", default-features = false, features = ["trace"] }
+opentelemetry = { version = "0.33.1", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace"] }
+opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["trace"] }
 # ConnectionManager reconnects by itself. RedisJSON is driven with redis::cmd
 # (JSON.SET / JSON.GET), so the `json` feature is not needed.
-redis = { version = "=1.8.1", default-features = false, features = ["tokio-comp", "connection-manager"] }
+redis = { version = "1.8.1", default-features = false, features = ["tokio-comp", "connection-manager"] }
 # SEMP v2 provisioning and the container healthcheck. rustls with the ring
 # provider that core::install_crypto_provider installs (no aws-lc).
-reqwest = { version = "=0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
-rmcp = { version = "=2.2.0", features = ["server", "transport-streamable-http-server"] }
-rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
-secrecy = { version = "=0.10.3", features = ["serde"] }
-serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.154"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
+rmcp = { version = "2.2.0", features = ["server", "transport-streamable-http-server"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+secrecy = { version = "0.10.3", features = ["serde"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 # Runtime-checked queries; `macros` only for `migrate!`, which embeds
 # migrations/postgres at compile time (no DATABASE_URL needed). No TLS.
-sqlx = { version = "=0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "migrate", "macros"] }
-sysinfo = "=0.39.6"
-thiserror = "=2.0.21"
-tokio = { version = "=1.54.1", features = ["full"] }
-tokio-util = "=0.7.20"
-tower = { version = "=0.5.3", default-features = false, features = ["limit", "load-shed", "util"] }
-tower-http = { version = "=0.6.11", features = ["compression-gzip", "cors", "limit", "normalize-path", "request-id", "timeout", "trace", "util"] }
-tracing = "=0.1.44"
-tracing-opentelemetry = { version = "=0.34.0", default-features = false }
-tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "json"] }
-utoipa = { version = "=6.0.0", features = ["axum_extras", "chrono"] }
-utoipa-axum = "=0.3.0"
-utoipa-swagger-ui = { version = "=10.0.2", features = ["axum"] }
-uuid = { version = "=1.29.2", features = ["v4"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "migrate", "macros"] }
+sysinfo = "0.39.6"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["full"] }
+tokio-util = "0.7.20"
+tower = { version = "0.5.3", default-features = false, features = ["limit", "load-shed", "util"] }
+tower-http = { version = "0.6.11", features = ["compression-gzip", "cors", "limit", "normalize-path", "request-id", "timeout", "trace", "util"] }
+tracing = "0.1.44"
+tracing-opentelemetry = { version = "0.34.0", default-features = false }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+utoipa = { version = "6.0.0", features = ["axum_extras", "chrono"] }
+utoipa-axum = "0.3.0"
+utoipa-swagger-ui = { version = "10.0.2", features = ["axum"] }
+uuid = { version = "1.29.2", features = ["v4"] }
 
 [dev-dependencies]
 # LSM merge/compaction benchmark (benches/lsm.rs). No plotters, no rayon.
-criterion = { version = "=0.8.2", default-features = false, features = ["cargo_bench_support"] }
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 # Removes the shared test containers when the test binary exits (statics are never dropped).
-dtor = "=1.0.7"
-rcgen = "=0.14.10"
-reqwest = { version = "=0.13.5", default-features = false, features = ["json", "http2", "rustls-no-provider"] }
+dtor = "1.0.7"
+rcgen = "0.14.10"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "http2", "rustls-no-provider"] }
 # No TLS features: the local npipe / unix Docker socket needs none, and the
 # defaults add rustls providers (testcontainers-modules' clickhouse module
 # would add aws-lc-sys through reqwest).
-testcontainers = { version = "=0.27.3", default-features = false }
-testcontainers-modules = { version = "=0.15.0", default-features = false, features = ["postgres", "redis"] }
+testcontainers = { version = "0.27.3", default-features = false }
+testcontainers-modules = { version = "0.15.0", default-features = false, features = ["postgres", "redis"] }
 # Paused-clock tests for the ingest backoff, watchdog and consecutive-failure paths.
-tokio = { version = "=1.54.1", features = ["full", "test-util"] }
+tokio = { version = "1.54.1", features = ["full", "test-util"] }
 
 [profile.release]
 lto = "fat"
