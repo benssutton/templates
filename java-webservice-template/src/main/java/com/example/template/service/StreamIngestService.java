@@ -2,6 +2,7 @@ package com.example.template.service;
 
 import com.example.template.config.IngestSettings;
 import com.example.template.core.CorrelationId;
+import com.example.template.core.MdcPropagationContext;
 import com.example.template.core.Timed;
 import com.example.template.dto.health.IngestHealth;
 import com.example.template.health.IngestHealthProvider;
@@ -12,6 +13,7 @@ import com.example.template.ingestion.Delivery;
 import com.example.template.ingestion.MalformedBatchException;
 import com.example.template.persistence.streamstore.LsmRow;
 import com.example.template.persistence.streamstore.LsmStore;
+import io.micronaut.core.propagation.PropagatedContext;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumMap;
@@ -27,7 +29,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
 
 /**
  * Owns the ingest thread and decides how each transport delivery is settled.
@@ -108,16 +109,11 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
     }
 
     public void start() {
-        thread = new Thread(this::ingestLoop, "ingest-loop");
-        thread.setDaemon(true);
-        thread.start();
+        thread = Thread.ofPlatform().name("ingest-loop").daemon().start(this::ingestLoop);
         if (!settings.maxDisconnect().isZero()) {
             watchdog =
-                    Executors.newSingleThreadScheduledExecutor(r -> {
-                        Thread t = new Thread(r, "ingest-watchdog");
-                        t.setDaemon(true);
-                        return t;
-                    });
+                    Executors.newSingleThreadScheduledExecutor(
+                            Thread.ofPlatform().name("ingest-watchdog").daemon().factory());
             long poll = Math.max(1, Math.min(settings.maxDisconnect().toSeconds() / 2, 5));
             watchdog.scheduleAtFixedRate(this::checkDisconnect, poll, poll, TimeUnit.SECONDS);
         }
@@ -199,9 +195,9 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
         }
         resetTransportBackoff();
         Outcome outcome = null;
-        String previous = MDC.get(CorrelationId.MDC_KEY);
-        MDC.put(CorrelationId.MDC_KEY, CorrelationId.adoptOrGenerate(delivery.correlationId()));
-        try {
+        String id = CorrelationId.adoptOrGenerate(delivery.correlationId());
+        try (PropagatedContext.Scope ignored =
+                PropagatedContext.getOrEmpty().plus(new MdcPropagationContext(id)).propagate()) {
             outcome = settle(delivery);
         } catch (RuntimeException e) {
             // settle() calls into the SDK; if the session just dropped, the
@@ -210,12 +206,6 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
                 LOG.warn("settlement failed during shutdown; broker will redeliver");
             } else {
                 LOG.error("settlement failed; broker will redeliver", e);
-            }
-        } finally {
-            if (previous == null) {
-                MDC.remove(CorrelationId.MDC_KEY);
-            } else {
-                MDC.put(CorrelationId.MDC_KEY, previous);
             }
         }
         if (outcome == Outcome.FAILED) {

@@ -34,7 +34,7 @@ public class StreamIngestBeans {
         // hook closes this service, which joins the ingest thread. Calling exit on the
         // ingest/watchdog thread would stall that join for its full timeout and log a
         // false "did not stop" error.
-        Runnable exit = () -> new Thread(() -> System.exit(3), "ingest-exit").start();
+        Runnable exit = () -> Thread.ofPlatform().name("ingest-exit").start(() -> System.exit(3));
         StreamIngestService svc = new StreamIngestService(consumer, store, decoder, settings, exit);
         svc.start();
         return svc;
