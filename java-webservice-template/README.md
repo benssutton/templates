@@ -63,8 +63,8 @@ From the repo root the same steps run as `python run_CICD.py java fmt|fmt-check|
 
 Surefire runs test classes four at a time (`test.parallelism` in `pom.xml`); methods within a class
 stay on one thread, and `@Isolated` marks any class that touches JVM-global state. Failsafe `*IT`
-classes run sequentially (they share one Solace broker). Pass
-`-Dtest.parallelism=1` to run serially when debugging.
+classes run sequentially (they share one Solace broker). Pass `-Dtest.parallelism=1` to run
+serially when debugging.
 
 On Windows + Docker Desktop the `windows-docker` Maven profile auto-activates to pin
 `DOCKER_HOST`. Tests run the embedded server on a random port because the Solace

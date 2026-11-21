@@ -20,11 +20,11 @@ public class DataService {
 
     public DataRowsResponse getData(int limit) {
         long total;
-        try (Timed t = Timed.start("clickhouse.count")) {
+        try (var _ = Timed.start("clickhouse.count")) {
             total = repository.countAll();
         }
         List<ItemEntity> items;
-        try (Timed t = Timed.start("clickhouse.select")) {
+        try (var _ = Timed.start("clickhouse.select")) {
             items = repository.findLimited(limit);
         }
         List<DataRow> rows =

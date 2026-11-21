@@ -3,6 +3,7 @@ package com.example.template.support;
 import io.micronaut.test.support.TestPropertyProvider;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.TestInstance;
 import org.testcontainers.clickhouse.ClickHouseContainer;
 import org.testcontainers.containers.GenericContainer;
@@ -40,7 +41,7 @@ public abstract class IntegrationSupport implements TestPropertyProvider {
 
     /** A per-call unique key so tests never collide on the shared stores, even when concurrent. */
     protected static String unique(String prefix) {
-        return prefix + "-" + java.util.UUID.randomUUID().toString().substring(0, 12);
+        return prefix + "-" + UUID.randomUUID().toString().substring(0, 12);
     }
 
     @Override

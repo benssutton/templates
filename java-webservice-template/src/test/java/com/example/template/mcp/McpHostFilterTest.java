@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class McpHostFilterTest {
 
@@ -49,13 +51,14 @@ class McpHostFilterTest {
         assertThat(f.isAllowedHost("[::2]:8443")).isFalse();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"evil.example/path", "user@host", "host:99999", ""})
+    void badEntriesFailAtConstruction(String bad) {
+        assertThatThrownBy(() -> filter(bad)).isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Test
-    void badEntriesFailAtConstruction() {
-        for (String bad : new String[] {"evil.example/path", "user@host", "host:99999", ""}) {
-            assertThatThrownBy(() -> filter(bad))
-                    .as(bad)
-                    .isInstanceOf(IllegalArgumentException.class);
-        }
+    void emptyListFailsAtConstruction() {
         assertThatThrownBy(() -> new McpHostFilter(List.of()))
                 .isInstanceOf(IllegalArgumentException.class);
     }

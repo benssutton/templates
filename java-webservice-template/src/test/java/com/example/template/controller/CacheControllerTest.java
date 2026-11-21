@@ -12,9 +12,11 @@ import io.micronaut.http.client.annotation.Client;
 import io.micronaut.http.client.exceptions.HttpClientResponseException;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import jakarta.inject.Inject;
-import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import redis.clients.jedis.RedisClient;
 
 @MicronautTest
@@ -39,29 +41,27 @@ class CacheControllerTest extends IntegrationSupport {
     }
 
     /** Python/Rust parity: an empty key or a TTL below 1 is 422 and stores nothing. */
+    static Stream<Map<String, Object>> invalidEntries() {
+        return Stream.of(
+                // EXPIRE 0 deletes the key
+                Map.of("key", "bad-ttl", "value", 1, "ttl_seconds", 0),
+                Map.of("key", "bad-ttl", "value", 1, "ttl_seconds", -1),
+                Map.of("key", "", "value", 1));
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidEntries")
+    void invalidKeyOrTtlIs422(Map<String, Object> body) {
+        HttpClientResponseException ex =
+                catchThrowableOfType(
+                        HttpClientResponseException.class,
+                        () -> client.toBlocking().exchange(HttpRequest.POST("/cache", body)));
+        assertThat((Object) ex.getStatus()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(ex.getResponse().getBody(String.class).orElse("")).contains("\"detail\"");
+    }
+
     @Test
-    void invalidKeyOrTtlIs422() {
-        List<Map<String, Object>> invalid =
-                List.of(
-                        Map.of(
-                                "key",
-                                "bad-ttl",
-                                "value",
-                                1,
-                                "ttl_seconds",
-                                0), // EXPIRE 0 deletes the key
-                        Map.of("key", "bad-ttl", "value", 1, "ttl_seconds", -1),
-                        Map.of("key", "", "value", 1));
-        for (Map<String, Object> body : invalid) {
-            HttpClientResponseException ex =
-                    catchThrowableOfType(
-                            HttpClientResponseException.class,
-                            () -> client.toBlocking().exchange(HttpRequest.POST("/cache", body)));
-            assertThat((Object) ex.getStatus())
-                    .as("%s", body)
-                    .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
-            assertThat(ex.getResponse().getBody(String.class).orElse("")).contains("\"detail\"");
-        }
+    void rejectedEntryStoresNothing() {
         HttpClientResponseException missing =
                 catchThrowableOfType(
                         HttpClientResponseException.class,

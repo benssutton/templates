@@ -18,6 +18,8 @@ import java.sql.DriverManager;
 import java.sql.Statement;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 @MicronautTest
 class DataControllerTest extends IntegrationSupport {
@@ -57,17 +59,16 @@ class DataControllerTest extends IntegrationSupport {
     }
 
     /** FastAPI/Rust parity: an out-of-range limit is 422 {"detail": ...}, not Micronaut's 400. */
-    @Test
-    void limitOutOfRangeIs422() {
-        for (String limit : new String[] {"0", "101"}) {
-            HttpClientResponseException ex =
-                    catchThrowableOfType(
-                            HttpClientResponseException.class,
-                            () ->
-                                    client.toBlocking()
-                                            .exchange(HttpRequest.GET("/data?limit=" + limit)));
-            assertThat((Object) ex.getStatus()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
-            assertThat(ex.getResponse().getBody(String.class).orElse("")).contains("limit");
-        }
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "101"})
+    void limitOutOfRangeIs422(String limit) {
+        HttpClientResponseException ex =
+                catchThrowableOfType(
+                        HttpClientResponseException.class,
+                        () ->
+                                client.toBlocking()
+                                        .exchange(HttpRequest.GET("/data?limit=" + limit)));
+        assertThat((Object) ex.getStatus()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(ex.getResponse().getBody(String.class).orElse("")).contains("limit");
     }
 }

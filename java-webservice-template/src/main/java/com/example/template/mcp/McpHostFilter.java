@@ -3,6 +3,7 @@ package com.example.template.mcp;
 import com.example.template.config.AppSettings;
 import com.example.template.dto.ErrorDetail;
 import io.micronaut.core.annotation.Nullable;
+import io.micronaut.core.order.Ordered;
 import io.micronaut.http.HttpHeaders;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpResponse;
@@ -10,6 +11,7 @@ import io.micronaut.http.HttpStatus;
 import io.micronaut.http.MediaType;
 import io.micronaut.http.annotation.RequestFilter;
 import io.micronaut.http.annotation.ServerFilter;
+import io.micronaut.http.filter.ServerFilterPhase;
 import jakarta.inject.Inject;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -29,7 +31,7 @@ import java.util.Locale;
  * evil.example}, not localhost.
  */
 @ServerFilter({"/mcp", "/mcp/**"})
-public class McpHostFilter {
+public class McpHostFilter implements Ordered {
 
     private static final int ANY_PORT = -1;
 
@@ -84,6 +86,12 @@ public class McpHostFilter {
             return null;
         }
         return new Authority(uri.getHost().toLowerCase(Locale.ROOT), uri.getPort());
+    }
+
+    /** Runs ahead of security; see ServerFilterPhase (correlation, timing, last-request, host). */
+    @Override
+    public int getOrder() {
+        return ServerFilterPhase.SECURITY.before();
     }
 
     @RequestFilter

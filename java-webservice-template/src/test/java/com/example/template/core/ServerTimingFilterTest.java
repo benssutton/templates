@@ -23,7 +23,7 @@ class ServerTimingFilterTest extends IntegrationSupport {
     static class Probe {
         @Get
         String work() throws InterruptedException {
-            try (Timed t = Timed.start("db.query")) {
+            try (var _ = Timed.start("db.query")) {
                 Thread.sleep(5);
             }
             return "ok";

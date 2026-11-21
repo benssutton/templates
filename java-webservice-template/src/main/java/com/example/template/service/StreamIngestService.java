@@ -286,7 +286,7 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
     public void ingestBatch(List<LsmRow> batch) {
         try {
             if (!batch.isEmpty()) {
-                try (Timed t = Timed.start("ingest.lsm_write")) {
+                try (var _ = Timed.start("ingest.lsm_write")) {
                     record(batch);
                 }
             }

@@ -1,10 +1,12 @@
 package com.example.template.core;
 
+import io.micronaut.core.order.Ordered;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.MutableHttpResponse;
 import io.micronaut.http.annotation.RequestFilter;
 import io.micronaut.http.annotation.ResponseFilter;
 import io.micronaut.http.annotation.ServerFilter;
+import io.micronaut.http.filter.ServerFilterPhase;
 
 /**
  * Installs a request-scoped {@link BoundarySamples} holder and renders the W3C {@code
@@ -12,9 +14,15 @@ import io.micronaut.http.annotation.ServerFilter;
  * Python ServerTimingMiddleware.
  */
 @ServerFilter("/**")
-public class ServerTimingFilter {
+public class ServerTimingFilter implements Ordered {
 
     private static final String START_ATTR = "serverTimingStart";
+
+    /** Runs ahead of security; see ServerFilterPhase (correlation, timing, last-request, host). */
+    @Override
+    public int getOrder() {
+        return ServerFilterPhase.FIRST.order();
+    }
 
     @RequestFilter
     public void onRequest(HttpRequest<?> request) {
