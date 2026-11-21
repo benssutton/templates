@@ -84,8 +84,8 @@ class HealthService:
 
     async def dependencies(self) -> list[ProbeResult]:
         """Probe every dependency, reusing a result younger than
-        health_probe_cache_seconds; concurrent callers share one probe round."""
-        ttl = self.settings.health_probe_cache_seconds
+        health_cache_ttl_seconds; concurrent callers share one probe round."""
+        ttl = self.settings.health_cache_ttl_seconds
         async with self._probe_lock:
             now = time.monotonic()
             if self._cached is not None and now - self._cached[0] < ttl:

@@ -52,7 +52,7 @@ async def test_dependency_probes_are_cached_for_the_ttl(ttl, expected_pings):
     async def ping() -> None:
         calls.append("ping")
 
-    settings = Settings(ingest_transport="noop", health_probe_cache_seconds=ttl)
+    settings = Settings(ingest_transport="noop", health_cache_ttl_seconds=ttl)
     health = _health(settings, {"store": ping})
     for _ in range(3):
         await health.dependencies()
@@ -66,7 +66,7 @@ async def test_concurrent_callers_share_one_probe_round():
         calls.append("ping")
         await asyncio.sleep(0.05)
 
-    settings = Settings(ingest_transport="noop", health_probe_cache_seconds=60.0)
+    settings = Settings(ingest_transport="noop", health_cache_ttl_seconds=60.0)
     health = _health(settings, {"store": slow_ping})
     await asyncio.gather(*(health.dependencies() for _ in range(5)))
     assert calls == ["ping"]

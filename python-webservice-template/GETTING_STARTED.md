@@ -47,9 +47,9 @@ The app applies its Postgres and ClickHouse migrations (`migrations/`) at startu
 python main.py
 ```
 
-Swagger is at https://localhost/docs. `python main.py` serves HTTPS on 443; the
-container listens on 8443 and compose publishes it as `443:8443`, so both are
-reached at `https://localhost/`. Your browser will warn about the self-signed
+Swagger is at https://localhost:8443/docs when run with `python main.py` (HTTPS on
+8443). Under compose the container listens on 8443 and publishes it as `443:8443`,
+so it is reached at `https://localhost/`. Your browser will warn about the self-signed
 certificate: accept it (dev only).
 
 ## Running the Tests
