@@ -239,9 +239,9 @@ class StreamIngestServiceTest {
             consumer.queue.offer(bad);
             await().atMost(2, TimeUnit.SECONDS)
                     .until(() -> !ok.outcomes.isEmpty() && !bad.outcomes.isEmpty());
-            assertThat(svc.settlementCount(StreamIngestService.Outcome.ACCEPT)).isEqualTo(1);
-            assertThat(svc.settlementCount(StreamIngestService.Outcome.REJECT)).isEqualTo(1);
-            assertThat(svc.settlementCount(StreamIngestService.Outcome.FAIL)).isZero();
+            assertThat(svc.outcomeCount(StreamIngestService.Outcome.ACCEPTED)).isEqualTo(1);
+            assertThat(svc.outcomeCount(StreamIngestService.Outcome.REJECTED)).isEqualTo(1);
+            assertThat(svc.outcomeCount(StreamIngestService.Outcome.FAILED)).isZero();
             assertThat(svc.rowsIngestedTotal()).isEqualTo(1);
         } finally {
             svc.close();

@@ -26,9 +26,13 @@ class MetricsControllerTest extends IntegrationSupport {
         assertThat(body).contains("jvm_memory_used_bytes"); // standard Micrometer binder
         // Totals are counters; settlements are split by outcome.
         assertThat(body).contains("# TYPE ingest_rows_ingested_total counter");
-        assertThat(body).contains("ingest_settlements_total{outcome=\"accept\"}");
-        assertThat(body).contains("ingest_settlements_total{outcome=\"reject\"}");
-        assertThat(body).contains("# TYPE lsm_rows_evicted_total counter");
+        for (String outcome : new String[] {"accepted", "failed", "rejected"}) {
+            assertThat(body).contains("ingest_outcomes_total{outcome=\"" + outcome + "\"}");
+        }
+        assertThat(body).doesNotContain("ingest_settlements");
+        assertThat(body).contains("ingest_connection_state{");
+        assertThat(body).contains("state=\"connected\"");
+        assertThat(body).contains("# TYPE lsm_evicted_rows_total counter");
         assertThat(body).contains("dependency_up{name=\"postgres\"} 1.0");
     }
 

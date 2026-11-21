@@ -2,7 +2,7 @@ micronaut:
   application:
     name: java-template
   server:
-    port: ${SERVER_PORT:8080}
+    port: ${SERVER_PORT:8443}
     max-request-size: 16MB
     cors:
       enabled: true

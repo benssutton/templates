@@ -5,6 +5,7 @@ import com.example.template.dto.CachedDataRowsResponse;
 import com.example.template.dto.DataRowsResponse;
 import com.example.template.dto.IngestAccepted;
 import com.example.template.ingestion.ArrowDecoder;
+import com.example.template.ingestion.MalformedBatchException;
 import com.example.template.persistence.streamstore.LsmRow;
 import com.example.template.service.CachedDataService;
 import com.example.template.service.DataService;
@@ -72,6 +73,9 @@ public class DataController {
         List<LsmRow> rows;
         try (Timed t = Timed.start("ingest.decode")) {
             rows = decoder.decodeAll(body);
+        } catch (MalformedBatchException e) {
+            ingestService.countRejected();
+            throw e;
         }
         ingestService.ingestBatch(rows);
         return HttpResponse.accepted().body(IngestAccepted.INSTANCE);

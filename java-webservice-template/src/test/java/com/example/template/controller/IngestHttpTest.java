@@ -171,6 +171,29 @@ class IngestHttpTest extends IntegrationSupport {
 
     @Inject LsmStore store;
 
+    private double outcomeCount(String outcome) {
+        String body = client.toBlocking().retrieve(HttpRequest.GET("/metrics"));
+        String prefix = "ingest_outcomes_total{outcome=\"" + outcome + "\"} ";
+        return body.lines()
+                .filter(l -> l.startsWith(prefix))
+                .mapToDouble(l -> Double.parseDouble(l.substring(prefix.length())))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    /** HTTP ingest counts in ingest_outcomes_total, like a transport delivery. */
+    @Test
+    void httpIngestIsCountedByOutcome() {
+        double accepted = outcomeCount("accepted");
+        double rejected = outcomeCount("rejected");
+        assertThat(postIngest(ArrowBatches.encode(List.of(row(601, "upsert"))))[0])
+                .isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(postIngest(ArrowBatches.encode(List.of(row(602, "bogus"))))[0])
+                .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(outcomeCount("accepted")).isEqualTo(accepted + 1);
+        assertThat(outcomeCount("rejected")).isEqualTo(rejected + 1);
+    }
+
     /** A stream whose second batch is invalid stores nothing from its first batch either. */
     @Test
     void everyBatchIsValidatedBeforeAnyIsWritten() {

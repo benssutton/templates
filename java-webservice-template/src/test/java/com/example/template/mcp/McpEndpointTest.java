@@ -36,6 +36,8 @@ class McpEndpointTest extends IntegrationSupport {
     @Client("/")
     HttpClient client;
 
+    @Inject io.micronaut.json.JsonMapper json;
+
     @Test
     void sdkClientCompletesHandshakeAndCallsTool() {
         McpSchema.InitializeResult init = mcp.initialize();
@@ -52,9 +54,30 @@ class McpEndpointTest extends IntegrationSupport {
                         "get_data",
                         "get_cached_data");
 
-        // Real readiness, in the same snake_case JSON as GET /health/ready.
-        String health = text(call("get_health_status", Map.of()));
-        assertThat(health).contains("\"status\":\"ready\"").contains("\"latency_ms\"");
+        // The detailed status, same top-level keys as GET /health/status.
+        McpSchema.CallToolResult result = call("get_health_status", Map.of());
+        assertThat(result.content()).hasSize(1);
+        Map<String, Object> viaMcp = parse(text(result));
+        Map<String, Object> viaRest =
+                parse(client.toBlocking().retrieve(HttpRequest.GET("/health/status")));
+        assertThat(viaMcp.keySet()).isEqualTo(viaRest.keySet());
+    }
+
+    private Object parseJson(String body) {
+        try {
+            return json.readValue(body, Object.class);
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parse(String body) {
+        try {
+            return json.readValue(body, Map.class);
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private McpSchema.CallToolResult call(String tool, Map<String, Object> args) {
@@ -72,8 +95,11 @@ class McpEndpointTest extends IntegrationSupport {
         mcp.initialize();
         client.toBlocking()
                 .exchange(HttpRequest.POST("/config", Map.of("key", "mcp-k", "value", "mcp-v")));
-        assertThat(text(call("get_config", Map.of())))
-                .contains("{\"key\":\"mcp-k\",\"value\":\"mcp-v\"}");
+        McpSchema.CallToolResult cfg = call("get_config", Map.of());
+        assertThat(cfg.content()).hasSize(1);
+        assertThat(text(cfg)).startsWith("[").contains("{\"key\":\"mcp-k\",\"value\":\"mcp-v\"}");
+        assertThat(parseJson(text(cfg)))
+                .isEqualTo(parseJson(client.toBlocking().retrieve(HttpRequest.GET("/config"))));
 
         client.toBlocking()
                 .exchange(

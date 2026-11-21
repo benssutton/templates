@@ -73,6 +73,7 @@ constraint fails startup.
 
 | Env | Default | Meaning |
 |---|---|---|
+| `SERVER_PORT` | `8443` | HTTP listen port |
 | `INGEST_TRANSPORT` | `noop` | `noop` (HTTP ingest only) or `solace` |
 | `MCP_ALLOWED_HOSTS` | `localhost` | `/mcp` Host/Origin allow-list: JSON array or comma-separated `host[:port]` (no port = any port) |
 | `AUTH_ENABLED` | `false` | require `Authorization: Bearer <HS256 JWT>` on every route but `/health/live` and `/health/ready` |
@@ -107,7 +108,7 @@ and answers 413 when a batch's decoded Arrow buffers exceed `max-batch-bytes`. A
 decodes share one Arrow allocator bounded by `decoder-memory-bytes`.
 
 The LSM store is append-only and bounded by `lsm-max-rows`: the oldest rows are evicted,
-counted (`lsm_rows_evicted_total`, `rows_evicted_total` on the ingest health) and logged
+counted (`lsm_evicted_rows_total`, `rows_evicted_total` on the ingest health) and logged
 at WARN at most once a minute. Compaction is left to the client.
 
 **Solace (`INGEST_TRANSPORT=solace`).** `SolaceBatchConsumer` binds a durable exclusive
@@ -117,11 +118,11 @@ once after the write:
 
 | Situation | Outcome |
 |---|---|
-| Written to the store | ACCEPT |
-| Store write or decode memory failed | FAIL: redelivered after a jittered, doubling backoff (`retry-base-delay-seconds` to `retry-max-delay-seconds`) |
-| Over `max-batch-bytes` (checked before decoding), not Arrow IPC, or invalid | REJECT: never redelivered |
+| Written to the store | ACCEPTED |
+| Store write or decode memory failed | FAILED: redelivered after a jittered, doubling backoff (`retry-base-delay-seconds` to `retry-max-delay-seconds`) |
+| Over `max-batch-bytes` (checked before decoding), not Arrow IPC, or invalid | REJECTED: never redelivered |
 
-Settlements are counted in `ingest_settlements_total{outcome}`. Auto-created queues have
+Outcomes are counted in `ingest_outcomes_total{outcome=accepted|failed|rejected}`, which also counts HTTP `POST /data/ingest` requests (accepted, or rejected on a 4xx decode error). `ingest_connection_state{transport,state}` is 1 for the transport's current state (`connected`, `reconnecting`, `down`). Auto-created queues have
 unlimited redelivery and no dead-message queue; production queues should set both.
 
 The consumer connects lazily inside the ingest loop, so the app comes up live with

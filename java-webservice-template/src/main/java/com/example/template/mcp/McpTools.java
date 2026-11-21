@@ -2,10 +2,9 @@ package com.example.template.mcp;
 
 import com.example.template.dto.CacheEntry;
 import com.example.template.dto.CachedDataRowsResponse;
-import com.example.template.dto.ConfigEntry;
 import com.example.template.dto.DataRowsResponse;
 import com.example.template.dto.ErrorDetail;
-import com.example.template.dto.health.ReadinessResponse;
+import com.example.template.dto.health.DetailedStatusResponse;
 import com.example.template.service.CacheService;
 import com.example.template.service.CachedDataService;
 import com.example.template.service.ConfigService;
@@ -22,7 +21,6 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import java.io.IOException;
-import java.util.List;
 
 /**
  * MCP tools at {@code /mcp}, served by micronaut-mcp (the official MCP Java SDK's stateless
@@ -56,20 +54,22 @@ public class McpTools {
         this.cachedData = cachedData;
     }
 
-    /** GET /health/ready. */
+    /** GET /health/status. */
     @Tool(
             name = "get_health_status",
-            description = "Readiness of the service and each dependency (GET /health/ready).")
-    public ReadinessResponse getHealthStatus() {
-        return health.readiness();
+            description = "Detailed application status (GET /health/status).")
+    public DetailedStatusResponse getHealthStatus() {
+        return health.detailedStatus();
     }
 
     /** GET /config. */
     @Tool(
             name = "get_config",
             description = "All configuration entries, ordered by key (GET /config).")
-    public List<ConfigEntry> getConfig() {
-        return config.getAll();
+    public McpSchema.CallToolResult getConfig() throws IOException {
+        return McpSchema.CallToolResult.builder()
+                .addTextContent(json.writeValueAsString(config.getAll()))
+                .build();
     }
 
     /**
