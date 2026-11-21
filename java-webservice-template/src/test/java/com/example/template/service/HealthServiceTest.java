@@ -24,6 +24,7 @@ import com.example.template.support.TestSettings;
 import io.micronaut.core.propagation.PropagatedContext;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -36,7 +37,8 @@ class HealthServiceTest {
 
     private static final org.slf4j.Logger PROBE_LOG = LoggerFactory.getLogger("test.probe");
 
-    private static DependencyHealthProbe probe(String name, Duration delay, boolean throwInstead) {
+    /** Returns at once: up, or throwing. */
+    private static DependencyHealthProbe probe(String name, boolean throwInstead) {
         return new DependencyHealthProbe() {
             @Override
             public String name() {
@@ -46,13 +48,54 @@ class HealthServiceTest {
             @Override
             public ProbeResult probe() {
                 PROBE_LOG.info("probing {}", name);
+                if (throwInstead) throw new IllegalStateException("boom");
+                return ProbeResult.up(name, 0);
+            }
+        };
+    }
+
+    /**
+     * Blocks until all {@code parties} probes sharing {@code barrier} have started (or until
+     * interrupted by the timeout): it is up only if the probes really run concurrently.
+     */
+    private static DependencyHealthProbe barrierProbe(String name, CountDownLatch barrier) {
+        return new DependencyHealthProbe() {
+            @Override
+            public String name() {
+                return name;
+            }
+
+            @Override
+            public ProbeResult probe() {
+                barrier.countDown();
                 try {
-                    Thread.sleep(delay);
+                    barrier.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("interrupted", e);
+                }
+                return ProbeResult.up(name, 0);
+            }
+        };
+    }
+
+    /** Hangs until interrupted (the timeout's cancellation), like a blackholed dependency. */
+    private static DependencyHealthProbe hungProbe(String name) {
+        CountDownLatch never = new CountDownLatch(1);
+        return new DependencyHealthProbe() {
+            @Override
+            public String name() {
+                return name;
+            }
+
+            @Override
+            public ProbeResult probe() {
+                try {
+                    never.await();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
-                if (throwInstead) throw new IllegalStateException("boom");
-                return ProbeResult.up(name, delay.toMillis());
+                throw new IllegalStateException("hung probe interrupted");
             }
         };
     }
@@ -148,20 +191,25 @@ class HealthServiceTest {
         assertThat(service(1.0, 0, true).readiness().status()).isEqualTo(ReadinessStatus.NOT_READY);
     }
 
+    /*
+     * No tight wall-clock bounds: under concurrent test classes a virtual thread can be scheduled
+     * late. The fast probes return at once, the hung one only ends when the timeout interrupts it,
+     * and the elapsed time is only checked against the hang, not against the timeout.
+     */
     @Test
     void hungProbeTimesOutAsDownWithoutBlockingTheOthers() {
         HealthService svc =
                 service(
-                        0.3,
-                        probe("postgres", Duration.ofMillis(10), false),
-                        probe("clickhouse", Duration.ofSeconds(30), false),
-                        probe("redis", Duration.ofMillis(10), false));
+                        1.5,
+                        probe("postgres", false),
+                        hungProbe("clickhouse"),
+                        probe("redis", false));
 
         long start = System.nanoTime();
         ReadinessResponse r = svc.readiness();
         Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
 
-        assertThat(elapsed).isLessThan(Duration.ofSeconds(2));
+        assertThat(elapsed).isLessThan(Duration.ofSeconds(10));
         assertThat(r.status()).isEqualTo(ReadinessStatus.NOT_READY);
         assertThat(r.checks())
                 .filteredOn(c -> c.name().equals("clickhouse"))
@@ -176,23 +224,22 @@ class HealthServiceTest {
                 .containsOnly(ProbeStatus.UP);
     }
 
+    /** Each probe waits for the other two to start, so all are up only if they run at once. */
     @Test
     void probesRunConcurrently() {
+        CountDownLatch allStarted = new CountDownLatch(3);
         HealthService svc =
                 service(
-                        2.0,
-                        probe("a", Duration.ofMillis(400), false),
-                        probe("b", Duration.ofMillis(400), false),
-                        probe("c", Duration.ofMillis(400), false));
-        long start = System.nanoTime();
+                        5.0,
+                        barrierProbe("a", allStarted),
+                        barrierProbe("b", allStarted),
+                        barrierProbe("c", allStarted));
         assertThat(svc.readiness().status()).isEqualTo(ReadinessStatus.READY);
-        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofMillis(1000));
     }
 
     @Test
     void throwingProbeIsDownAndKeepsOrder() {
-        HealthService svc =
-                service(1.0, probe("a", Duration.ZERO, false), probe("b", Duration.ZERO, true));
+        HealthService svc = service(1.0, probe("a", false), probe("b", true));
         assertThat(svc.detailedStatus().dependencies())
                 .extracting(ProbeResult::name, ProbeResult::status)
                 .containsExactly(tuple("a", ProbeStatus.UP), tuple("b", ProbeStatus.DOWN));
@@ -209,7 +256,7 @@ class HealthServiceTest {
         appender.start();
         logger.addAppender(appender);
         try {
-            HealthService svc = service(1.0, probe("a", Duration.ZERO, false));
+            HealthService svc = service(1.0, probe("a", false));
             try (PropagatedContext.Scope ignored =
                     PropagatedContext.getOrEmpty()
                             .plus(new MdcPropagationContext("cid-probe-1"))

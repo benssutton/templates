@@ -42,4 +42,25 @@ class RetryTest {
                 .isInstanceOf(RuntimeException.class);
         assertThat(attempts.get()).isEqualTo(3);
     }
+
+    @Test
+    void backoffDoublesUpToTheCap() {
+        Duration base = Duration.ofSeconds(1);
+        Duration max = Duration.ofSeconds(30);
+        assertThat(Retry.backoff(base, max, 1)).isEqualTo(Duration.ofSeconds(1));
+        assertThat(Retry.backoff(base, max, 2)).isEqualTo(Duration.ofSeconds(2));
+        assertThat(Retry.backoff(base, max, 5)).isEqualTo(Duration.ofSeconds(16));
+        assertThat(Retry.backoff(base, max, 6)).isEqualTo(max);
+    }
+
+    /** A huge base delay and attempt number saturate at the cap instead of overflowing. */
+    @Test
+    void backoffSaturatesWithoutOverflow() {
+        Duration huge = Duration.ofDays(365L * 1_000_000);
+        Duration max = Duration.ofSeconds(30);
+        assertThat(Retry.backoff(huge, max, Integer.MAX_VALUE)).isEqualTo(max);
+        assertThat(Retry.backoff(huge, max, 40)).isEqualTo(max);
+        assertThat(Retry.backoff(Duration.ofSeconds(1), max, Integer.MAX_VALUE)).isEqualTo(max);
+        assertThat(Retry.backoff(huge, huge, 2)).isEqualTo(huge);
+    }
 }

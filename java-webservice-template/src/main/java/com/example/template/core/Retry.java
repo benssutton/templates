@@ -37,10 +37,7 @@ public final class Retry {
                     LOG.error("{}: all {} connection attempts failed", label, maxAttempts);
                     throw e;
                 }
-                Duration delay = baseDelay.multipliedBy(1L << Math.min(attempt - 1, 30));
-                if (delay.compareTo(maxDelay) > 0) {
-                    delay = maxDelay;
-                }
+                Duration delay = backoff(baseDelay, maxDelay, attempt);
                 long waitMs =
                         (long)
                                 (delay.toMillis()
@@ -56,5 +53,18 @@ public final class Retry {
             }
         }
         throw new IllegalStateException("unreachable");
+    }
+
+    /**
+     * {@code baseDelay * 2^(attempt-1)}, capped at {@code maxDelay}. The cap is tested against
+     * {@code maxDelay / 2^n} first, so the product is only formed when it fits under {@code
+     * maxDelay} and can never overflow {@link Duration}.
+     */
+    static Duration backoff(Duration baseDelay, Duration maxDelay, int attempt) {
+        long factor = 1L << Math.min(Math.max(attempt - 1, 0), 62);
+        if (baseDelay.compareTo(maxDelay.dividedBy(factor)) > 0) {
+            return maxDelay;
+        }
+        return baseDelay.multipliedBy(factor);
     }
 }

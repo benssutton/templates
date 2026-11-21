@@ -142,6 +142,19 @@ class AuthTest extends IntegrationSupport {
         assertThat(send(HttpRequest.GET("/config").bearerAuth(token)).status()).isEqualTo(200);
     }
 
+    /** Accepting a missing sub must not skip the other claim checks. */
+    @Test
+    void tokenWithoutSubAndWrongIssuerIs401() throws Exception {
+        String token =
+                token(
+                        SECRET,
+                        null,
+                        "https://evil.example",
+                        AUDIENCE,
+                        Instant.now().plusSeconds(300));
+        assertNotAuthenticated(send(HttpRequest.GET("/config").bearerAuth(token)));
+    }
+
     @Test
     void probesStayOpen() {
         assertThat(send(HttpRequest.GET("/health/live")).status()).isEqualTo(200);
