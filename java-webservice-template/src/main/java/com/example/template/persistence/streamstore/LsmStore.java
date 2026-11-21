@@ -17,11 +17,11 @@ import org.slf4j.LoggerFactory;
  *
  * <p>One writer at a time ({@code ingest} is synchronized); readers never lock, they read an
  * immutable {@link Snapshot} published at the end of every write. Delete tombstones shadow older
- * versions until a full compaction, where they are dropped. Over {@code maxRows} the writer
- * compacts everything, then evicts the oldest live rows (lowest seqno) and counts them.
+ * versions until a full compaction, where they are dropped.
  *
- * <p>Eviction policy: past {@code maxRows}, evict down to {@code maxRows - max(1, maxRows / 10)},
- * so the next compact-and-evict is a tenth of the cap away rather than on every ingest.
+ * <p>Eviction policy: over {@code maxRows} stored rows the store compacts; only if live rows still
+ * exceed {@code maxRows} does it evict the oldest (lowest seqno) down to {@code maxRows - max(1,
+ * maxRows / 10)}, and count them, so the next eviction is a tenth of the cap away.
  */
 public class LsmStore {
 
@@ -95,7 +95,11 @@ public class LsmStore {
             }
         }
         if (storedRows() > maxRows) {
-            evictOldest(compact());
+            // Shadowed versions and tombstones count as stored; compaction may be enough.
+            TreeMap<Long, LsmRow> live = compact();
+            if (live.size() > maxRows) {
+                evictOldest(live);
+            }
         }
         publish();
     }

@@ -88,6 +88,46 @@ class LsmStoreTest {
         assertThat(store.evictedRows()).isEqualTo(2);
     }
 
+    /**
+     * Overwrites push stored rows (shadowed versions included) past the cap, but live rows stay
+     * under it: compaction alone suffices and no live row is evicted.
+     */
+    @Test
+    void overwritesThatCrossTheCapEvictNothing() {
+        // flushRows 10 and compactionRuns 1000: every 10 rows become a run, and runs only merge
+        // at the cap, so shadowed versions accumulate across runs.
+        LsmStore store = new LsmStore(10, 1_000, 1_000);
+        for (long id = 1; id <= 950; id += 10) {
+            List<LsmRow> batch = new ArrayList<>();
+            for (long k = id; k < id + 10; k++) {
+                batch.add(upsert(k, "a"));
+            }
+            store.ingest(batch);
+        }
+        // 200 overwrites: stored rows reach 1010 after the 6th batch (crossing the cap at 1000),
+        // and cross again later. Only 950 live rows throughout.
+        for (long id = 1; id <= 200; id += 10) {
+            List<LsmRow> batch = new ArrayList<>();
+            for (long k = id; k < id + 10; k++) {
+                batch.add(upsert(k, "b"));
+            }
+            store.ingest(batch);
+        }
+
+        LsmStore.QueryResult r = store.query(1_000);
+        assertThat(store.evictedRows()).isZero();
+        assertThat(r.total()).isEqualTo(950);
+        assertThat(r.rows())
+                .filteredOn(row -> row.id() <= 200)
+                .extracting(LsmRow::value)
+                .hasSize(200)
+                .containsOnly("b");
+        assertThat(r.rows())
+                .filteredOn(row -> row.id() > 200)
+                .extracting(LsmRow::value)
+                .containsOnly("a");
+    }
+
     /** Cap 100, low-water 90: one-row ingests evict 11 rows every 11th ingest, not every time. */
     @Test
     void evictionIsAmortisedNotPerIngest() {
