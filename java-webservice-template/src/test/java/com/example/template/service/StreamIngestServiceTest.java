@@ -106,6 +106,10 @@ class StreamIngestServiceTest {
 
     /** A real store whose write raises: an unexpected, possibly transient storage error. */
     static final class FailingStore extends LsmStore {
+        FailingStore() {
+            super(1000, 4, 1_000_000);
+        }
+
         @Override
         public void ingest(List<LsmRow> batch) {
             throw new IllegalStateException("simulated storage failure");
@@ -165,7 +169,7 @@ class StreamIngestServiceTest {
 
     @Test
     void successfulWriteAcceptsAndLandsInStore() {
-        LsmStore store = new LsmStore();
+        LsmStore store = new LsmStore(1000, 4, 1_000_000);
         RecordingDelivery d = RecordingDelivery.of(new LsmRow(1, "a", "x", 0, "upsert"));
         assertThat(settle(d, store, settings())).containsExactly("accept");
         assertThat(store.query(10).total()).isEqualTo(1);
@@ -174,7 +178,7 @@ class StreamIngestServiceTest {
     /** The size limit is checked on the encoded payload before any decoding memory is spent. */
     @Test
     void oversizedPayloadRejectsWithoutDecoding() {
-        LsmStore store = new LsmStore();
+        LsmStore store = new LsmStore(1000, 4, 1_000_000);
         CountingDecoder decoder = new CountingDecoder();
         RecordingDelivery d = RecordingDelivery.of(new LsmRow(1, "a", "x", 0, "upsert"));
         assertThat(settle(d, store, settings(0, 0, 1), decoder)).containsExactly("reject");
@@ -184,7 +188,7 @@ class StreamIngestServiceTest {
 
     @Test
     void malformedOrUnknownOpPayloadRejects() {
-        LsmStore store = new LsmStore();
+        LsmStore store = new LsmStore(1000, 4, 1_000_000);
         assertThat(settle(new RecordingDelivery("not arrow".getBytes()), store, settings()))
                 .containsExactly("reject");
         assertThat(
@@ -204,6 +208,10 @@ class StreamIngestServiceTest {
 
     /** A store that records the MDC correlation id each write ran under. */
     static final class MdcRecordingStore extends LsmStore {
+        MdcRecordingStore() {
+            super(1000, 4, 1_000_000);
+        }
+
         final List<String> ids = new CopyOnWriteArrayList<>();
 
         @Override
@@ -230,7 +238,8 @@ class StreamIngestServiceTest {
     @Test
     void settlementsAreCountedByOutcome() {
         ScriptedConsumer consumer = new ScriptedConsumer();
-        StreamIngestService svc = service(consumer, new LsmStore(), settings(), () -> {});
+        StreamIngestService svc =
+                service(consumer, new LsmStore(1000, 4, 1_000_000), settings(), () -> {});
         svc.start();
         try {
             RecordingDelivery ok = RecordingDelivery.of(new LsmRow(1, "a", "x", 0, "upsert"));
@@ -352,7 +361,8 @@ class StreamIngestServiceTest {
                         throw new IllegalStateException("transport down");
                     }
                 };
-        StreamIngestService svc = service(consumer, new LsmStore(), settings(), () -> {});
+        StreamIngestService svc =
+                service(consumer, new LsmStore(1000, 4, 1_000_000), settings(), () -> {});
         svc.start();
         try {
             await().atMost(2, TimeUnit.SECONDS).until(() -> calls.get() == 1);
@@ -386,7 +396,8 @@ class StreamIngestServiceTest {
         IngestSettings s = settings(0, 5, 16L * 1024 * 1024); // 5-consecutive-failures shutdown on
         FlakyConsumer consumer = new FlakyConsumer();
         AtomicBoolean shutdown = new AtomicBoolean();
-        StreamIngestService svc = service(consumer, new LsmStore(), s, () -> shutdown.set(true));
+        StreamIngestService svc =
+                service(consumer, new LsmStore(1000, 4, 1_000_000), s, () -> shutdown.set(true));
         svc.start();
         try {
             // 5 failures in total, but never 5 in a row: backoff ~1+2, reset, ~1+2+4 s.
@@ -428,7 +439,8 @@ class StreamIngestServiceTest {
         BindThenFailConsumer consumer =
                 new BindThenFailConsumer(6); // > max-consecutive-failures (5)
         AtomicBoolean shutdown = new AtomicBoolean();
-        StreamIngestService svc = service(consumer, new LsmStore(), s, () -> shutdown.set(true));
+        StreamIngestService svc =
+                service(consumer, new LsmStore(1000, 4, 1_000_000), s, () -> shutdown.set(true));
         svc.start();
         try {
             // Each bind resets the backoff to the 1 s base: 6 waits of 1-1.25 s, not 1+2+4+8+16.

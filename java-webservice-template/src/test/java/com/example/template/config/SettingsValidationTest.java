@@ -39,6 +39,9 @@ class SettingsValidationTest {
         List<Map<String, Object>> invalid =
                 List.of(
                         Map.of("template.ingest.lsm-max-rows", "0"),
+                        Map.of("template.ingest.lsm-flush-rows", "0"),
+                        Map.of("template.ingest.lsm-compaction-runs", "1"),
+                        Map.of("template.ingest.lsm-key-columns", "id,name"),
                         Map.of("template.ingest.transport", "kafka"),
                         Map.of("template.ingest.solace.port", "70000"),
                         Map.of("template.health-check-timeout-seconds", "0"),

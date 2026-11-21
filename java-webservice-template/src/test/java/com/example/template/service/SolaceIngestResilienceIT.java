@@ -27,7 +27,11 @@ class SolaceIngestResilienceIT {
         SolaceBatchConsumer consumer = new SolaceBatchConsumer(s);
         StreamIngestService svc =
                 new StreamIngestService(
-                        consumer, new LsmStore(), SolaceSupport.decoder(), s, shutdown::countDown);
+                        consumer,
+                        new LsmStore(1000, 4, 1_000_000),
+                        SolaceSupport.decoder(),
+                        s,
+                        shutdown::countDown);
         svc.start();
         try {
             await().atMost(30, TimeUnit.SECONDS).until(() -> SEMP.queueExists(names.queue()));
@@ -58,7 +62,7 @@ class SolaceIngestResilienceIT {
         StreamIngestService svc =
                 new StreamIngestService(
                         new SolaceBatchConsumer(s),
-                        new LsmStore(),
+                        new LsmStore(1000, 4, 1_000_000),
                         SolaceSupport.decoder(),
                         s,
                         shutdown::countDown);

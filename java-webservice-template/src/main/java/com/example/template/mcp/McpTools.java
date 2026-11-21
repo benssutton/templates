@@ -1,7 +1,6 @@
 package com.example.template.mcp;
 
 import com.example.template.dto.CacheEntry;
-import com.example.template.dto.CachedDataRowsResponse;
 import com.example.template.dto.DataRowsResponse;
 import com.example.template.dto.ErrorDetail;
 import com.example.template.dto.health.DetailedStatusResponse;
@@ -108,8 +107,9 @@ public class McpTools {
     /** GET /data/cache. */
     @Tool(
             name = "get_cached_data",
-            description = "Newest rows of the in-memory stream store (GET /data/cache).")
-    public CachedDataRowsResponse getCachedData(
+            description =
+                    "Merged live rows of the in-memory stream store, ordered by id (GET /data/cache).")
+    public DataRowsResponse getCachedData(
             @ToolArg(name = "limit", description = "Rows to return, 1-100") @Min(1) @Max(100)
                     int limit) {
         return cachedData.query(limit);

@@ -3,7 +3,8 @@ package com.example.template.controller;
 import static com.example.template.support.ArrowBatches.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.example.template.dto.CachedDataRowsResponse;
+import com.example.template.dto.DataRow;
+import com.example.template.dto.DataRowsResponse;
 import com.example.template.persistence.streamstore.LsmStore;
 import com.example.template.support.ArrowBatches;
 import com.example.template.support.IntegrationSupport;
@@ -143,7 +144,7 @@ class IngestHttpTest extends IntegrationSupport {
     }
 
     @Test
-    void ingestAcceptsArrowAndCacheReturnsRowWithSeqnoAndOp() throws Exception {
+    void ingestAcceptsArrowAndCacheReturnsTheMergedRow() throws Exception {
         HttpStatus status =
                 client.toBlocking()
                         .exchange(
@@ -155,18 +156,35 @@ class IngestHttpTest extends IntegrationSupport {
         assertThat((Object) status).isEqualTo(HttpStatus.ACCEPTED);
 
         // The store is shared by this class's tests, so look for this test's row (id 7).
-        CachedDataRowsResponse r =
+        DataRowsResponse r =
                 client.toBlocking()
-                        .retrieve(
-                                HttpRequest.GET("/data/cache?limit=100"),
-                                CachedDataRowsResponse.class);
-        assertThat(r.rows())
-                .filteredOn(r2 -> r2.id() == 7L)
-                .singleElement()
-                .satisfies(r2 -> {
-                    assertThat(r2.op()).isEqualTo("upsert");
-                    assertThat(r2.seqno()).isGreaterThanOrEqualTo(0L);
-                });
+                        .retrieve(HttpRequest.GET("/data/cache?limit=100"), DataRowsResponse.class);
+        assertThat(r.rows()).filteredOn(r2 -> r2.id() == 7L).hasSize(1);
+        assertThat(r.rows()).extracting(DataRow::id).isSorted();
+    }
+
+    /** Newest version per key wins and a delete removes the key; rows carry no seqno or op. */
+    @Test
+    void cacheServesTheMergedView() {
+        client.toBlocking()
+                .exchange(
+                        HttpRequest.POST(
+                                        "/data/ingest",
+                                        ArrowBatches.encodeBatches(
+                                                List.of(
+                                                        List.of(
+                                                                row(-3, "upsert"),
+                                                                row(-2, "upsert")),
+                                                        List.of(
+                                                                row(-3, "upsert"),
+                                                                row(-2, "delete")))))
+                                .contentType(MediaType.APPLICATION_OCTET_STREAM));
+        String body = client.toBlocking().retrieve(HttpRequest.GET("/data/cache?limit=100"));
+        assertThat(body).doesNotContain("seqno").doesNotContain("\"op\"");
+        DataRowsResponse r =
+                client.toBlocking()
+                        .retrieve(HttpRequest.GET("/data/cache?limit=100"), DataRowsResponse.class);
+        assertThat(r.rows()).extracting(DataRow::id).contains(-3L).doesNotContain(-2L);
     }
 
     @Inject LsmStore store;

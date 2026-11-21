@@ -118,7 +118,10 @@ template:
     # Exit after this many transport failures in a row without a bind (0 disables).
     max-consecutive-failures: 5
     staleness-threshold-seconds: 0
-    lsm-max-rows: 1000000   # retention cap for the append-only LSM store (oldest evicted)
+    lsm-max-rows: 1000000   # retention cap for the LSM store (oldest live rows evicted)
+    lsm-flush-rows: ${LSM_FLUSH_ROWS:1000}   # memtable -> sorted run threshold
+    lsm-compaction-runs: ${LSM_COMPACTION_RUNS:4}   # run count -> full compaction threshold
+    lsm-key-columns: ${LSM_KEY_COLUMNS:id}   # merge key; the Java store supports id only
     decoder-memory-bytes: 268435456   # direct memory bound shared by all Arrow decodes
     retry-base-delay-seconds: 1.0
     retry-max-delay-seconds: 60.0

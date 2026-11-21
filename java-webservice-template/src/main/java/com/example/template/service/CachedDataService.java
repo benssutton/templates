@@ -1,11 +1,14 @@
 package com.example.template.service;
 
-import com.example.template.dto.CachedDataRow;
-import com.example.template.dto.CachedDataRowsResponse;
+import com.example.template.dto.DataRow;
+import com.example.template.dto.DataRowsResponse;
 import com.example.template.persistence.streamstore.LsmStore;
 import jakarta.inject.Singleton;
 
-/** Reads of the in-memory LSM store: the newest {@code limit} rows, oldest first. */
+/**
+ * Reads of the in-memory LSM store: the merged live view (newest version per key, no deletes), the
+ * first {@code limit} by id.
+ */
 @Singleton
 public class CachedDataService {
 
@@ -15,12 +18,10 @@ public class CachedDataService {
         this.store = store;
     }
 
-    public CachedDataRowsResponse query(int limit) {
+    public DataRowsResponse query(int limit) {
         LsmStore.QueryResult result = store.query(limit);
-        return new CachedDataRowsResponse(
-                result.rows().stream()
-                        .map(r -> new CachedDataRow(r.id(), r.name(), r.value(), r.seqno(), r.op()))
-                        .toList(),
+        return new DataRowsResponse(
+                result.rows().stream().map(r -> new DataRow(r.id(), r.name(), r.value())).toList(),
                 result.total(),
                 limit);
     }

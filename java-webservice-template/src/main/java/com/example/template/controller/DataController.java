@@ -1,7 +1,6 @@
 package com.example.template.controller;
 
 import com.example.template.core.Timed;
-import com.example.template.dto.CachedDataRowsResponse;
 import com.example.template.dto.DataRowsResponse;
 import com.example.template.dto.IngestAccepted;
 import com.example.template.ingestion.ArrowDecoder;
@@ -25,7 +24,10 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.util.List;
 
-/** GET /data (ClickHouse, ordered by id), GET /data/cache (LSM, newest rows), POST /data/ingest. */
+/**
+ * GET /data (ClickHouse, ordered by id), GET /data/cache (LSM, merged view by id), POST
+ * /data/ingest.
+ */
 @Controller("/data")
 @Tag(name = "data")
 @ExecuteOn(TaskExecutors.BLOCKING)
@@ -54,8 +56,8 @@ public class DataController {
     }
 
     @Get("/cache")
-    @Operation(summary = "Newest rows of the in-memory stream store, oldest first")
-    public CachedDataRowsResponse getCachedData(
+    @Operation(summary = "Merged live rows of the in-memory stream store, ordered by id")
+    public DataRowsResponse getCachedData(
             @QueryValue(defaultValue = "10") @Min(1) @Max(100) int limit) {
         return cachedData.query(limit);
     }

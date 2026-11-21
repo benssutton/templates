@@ -2,6 +2,7 @@ package com.example.template.support;
 
 import com.example.template.config.AppSettings;
 import com.example.template.config.IngestSettings;
+import java.util.List;
 
 /** Settings records for tests that build services by hand (values mirror application.yml). */
 public final class TestSettings {
@@ -61,6 +62,9 @@ public final class TestSettings {
                 maxConsecutiveFailures,
                 0,
                 1_000_000,
+                1000,
+                4,
+                List.of("id"),
                 256L * 1024 * 1024,
                 1.0,
                 60.0,

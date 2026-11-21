@@ -26,7 +26,7 @@ parity is held by contract tests, not by mirroring code.
 | `GET /config`, `POST /config` | Postgres key/value configuration (POST 201) |
 | `GET /cache/{key}`, `POST /cache` | RedisJSON values with optional `ttl_seconds` (POST 201, GET 404 when absent) |
 | `GET /data?limit=1..100` | ClickHouse rows ordered by `id` |
-| `GET /data/cache?limit=1..100` | newest LSM rows (oldest first), each with `seqno` and `op` |
+| `GET /data/cache?limit=1..100` | merged LSM view (newest version per key wins, deletes removed), ordered by `id`, rows `{id, name, value}` |
 | `POST /data/ingest` | Arrow IPC stream (`application/octet-stream`), 202 |
 | `GET /health/live`, `/health/ready`, `/health/status` | liveness, readiness (503 when not ready), detailed status |
 | `GET /metrics` | Prometheus text |
@@ -107,9 +107,14 @@ non-null; `name`, `value` nullable utf8) land in the LSM store served from
 and answers 413 when a batch's decoded Arrow buffers exceed `max-batch-bytes`. All
 decodes share one Arrow allocator bounded by `decoder-memory-bytes`.
 
-The LSM store is append-only and bounded by `lsm-max-rows`: the oldest rows are evicted,
+The LSM store is a real in-memory LSM (memtable, sorted runs, full compaction): the newest
+version of a key wins and a `delete` tombstone hides it until compaction drops it. Writes
+flush at `lsm-flush-rows` (`LSM_FLUSH_ROWS`, 1000) and compact at `lsm-compaction-runs`
+(`LSM_COMPACTION_RUNS`, 4); the merge key is `id` only (`LSM_KEY_COLUMNS`). Readers never
+lock: they read an immutable snapshot built from the last write. The store is bounded by
+`lsm-max-rows`: over it everything is compacted and the oldest live rows are evicted,
 counted (`lsm_evicted_rows_total`, `rows_evicted_total` on the ingest health) and logged
-at WARN at most once a minute. Compaction is left to the client.
+at WARN at most once a minute.
 
 **Solace (`INGEST_TRANSPORT=solace`).** `SolaceBatchConsumer` binds a durable exclusive
 queue (`SOLACE_QUEUE`, one per replica), created on start with the topic subscription,
@@ -165,7 +170,7 @@ mounted at `/app/certs`; real deployments mount their own. Compose opts into
   a JSON-RPC protocol error). Test it with the SDK client in `McpEndpointTest`.
 
 ## Deliberate differences from the Python and Rust templates
-1. **Append-only LSM store**: `/data/cache` rows carry `seqno` and `op`; the client compacts.
+1. **Single-column LSM key**: the merge key is `id` only (`LSM_KEY_COLUMNS` accepts just `id`).
 2. **Stateless MCP transport** (micronaut-mcp's stateless Streamable HTTP: JSON responses,
    no sessions); Python and Rust are session-based.
 3. **Lazy Solace connect** (above); Python connects in its lifespan and fails startup.

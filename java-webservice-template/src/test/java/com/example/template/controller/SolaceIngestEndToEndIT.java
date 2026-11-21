@@ -3,7 +3,7 @@ package com.example.template.controller;
 import static com.example.template.support.SolaceSupport.SEMP;
 import static org.awaitility.Awaitility.await;
 
-import com.example.template.dto.CachedDataRowsResponse;
+import com.example.template.dto.DataRowsResponse;
 import com.example.template.persistence.streamstore.LsmRow;
 import com.example.template.support.ArrowBatches;
 import com.example.template.support.IntegrationSupport;
@@ -58,14 +58,18 @@ class SolaceIngestEndToEndIT extends IntegrationSupport {
                 NAMES.topic(),
                 ArrowBatches.encode(List.of(new LsmRow(1, "alpha", "v2", 0, "upsert"))));
 
+        // Merged view: two keys, and key 1 holds its newest version.
         await().atMost(30, TimeUnit.SECONDS)
-                .until(() ->
-                        client.toBlocking()
-                                        .retrieve(
-                                                HttpRequest.GET("/data/cache?limit=100"),
-                                                CachedDataRowsResponse.class)
-                                        .total()
-                                == 3);
+                .until(() -> {
+                    DataRowsResponse r =
+                            client.toBlocking()
+                                    .retrieve(
+                                            HttpRequest.GET("/data/cache?limit=100"),
+                                            DataRowsResponse.class);
+                    return r.total() == 2
+                            && r.rows().stream()
+                                    .anyMatch(x -> x.id() == 1L && "v2".equals(x.value()));
+                });
         await().atMost(10, TimeUnit.SECONDS)
                 .until(() -> SEMP.queueMessageCount(NAMES.queue()) == 0);
     }
