@@ -16,4 +16,23 @@ public record CheckResult(
         @Nullable Boolean threadAlive,
         @Nullable Instant lastBatchAt,
         @Nullable Double secondsSinceLastBatch,
-        @Nullable String error) {}
+        @Nullable String error) {
+
+    public static CheckResult dependency(ProbeResult p) {
+        return new CheckResult(
+                p.name(), p.status(), p.latencyMs(), null, null, null, null, null, p.error());
+    }
+
+    public static CheckResult ingest(IngestHealth h, ProbeStatus status) {
+        return new CheckResult(
+                "ingest",
+                status,
+                null,
+                h.transport(),
+                h.connectionState(),
+                h.threadAlive(),
+                h.lastBatchAt(),
+                h.secondsSinceLastBatch(),
+                null);
+    }
+}

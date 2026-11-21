@@ -57,6 +57,21 @@ class HealthServiceTest {
         };
     }
 
+    private static DependencyHealthProbe countingProbe(String name, AtomicInteger calls) {
+        return new DependencyHealthProbe() {
+            @Override
+            public String name() {
+                return name;
+            }
+
+            @Override
+            public ProbeResult probe() {
+                calls.incrementAndGet();
+                return ProbeResult.up(name, 0);
+            }
+        };
+    }
+
     private static HealthService service(
             double timeoutSeconds,
             double cacheTtlSeconds,
@@ -113,6 +128,17 @@ class HealthServiceTest {
 
     private static HealthService service(double timeoutSeconds, DependencyHealthProbe... probes) {
         return service(timeoutSeconds, 0, false, probes);
+    }
+
+    @Test
+    void readinessProbesLiveAndRefreshesTheCache() {
+        AtomicInteger calls = new AtomicInteger();
+        HealthService health = service(1.0, 60.0, countingProbe("pg", calls));
+        health.dependencies(); // 1: fills the cache
+        health.dependencies(); // cached
+        health.readiness(); // 2: live
+        health.dependencies(); // cached (refreshed by readiness)
+        assertThat(calls).hasValue(2);
     }
 
     /** The stub ingest is stale: it fails readiness only when stale-fails-readiness is on. */
