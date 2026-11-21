@@ -6,7 +6,7 @@ name: python-template
 
 services:
   db:
-    image: pgvector/pgvector:0.8.4-pg18
+    image: pgvector/pgvector:0.8.7-pg18
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
@@ -22,7 +22,7 @@ services:
       retries: 10
 
   clickhouse:
-    image: clickhouse/clickhouse-server:26.8.40.7
+    image: clickhouse/clickhouse-server:26.10.4.207
     ports:
       - "8123:8123"
     environment:
