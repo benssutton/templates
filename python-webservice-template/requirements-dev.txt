@@ -3,7 +3,7 @@
 
 # Lint / format / typecheck
 black>=26.10.1
-ruff>=0.15
+ruff>=0.17.5
 pyright>=1.1.400
 
 # Lock compilation (requirements.txt -> requirements.lock)
