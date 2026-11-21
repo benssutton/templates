@@ -12,13 +12,13 @@ TAG_METADATA = {
 router = APIRouter(tags=[TAG])
 
 
-@router.post("", response_model=ConfigEntry, status_code=201)
-@router.post("/", response_model=ConfigEntry, status_code=201, include_in_schema=False)
-async def set_config(body: ConfigSetRequest, config_service: ConfigServiceDep):
+@router.post("", status_code=201)
+async def set_config(
+    body: ConfigSetRequest, config_service: ConfigServiceDep
+) -> ConfigEntry:
     return await config_service.set(body.key, body.value)
 
 
-@router.get("", response_model=list[ConfigEntry])
-@router.get("/", response_model=list[ConfigEntry], include_in_schema=False)
-async def get_config(config_service: ConfigServiceDep):
+@router.get("")
+async def get_config(config_service: ConfigServiceDep) -> list[ConfigEntry]:
     return await config_service.get_all()

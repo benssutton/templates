@@ -12,14 +12,15 @@ TAG_METADATA = {
 router = APIRouter(tags=[TAG])
 
 
-@router.post("", response_model=CacheEntry, status_code=201)
-@router.post("/", response_model=CacheEntry, status_code=201, include_in_schema=False)
-async def set_cache(body: CacheSetRequest, cache_service: CacheServiceDep):
+@router.post("", status_code=201)
+async def set_cache(
+    body: CacheSetRequest, cache_service: CacheServiceDep
+) -> CacheEntry:
     return await cache_service.set(body.key, body.value, body.ttl_seconds)
 
 
-@router.get("/{key}", response_model=CacheEntry)
-async def get_cache(key: str, cache_service: CacheServiceDep):
+@router.get("/{key}")
+async def get_cache(key: str, cache_service: CacheServiceDep) -> CacheEntry:
     entry = await cache_service.get(key)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"Key '{key}' not found")

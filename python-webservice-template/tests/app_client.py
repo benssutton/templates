@@ -3,7 +3,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from settings import Settings
 

@@ -3,11 +3,8 @@ import logging
 import random
 import time
 from collections.abc import Awaitable, Callable
-from typing import TypeVar
 
 log = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 
 def jittered(delay: float) -> float:
@@ -24,7 +21,7 @@ def _log_retry(
     label: str, attempt: int, max_attempts: int, delay: float, exc: Exception
 ) -> None:
     log.warning(
-        "%s: attempt %d/%d failed – retrying in %.1fs: %s",
+        "%s: attempt %d/%d failed, retrying in %.1fs: %s",
         label,
         attempt,
         max_attempts,
@@ -33,7 +30,7 @@ def _log_retry(
     )
 
 
-async def connect_with_backoff(
+async def connect_with_backoff[T](
     connect: Callable[[], Awaitable[T]],
     *,
     label: str,
@@ -67,7 +64,7 @@ def _sleep(delay: float) -> bool:
     return False
 
 
-def connect_with_backoff_sync(
+def connect_with_backoff_sync[T](
     connect: Callable[[], T],
     *,
     label: str,

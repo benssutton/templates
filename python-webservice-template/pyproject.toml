@@ -1,0 +1,47 @@
+# Tool configuration only: the service is not packaged (requirements*.txt pin deps).
+
+[tool.ruff]
+target-version = "py312"
+extend-exclude = ["tests/performance", "certs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "ASYNC", "RUF"]
+ignore = [
+    "E501",  # line length is black's job
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Test polling helpers take a deadline in seconds; they are not cancel scopes.
+"tests/support/solace.py" = ["ASYNC109"]
+"tests/support/wait.py" = ["ASYNC109"]
+"tests/test_http_ingest.py" = ["ASYNC109"]
+"tests/test_solace_consumer.py" = ["ASYNC109"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "ingestion", "mcp_routers", "observability", "persistence", "routers", "schemas", "services", "settings", "main"]
+
+[tool.pyright]
+include = ["."]
+exclude = ["**/__pycache__", "tests/performance", "certs"]
+typeCheckingMode = "standard"
+pythonVersion = "3.12"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+# -n 2: each worker starts its own Postgres/ClickHouse/Redis; more saturate the Docker VM (serial 167 s, -n4 230 s, -n2 ~110-150 s). -n 0 runs serially.
+addopts = "-n auto --maxprocesses=2 --dist loadgroup"
+markers = [
+    "http_ingest: tests for the HTTP ingest endpoint",
+    "observability: tests for the observability endpoints",
+    "resilience: tests for startup resilience and connection retry behaviour",
+]
+
+[tool.coverage.run]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+# The >90% coverage guarantee the README advertises: `pytest --cov` fails below this.
+fail_under = 94

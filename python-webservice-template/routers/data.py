@@ -1,10 +1,11 @@
 import asyncio
 import logging
+from typing import Annotated
 
 import pyarrow as pa
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from core.correlation import timed
+from core.boundary_timing import timed
 from core.dependencies import DataServiceDep, StreamIngestServiceDep
 from persistence.stream_store.lsm_store import InvalidBatchError
 from schemas.data import DataRowsResponse, IngestAccepted
@@ -27,24 +28,23 @@ def _decode(body: bytes) -> list[pa.RecordBatch]:
     return list(pa.ipc.open_stream(pa.BufferReader(body)))
 
 
-@router.get("", response_model=DataRowsResponse)
-async def get_data(
-    data_service: DataServiceDep,
-    limit: int = Query(default=10, ge=1, le=100),
-):
+Limit = Annotated[int, Query(ge=1, le=100, description="Maximum rows to return")]
+
+
+@router.get("")
+async def get_data(data_service: DataServiceDep, limit: Limit = 10) -> DataRowsResponse:
     return await data_service.get_data(limit=limit)
 
 
-@router.get("/cache", response_model=DataRowsResponse)
+@router.get("/cache")
 async def get_cached_data(
-    svc: StreamIngestServiceDep,
-    limit: int = Query(default=10, ge=1, le=100),
-):
+    svc: StreamIngestServiceDep, limit: Limit = 10
+) -> DataRowsResponse:
     return await svc.get_data(limit=limit)
 
 
-@router.post("/ingest", status_code=202, response_model=IngestAccepted)
-async def ingest_batch(request: Request, svc: StreamIngestServiceDep):
+@router.post("/ingest", status_code=202)
+async def ingest_batch(request: Request, svc: StreamIngestServiceDep) -> IngestAccepted:
     media_type = request.headers.get("content-type", "").split(";", 1)[0]
     if media_type.strip().lower() not in ARROW_MEDIA_TYPES:
         raise HTTPException(

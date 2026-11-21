@@ -1,9 +1,8 @@
 import time
 
 import pytest
-from testcontainers.redis import RedisContainer
-
 from pydantic import SecretStr
+from testcontainers.redis import RedisContainer
 
 from settings import Settings
 from tests.app_client import lifespan_test_client
@@ -31,12 +30,13 @@ async def test_clickhouse_unreachable_aborts_startup_after_bounded_retries(
         connect_base_delay=0.001,
         connect_max_delay=0.005,
         ingest_max_disconnect_seconds=None,
+        ingest_max_consecutive_failures=0,
     )
     start = time.monotonic()
     # Broad Exception: connect_with_backoff re-raises the last attempt's
     # exception, which varies by library version (aiohttp, clickhouse_connect).
     # The assertion below validates the test does not hang, which is the core invariant.
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         async with lifespan_test_client(settings):
             pass
     assert (
@@ -58,6 +58,7 @@ async def test_stock_redis_without_json_module_aborts_startup(postgres_container
             redis_url=SecretStr(f"redis://localhost:{redis_port}/0"),
             connect_max_attempts=1,
             ingest_max_disconnect_seconds=None,
+            ingest_max_consecutive_failures=0,
         )
         with pytest.raises(Exception, match="RedisJSON"):
             async with lifespan_test_client(settings):

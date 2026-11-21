@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import math
 import threading
@@ -9,8 +10,8 @@ from testcontainers.redis import RedisContainer
 
 from settings import Settings
 from tests.app_client import lifespan_test_client
-from tests.support.images import CH_IMAGE, REDIS_IMAGE
 from tests.publishers.batches import make_batch
+from tests.support.images import CH_IMAGE, REDIS_IMAGE
 from tests.support.settings import app_settings
 from tests.support.solace import broker_paused, wait_for_queue
 from tests.support.wait import check, poll_cache, poll_json, poll_ready
@@ -93,7 +94,9 @@ async def test_broker_partition_fails_readiness_then_recovers(
     solace_settings, solace_container
 ):
     # watchdog off: this test is about readiness, not shutdown
-    settings = solace_settings(ingest_max_disconnect_seconds=None)
+    settings = solace_settings(
+        ingest_max_disconnect_seconds=None, ingest_max_consecutive_failures=0
+    )
     async with lifespan_test_client(settings) as client:
         await poll_ready(client, 200)
         with broker_paused(solace_container):
@@ -138,16 +141,17 @@ async def test_idle_ingest_is_stale_but_ready():
         ingest_staleness_threshold_seconds=2.0,
         ingest_stale_fails_readiness=False,
         ingest_max_disconnect_seconds=None,
+        ingest_max_consecutive_failures=0,
     )
     svc = StreamIngestService(
         _IdleConsumer(), LSMStore(flush_rows=100, compaction_runs=4), settings
     )
 
-    health = await svc.health_check()
+    health = svc.health_check()
     assert health.connection_state == "connected"
     assert health.stale is False
     await asyncio.sleep(2.5)
-    health2 = await svc.health_check()
+    health2 = svc.health_check()
     assert health2.connection_state == "connected"
     assert health2.stale is True
 
@@ -176,10 +180,8 @@ async def test_dependency_down_fails_readiness(
                 "status"
             ] == "down"
     finally:
-        try:
+        with contextlib.suppress(Exception):
             dedicated_redis.stop()
-        except Exception:
-            pass
 
 
 async def test_health_probe_error_is_generic_not_leaky(
@@ -202,10 +204,8 @@ async def test_health_probe_error_is_generic_not_leaky(
             assert error in {"unavailable", "timeout"}
             assert "localhost" not in error and "Error" not in error
     finally:
-        try:
+        with contextlib.suppress(Exception):
             dedicated_redis.stop()
-        except Exception:
-            pass
 
 
 async def test_clickhouse_health_check_exception_returns_generic_error(
@@ -226,10 +226,8 @@ async def test_clickhouse_health_check_exception_returns_generic_error(
         assert error in {"unavailable", "timeout"}
         assert "localhost" not in error and "Error" not in error
     finally:
-        try:
+        with contextlib.suppress(Exception):
             dedicated_ch.stop()
-        except Exception:
-            pass
 
 
 async def test_postgres_health_check_exception_logs_and_returns_generic_error(
@@ -326,8 +324,8 @@ async def test_ingest_never_started_metric_is_nan():
             )
 
     metrics = MetricsService(Settings())
-    await metrics.refresh(_FakeHealthService())
-    text = metrics.render()[0].decode()
+    status = await _FakeHealthService().detailed_status()
+    text = metrics.render(status)[0].decode()
     secs_line = next(
         (
             ln
@@ -347,10 +345,41 @@ async def test_get_data_logs_clickhouse_timing(
     redis_container,
     cid_caplog,
 ):
-    with cid_caplog.at_level(logging.DEBUG, logger="core.correlation"):
+    with cid_caplog.at_level(logging.DEBUG, logger="core.boundary_timing"):
         async with lifespan_test_client(
             app_settings(postgres_container, clickhouse_container, redis_container)
         ) as client:
             resp = await client.get("/data?limit=5")
             assert resp.status_code == 200
     assert any("clickhouse.select" in r.getMessage() for r in cid_caplog.records)
+
+
+CUSTOM_SERIES = {
+    "dependency_up",
+    "dependency_check_latency_seconds",
+    "ingest_connection_state",
+    "ingest_seconds_since_last_batch",
+    "ingest_rows_ingested_total",
+    "ingest_outcomes_total",
+    "app_process_cpu_percent",
+    "app_process_memory_rss_bytes",
+    "app_process_num_threads",
+    "app_process_open_files",
+    "app_process_uptime_seconds",
+    "system_cpu_percent",
+    "system_memory_total_bytes",
+    "system_memory_available_bytes",
+    "system_memory_used_percent",
+    "system_boot_time_seconds",
+    "app_info",
+}
+
+
+async def test_metrics_exposes_every_custom_series(test_client):
+    text = (await test_client.get("/metrics")).text
+    names = {
+        line.split("{")[0].split(" ")[0]
+        for line in text.splitlines()
+        if line and not line.startswith("#")
+    }
+    assert names >= CUSTOM_SERIES

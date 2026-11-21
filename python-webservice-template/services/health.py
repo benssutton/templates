@@ -98,8 +98,8 @@ class HealthService:
             self._cached = (time.monotonic(), results)
             return results
 
-    async def _ingest_health(self) -> IngestHealth:
-        return await self._ingest.health_check()
+    def _ingest_health(self) -> IngestHealth:
+        return self._ingest.health_check()
 
     def _ingest_status(self, ingest: IngestHealth) -> Literal["up", "down"]:
         if ingest.connection_state != "connected":
@@ -110,7 +110,7 @@ class HealthService:
 
     async def readiness(self) -> ReadinessResponse:
         deps = await self.dependencies()
-        ingest = await self._ingest_health()
+        ingest = self._ingest_health()
         ingest_status = self._ingest_status(ingest)
 
         checks = [
@@ -138,7 +138,7 @@ class HealthService:
 
     async def detailed_status(self) -> DetailedStatusResponse:
         deps = await self.dependencies()
-        ingest = await self._ingest_health()
+        ingest = self._ingest_health()
         snapshot = collect_system_snapshot(self._process)
         return DetailedStatusResponse(
             app=AppInfo(

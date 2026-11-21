@@ -17,8 +17,8 @@ same key across all in-memory frames until a full merge has occurred.
 import threading
 from dataclasses import dataclass
 
-import pyarrow as pa
 import polars as pl
+import pyarrow as pa
 
 ORDER_COLUMN = "seqno"
 

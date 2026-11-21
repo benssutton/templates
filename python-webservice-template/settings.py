@@ -66,8 +66,10 @@ class Settings(BaseSettings):
     redis_connect_timeout_seconds: float = Field(default=5.0, gt=0)
     redis_max_connections: int = Field(default=50, ge=1)
 
-    lsm_flush_rows: int = 1000  # memtable -> run threshold
-    lsm_compaction_runs: int = 4  # run count -> compaction threshold
+    # Memtable -> run threshold.
+    lsm_flush_rows: int = Field(default=1000, gt=0)
+    # Run count -> compaction threshold (one run has nothing to merge).
+    lsm_compaction_runs: int = Field(default=4, ge=2)
     lsm_key_columns: list[str] = ["id"]  # merge partition key; single extension point
 
     # Ingestion transport selector
@@ -84,30 +86,29 @@ class Settings(BaseSettings):
     otel_exporter_otlp_endpoint: str | None = None
     otel_service_name: str = "python-template"
     metrics_enabled: bool = True
-    health_check_timeout_seconds: float = 2.0  # per-dependency ping timeout
+    # Per-dependency ping timeout.
+    health_check_timeout_seconds: float = Field(default=2.0, gt=0)
     # Dependency probe results are reused for this long, so frequent scrapes of
     # /metrics and /health/* do not ping every store each time. 0 disables.
     health_cache_ttl_seconds: float = Field(default=5.0, ge=0)
-    ingest_staleness_threshold_seconds: float | None = (
-        None  # None = staleness never reported
-    )
-    ingest_stale_fails_readiness: bool = False  # stale -> 503 only if True
-    ingest_max_disconnect_seconds: float | None = (
-        60.0  # non-CONNECTED longer than this -> SIGTERM; None disables
-    )
+    # None = staleness never reported.
+    ingest_staleness_threshold_seconds: float | None = None
+    # Stale -> 503 only if True.
+    ingest_stale_fails_readiness: bool = False
+    # Non-CONNECTED longer than this -> SIGTERM; None disables the watchdog.
+    ingest_max_disconnect_seconds: float | None = 60.0
     # Streaming ingest loop: transport and settlement backoff, give-up point.
     ingest_retry_base_delay: float = Field(default=1.0, gt=0)
     ingest_retry_max_delay: float = Field(default=60.0, gt=0)
-    ingest_max_consecutive_failures: int = Field(default=5, ge=1)
+    # 0 disables the failure-count shutdown
+    ingest_max_consecutive_failures: int = Field(default=5, ge=0)
     ingest_join_timeout_seconds: float = Field(default=10.0, gt=0)
 
     # Inbound size limits
-    max_request_body_bytes: int = (
-        16 * 1024 * 1024
-    )  # 16 MiB; over-limit HTTP body -> 413
-    max_ingest_batch_bytes: int = (
-        16 * 1024 * 1024
-    )  # 16 MiB; over-limit stream batch -> dropped+logged
+    # Over-limit HTTP body -> 413.
+    max_request_body_bytes: int = 16 * 1024 * 1024
+    # Over-limit stream batch -> dropped+logged.
+    max_ingest_batch_bytes: int = 16 * 1024 * 1024
 
     # Correlation ID header name (inbound adoption + response echo).
     correlation_id_header: str = "X-Request-ID"
@@ -124,6 +125,14 @@ class Settings(BaseSettings):
     auth_jwt_secret: SecretStr | None = None
     auth_jwt_issuer: str | None = None
     auth_jwt_audience: str | None = None
+
+    @model_validator(mode="after")
+    def _retry_delays_ordered(self) -> "Settings":
+        if self.ingest_retry_max_delay < self.ingest_retry_base_delay:
+            raise ValueError(
+                "ingest_retry_max_delay must be >= ingest_retry_base_delay"
+            )
+        return self
 
     @model_validator(mode="after")
     def _auth_needs_secret(self) -> "Settings":

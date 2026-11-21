@@ -22,7 +22,7 @@ python -m pyright                              # typecheck
 pytest tests/test_cache.py::test_post_cache_without_ttl -v   # one test
 ```
 
-Tests run under pytest-xdist (`-n auto`, at most 2 workers, see `pytest.ini`): each
+Tests run under pytest-xdist (`-n auto`, at most 2 workers, see `pyproject.toml`): each
 worker starts its own Postgres, ClickHouse and Redis; tests that use the Solace
 broker share one worker (`xdist_group("solace")`, set in `tests/conftest.py`).
 `pytest -n 0` runs serially for debugging. Use `unique()` from
@@ -58,7 +58,8 @@ second `create_app` call, never a second lifespan on the same app.
 once every store is connected and puts it on `app.state.services`. Routes take
 `Annotated` aliases from `core/dependencies.py` (`ConfigServiceDep`, ...). MCP
 tools get a `lambda: app.state.services` and call the same service methods.
-HealthService receives one `ping()` per store; it never imports other services.
+HealthService receives one `ping()` per store and depends only on the stores and
+StreamIngestService (for ingest health); it imports no other service.
 
 **Middleware is pure ASGI only.** Never add `BaseHTTPMiddleware` /
 `@app.middleware("http")`: it runs `receive()` in a task group, turning the 413
