@@ -69,7 +69,8 @@ broker's SEMP API uses 8080.
 
 Settings are immutable, validated records (`config/AppSettings`, `config/IngestSettings`,
 `auth/AuthSettings`); defaults live in `application.yml` and a value that breaks a
-constraint fails startup.
+constraint fails startup. The full list, with the names shared by all three templates, is
+`.env.example` (pinned by `tests/cicd/test_env_contract.py`).
 
 | Env | Default | Meaning |
 |---|---|---|
@@ -82,7 +83,8 @@ constraint fails startup.
 | `LOG_FORMAT`, `LOG_LEVEL` | `json`, `INFO` | `json` or `text` logs; root level |
 | `OTEL_TRACES_EXPORTER`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `none` | set `otlp` to export traces (traceparent is always honoured) |
 | `HEALTH_CACHE_TTL_SECONDS` | `5` | `/health/status` and `/metrics` reuse one probe round this long; readiness is always live |
-| `POSTGRES_URL`, `CLICKHOUSE_URL`, `REDIS_URL` (+ users, passwords, `*_POOL_SIZE`) | localhost | store connections |
+| `POSTGRES_URL` (`postgresql://user:pass@host:port/db`), `CLICKHOUSE_HOST`/`PORT`/`DATABASE`/`USER`/`PASSWORD`, `REDIS_URL` | localhost | store connections; `config/EnvContract` turns the first two into JDBC URLs |
+| `POSTGRES_POOL_MIN_SIZE`, `POSTGRES_POOL_MAX_SIZE`, `POSTGRES_ACQUIRE_TIMEOUT_SECONDS`, `CLICKHOUSE_POOL_SIZE`, `REDIS_POOL_SIZE` | `2`, `10`, `3`, `10`, `16` | pool sizes and the Postgres wait for a pooled connection |
 | `SOLACE_HOST`, `SOLACE_PORT`, `SOLACE_VPN`, `SOLACE_USERNAME`, `SOLACE_PASSWORD`, `SOLACE_TOPIC`, `SOLACE_QUEUE` | localhost defaults | Solace transport |
 
 Every store client has bounded waits (Hikari connection timeout, pgjdbc socket timeout
