@@ -4,7 +4,7 @@
 # container healthcheck is the binary itself (`rust-template healthcheck`).
 # No TLS key is baked in: compose mounts one (see the `dev-certs` service).
 
-FROM rust:1.96-trixie AS chef
+FROM rust:1.99-trixie AS chef
 RUN cargo install cargo-chef --locked --version 0.1.78
 WORKDIR /build
 
