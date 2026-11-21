@@ -8,7 +8,7 @@ from settings import Settings
 class NoopBatchConsumer:
     """Connects to nothing and idles until closed. Selected with
     INGEST_TRANSPORT=noop for deployments (and tests) that only need the HTTP
-    ingest path. Mirrors Java's NoopBatchConsumer."""
+    ingest path."""
 
     def __init__(self, settings: Settings) -> None:
         self._closed = threading.Event()

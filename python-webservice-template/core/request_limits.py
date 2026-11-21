@@ -3,8 +3,7 @@
 Counts bytes as they stream from the client and aborts the read with 413 the
 moment the limit is crossed, so an oversized body is never buffered in full and
 never reaches the handler, even without Content-Length (chunked uploads).
-Mirrors tower-http's RequestBodyLimitLayer in the Rust template. Applied
-app-wide so every current and future POST route inherits the policy.
+Applied app-wide so every current and future POST route inherits the policy.
 """
 
 import json

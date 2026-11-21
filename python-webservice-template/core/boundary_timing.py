@@ -11,9 +11,8 @@ Request-scoping (the same isolation model as the correlation ID) means work that
 runs outside a request — e.g. the streaming ingest thread — never pollutes a
 request's samples, and multiple isolated apps in one test process cannot collide.
 
-Implemented as pure ASGI (mirroring core.request_limits.MaxBodySizeMiddleware) so
-it does not buffer streaming responses (the /mcp mount) and propagates the
-ContextVar to the endpoint reliably.
+Pure ASGI, so it does not buffer streaming responses (the /mcp mount) and
+propagates the ContextVar to the endpoint reliably.
 """
 
 import contextvars
@@ -28,7 +27,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 log = logging.getLogger(__name__)
 
 # None when no HTTP request is in flight (e.g. the streaming ingest thread):
-# record_boundary becomes a no-op and timed() only logs, exactly as before.
+# record_boundary is a no-op and timed() only logs.
 boundary_samples_var: contextvars.ContextVar[list[tuple[str, float]] | None] = (
     contextvars.ContextVar("boundary_samples", default=None)
 )
@@ -102,9 +101,7 @@ _timing_log = logging.getLogger(__name__)
 async def timed(label: str):
     """Log the wall-clock duration of an awaited boundary, tagged with the
     current correlation ID (added by CorrelationIdFilter), and record it as a
-    Server-Timing sample for the current request (added by record_boundary).
-    Structured as a context manager so an OpenTelemetry span could wrap the same
-    boundary later without changing call sites."""
+    Server-Timing sample for the current request (added by record_boundary)."""
     start = time.perf_counter()
     try:
         yield

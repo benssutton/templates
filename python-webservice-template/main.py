@@ -217,8 +217,7 @@ def create_app(settings: Settings) -> FastAPI:
 
 # Module-level app for `uvicorn main:app`.
 # All Settings fields have defaults so this is safe to execute at import time.
-# If you later add a field with no default, switch to the factory pattern:
-#   uvicorn main:create_app --factory
+# A field without a default would need `uvicorn main:create_app --factory`.
 app = create_app(get_settings())
 
 

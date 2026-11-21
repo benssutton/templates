@@ -84,8 +84,8 @@ class JsonErrorBodyMiddleware:
 
     For the mounted MCP app: its Host/Origin and size rejections are plain text.
     JSON error bodies (JSON-RPC errors) are part of the MCP protocol and pass
-    through untouched. The SDK answers a foreign Host with 421; the shared
-    contract (and the Java and Rust MCP servers) use 403 for both Host and Origin.
+    through untouched. The SDK answers a foreign Host with 421; the contract
+    is 403 for both Host and Origin.
     """
 
     def __init__(self, app: ASGIApp) -> None:

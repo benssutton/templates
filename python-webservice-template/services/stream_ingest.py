@@ -112,7 +112,7 @@ class StreamIngestService:
 
     def _check(self, batch: pa.RecordBatch) -> None:
         """Raise BatchTooLargeError or InvalidBatchError if the batch must be
-        refused. Measures decoded Arrow nbytes (Java measures the encoded payload)."""
+        refused. Measures decoded Arrow nbytes."""
         max_bytes = self._settings.max_ingest_batch_bytes
         if batch.nbytes > max_bytes:
             log.error(

@@ -5,7 +5,7 @@ write (seqno assignment, flush, compaction, publish), so the HTTP ingest
 thread pool and the transport ingest thread can both call it safely. Readers
 (`query()`) take no lock: `_publish()` swaps the snapshot reference
 atomically at the end of every write, so readers always see a consistent,
-immutable snapshot. Mirrors the Rust template's writer mutex.
+immutable snapshot.
 
 Lifecycle: memtable → run (flush) → compacted run.  When the number of runs
 reaches `compaction_runs`, all runs are merged into one. Compaction is the

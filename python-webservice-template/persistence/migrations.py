@@ -22,8 +22,7 @@ from clickhouse_connect.driver.asyncclient import AsyncClient
 
 MIGRATIONS_DIR = Path(__file__).parents[1] / "migrations"
 
-# Advisory-lock key serialising Postgres migrations across connections (same value
-# as the Rust template's SCHEMA_LOCK_ID).
+# Advisory-lock key serialising Postgres migrations across connections.
 SCHEMA_LOCK_ID = 0x7273_5F73_6368_656D
 
 _FILE_NAME = re.compile(r"(\d+)_(\w+)\.sql")
