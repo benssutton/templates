@@ -2,9 +2,9 @@
 #   docker compose -f docker-compose.yml -f docker-compose.profiling.yml up -d --build --wait
 #
 # - Layer 2 (PERF_PROFILING_RUNBOOK.md): Linux perf samples the app.
-#   SYS_PTRACE lets perf attach to the app process (as in the Python overlay);
+#   SYS_PTRACE lets perf attach to the app process;
 #   SYS_ADMIN + seccomp:unconfined let perf_event_open past Docker's default
-#   seccomp profile (as in the Java overlay for async-profiler).
+#   seccomp profile.
 # - The app image is rebuilt with frame pointers, so `perf --call-graph fp`
 #   sees whole stacks. A later plain `docker compose up --build` rebuilds it
 #   without them.

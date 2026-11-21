@@ -1,5 +1,5 @@
-//! Python tests/test_http_ingest.py: POST /data/ingest writes straight to the
-//! LSM (no Delivery); GET /data/cache reads it.
+//! POST /data/ingest writes straight to the LSM (no Delivery); GET
+//! /data/cache reads it.
 
 use crate::support::batches::{batch_without_id, make_batch, serialize_batch};
 use crate::support::logs;
@@ -40,7 +40,7 @@ fn value_of(body: &Value, id: u64) -> Option<String> {
         .map(|r| r["value"].as_str().unwrap().to_owned())
 }
 
-/// Python app_settings: lsm_flush_rows=2, lsm_compaction_runs=2.
+/// Small flush and compaction thresholds so a few rows exercise both.
 async fn settings() -> Settings {
     Settings {
         lsm_flush_rows: 2,
@@ -307,7 +307,6 @@ async fn a_stream_with_one_invalid_batch_writes_nothing() {
     assert_eq!(cache(&app).await["total"], 0);
 }
 
-/// Python test_http_ingest_propagates_request_id_to_store_write.
 #[tokio::test]
 async fn the_request_id_is_on_the_store_write_log_line() {
     let (logs, _guard) = logs::capture();

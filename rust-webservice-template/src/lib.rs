@@ -1,5 +1,5 @@
 //! Rust webservice template: an idiomatic axum/Tower service whose HTTP
-//! contract matches its Python and Java siblings (see README.md).
+//! contract is described in README.md.
 
 pub mod app;
 pub mod core;

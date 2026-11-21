@@ -87,7 +87,7 @@ async fn cache_missing_key_and_stored_null_read_as_absent() {
     let svc = CacheService::new(stores().await.redis.connection());
     let key = format!("svc-{}", uuid::Uuid::new_v4().simple());
     assert!(svc.get(&key).await.unwrap().is_none());
-    // Python: `if result is None: return None`, so a stored JSON null is "not found".
+    // A stored JSON null reads back as "not found".
     svc.set(&key, serde_json::Value::Null, None).await.unwrap();
     assert!(svc.get(&key).await.unwrap().is_none());
 }

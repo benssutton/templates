@@ -24,12 +24,11 @@ pub struct Stores {
 
 impl Stores {
     /// Connect all three concurrently. The first store to exhaust its retry
-    /// budget aborts startup; `try_join!` then drops (cancels) the other
-    /// attempts. Afterwards, apply the Postgres and ClickHouse migrations. A
-    /// store that had already connected when startup aborts is closed, not
-    /// leaked.
+    /// budget aborts startup and `try_join!` cancels the other attempts; a
+    /// store that had already connected is closed, not leaked. Then apply the
+    /// Postgres and ClickHouse migrations.
     pub async fn connect(settings: &Settings) -> anyhow::Result<Self> {
-        // `try_join!` discards the stores that finished before a sibling
+        // `try_join!` discards the stores that finished before another future
         // failed, so the Postgres pool (the only one needing an explicit
         // close) is also parked here as soon as it is connected.
         let connected_pg: Mutex<Option<PostgresStore>> = Mutex::new(None);

@@ -123,7 +123,7 @@ async fn root_returns_service_info() {
     assert_eq!(body["MCP"], "/mcp");
 }
 
-/// FastAPI's 404 body for unknown paths.
+/// An unknown path answers a JSON 404.
 #[tokio::test]
 async fn unknown_path_is_a_json_404() {
     let app = TestApp::spawn(app_settings().await).await;
@@ -132,7 +132,7 @@ async fn unknown_path_is_a_json_404() {
     assert_eq!(body, serde_json::json!({ "detail": "Not Found" }));
 }
 
-/// FastAPI's 405 body (and `Allow` header) for a known path, wrong method.
+/// A known path with the wrong method answers a JSON 405 with an `Allow` header.
 #[tokio::test]
 async fn wrong_method_is_a_json_405() {
     let app = TestApp::spawn(app_settings().await).await;

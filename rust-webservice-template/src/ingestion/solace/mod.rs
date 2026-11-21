@@ -62,9 +62,8 @@ impl Link {
 
     /// Best effort, bounded. The receiver is detached (not closed), so the
     /// durable queue is never destroyed by a shutdown. If a settlement still
-    /// holds the receiver, the connection close detaches it. The old
-    /// connection is always closed: a stale one would keep the exclusive
-    /// queue's flow.
+    /// holds the receiver, the connection close detaches it. The connection is
+    /// always closed: a stale one would keep the exclusive queue's flow.
     async fn shutdown(self) {
         if let Some(receiver) = self.receiver
             && let Ok(receiver) = Arc::try_unwrap(receiver)

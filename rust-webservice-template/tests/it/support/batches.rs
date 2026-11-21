@@ -1,5 +1,4 @@
-//! Transport-neutral Arrow test data shared by every publisher and test
-//! (Python tests/publishers/batches.py).
+//! Transport-neutral Arrow test data shared by every publisher and test.
 
 use arrow::array::{ArrayRef, Int64Array, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
@@ -23,7 +22,7 @@ pub fn make_batch(rows: &[(i64, &str, &str, &str)]) -> RecordBatch {
     RecordBatch::try_new(schema, columns).expect("valid test batch")
 }
 
-/// Python's unmergeable batch: `{"name": ["x"], "value": ["v"], "op": ["upsert"]}`.
+/// An unmergeable batch (no `id`): `{"name": ["x"], "value": ["v"], "op": ["upsert"]}`.
 pub fn batch_without_id() -> RecordBatch {
     make_batch(&[(0, "x", "v", "upsert")])
         .project(&[1, 2, 3])

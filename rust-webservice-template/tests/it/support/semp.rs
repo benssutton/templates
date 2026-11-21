@@ -1,7 +1,7 @@
-//! Thin SEMP v2 client (Python tests/support/semp.py): the broker-side view
-//! and the operator actions the tests need. Tests assert on broker state
-//! rather than trusting the client's own account. Transport errors are
-//! returned, so polling helpers can treat them as "not yet" (a paused broker).
+//! Thin SEMP v2 client: the broker-side view and the operator actions the
+//! tests need. Tests assert on broker state rather than trusting the client's
+//! own account. Transport errors are returned, so polling helpers can treat
+//! them as "not yet" (a paused broker).
 
 use anyhow::{Context, bail};
 use reqwest::Method;
@@ -140,7 +140,7 @@ impl Semp {
     }
 
     /// Counts the monitor `msgs` collection, following the paging cursor.
-    /// The scalar `spooledMsgCount` is cumulative and is not used (Python note).
+    /// The scalar `spooledMsgCount` is cumulative and is not used.
     pub async fn queue_message_count(&self, queue: &str) -> anyhow::Result<usize> {
         let path = format!("{}/msgs", self.path("monitor", "queues", queue));
         let mut query = "count=100".to_owned();

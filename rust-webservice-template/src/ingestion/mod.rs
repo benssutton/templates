@@ -64,16 +64,14 @@ impl Settlement {
     }
 }
 
-/// Broker settlement for one delivery. Each method consumes the box, so the
-/// compiler guarantees a delivery is settled at most once. An error is logged by the
-/// caller and never followed by a second settlement: the broker still holds
-/// the unsettled message and redelivers it.
+/// Broker settlement for one delivery. Each method consumes the box, so a
+/// delivery is settled at most once. A failed settlement is logged by the
+/// caller, never retried: the broker still holds the message and redelivers it.
 ///
 /// Ordering: settle a delivery BEFORE calling `next_delivery` again. A
 /// transport may hold its receiver for the whole of a pending `next_delivery`
-/// (Solace: `recv` holds the receiver mutex while it waits), so a settlement
-/// issued concurrently would wait behind it (bounded, then an error).
-/// `StreamIngestService` settles each delivery before asking for the next.
+/// (Solace: `recv` holds the receiver mutex while it waits), so a concurrent
+/// settlement would wait behind it (bounded, then an error).
 #[async_trait::async_trait]
 pub trait Settle: Send {
     async fn accept(self: Box<Self>) -> anyhow::Result<()>;
@@ -108,8 +106,7 @@ pub trait BatchConsumer: Send + Sync {
 
     /// Count of successful queue binds so far (0 = never bound). A rise
     /// proves the transport works, so the ingest loop resets its
-    /// consecutive-failure count and transport backoff, as the sibling
-    /// services' bind callbacks do: without it, healed
+    /// consecutive-failure count and transport backoff: without it, healed
     /// interruptions on a quiet queue would add up to a shutdown over time.
     /// Cheap, no I/O.
     fn bound_epoch(&self) -> u64;

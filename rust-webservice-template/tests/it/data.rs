@@ -1,4 +1,4 @@
-//! Python tests/test_data.py and the data half of tests/test_server_timing.py.
+//! GET /data/cache reads and Server-Timing on data reads.
 
 use crate::support::{TestApp, app_settings};
 
@@ -34,7 +34,7 @@ async fn limit_caps_the_page_but_not_the_total() {
     assert_eq!(body["limit"], 2);
 }
 
-/// FastAPI's `Query(ge=1, le=100)` and int parsing both answer 422.
+/// A limit outside 1..=100 or a non-integer limit answers 422.
 #[tokio::test]
 async fn limit_outside_1_to_100_or_not_an_integer_is_422() {
     let app = TestApp::spawn(app_settings().await).await;
@@ -45,7 +45,7 @@ async fn limit_outside_1_to_100_or_not_an_integer_is_422() {
     }
 }
 
-/// Python `test_data_read_emits_server_timing`.
+/// A data read emits a Server-Timing header.
 #[tokio::test]
 async fn data_read_emits_server_timing() {
     let app = TestApp::spawn(app_settings().await).await;

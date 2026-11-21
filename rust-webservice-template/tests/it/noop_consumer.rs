@@ -1,4 +1,4 @@
-//! Python tests/test_noop_consumer.py.
+//! The noop consumer.
 
 use rust_template::ingestion::noop::NoopBatchConsumer;
 use rust_template::ingestion::{BatchConsumer, ConnectionState};

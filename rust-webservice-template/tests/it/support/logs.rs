@@ -9,10 +9,10 @@
 //! Tests find their own lines by a unique id (`lines_containing`), so other
 //! tests' output in the buffer is harmless.
 //!
-//! `capture()` (Python's `caplog`) is the per-test alternative: it calls
-//! `ensure_installed()` first, so no callsite is ever cached as "never", then
-//! `set_default`s a subscriber writing to its own buffer for the current
-//! thread. Nothing else in the `it` binary may install a global subscriber.
+//! `capture()` is the per-test alternative: it calls `ensure_installed()`
+//! first, so no callsite is ever cached as "never", then `set_default`s a
+//! subscriber writing to its own buffer for the current thread. Nothing else
+//! in the `it` binary may install a global subscriber.
 
 use std::io;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -94,14 +94,13 @@ impl Logs {
 }
 
 /// Capture every DEBUG+ line emitted on this thread until the guard is
-/// dropped. Lines include the span context, e.g.
-/// `request{correlation_id=...}: ...`. `set_default` is thread-local: a plain
-/// `#[tokio::test]` runs the test, the served app and every task they spawn
-/// on one current-thread runtime, so the guard sees all of them and nothing
-/// from tests on other threads. Work moved to the blocking pool
-/// (`spawn_blocking`) is not captured; it still reaches the global buffer.
-/// While the guard lives, this thread's events go only to this buffer, not
-/// to `captured_logs()`.
+/// dropped; lines include the span context, e.g.
+/// `request{correlation_id=...}: ...`. A plain `#[tokio::test]` runs the test,
+/// the served app and every task they spawn on one current-thread runtime, so
+/// the guard sees all of them and nothing from other threads. Work on the
+/// blocking pool (`spawn_blocking`) is not captured here; it still reaches
+/// the global buffer. While the guard lives, this thread's events skip
+/// `captured_logs()`.
 pub fn capture() -> (Logs, DefaultGuard) {
     ensure_installed();
     let logs = Logs::default();

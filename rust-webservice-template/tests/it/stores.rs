@@ -77,8 +77,8 @@ async fn stopping_the_app_closes_the_postgres_pool() {
 use rust_template::app::create_app;
 use rust_template::settings::IngestTransport;
 
-/// Python main.py lifespan: the consumer for INGEST_TRANSPORT is entered and
-/// StreamIngestService starts; App::close stops it before the pools close.
+/// The consumer for INGEST_TRANSPORT is entered and StreamIngestService starts;
+/// App::close stops it before the pools close.
 #[tokio::test]
 async fn create_app_starts_ingest_with_the_noop_consumer_and_close_stops_it() {
     let app = TestApp::spawn(app_settings().await).await;

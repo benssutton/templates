@@ -30,8 +30,7 @@ fn assert_generic_down(body: &Value, name: &str) {
     }
 }
 
-/// Python `test_dependency_down_fails_readiness` and
-/// `test_health_probe_error_is_generic_not_leaky`.
+/// A Redis outage fails readiness with a generic, non-leaky error.
 #[tokio::test]
 async fn redis_going_down_fails_readiness_with_a_generic_error() {
     let (pg, ch) = tokio::join!(containers::postgres(), containers::clickhouse());
@@ -47,7 +46,7 @@ async fn redis_going_down_fails_readiness_with_a_generic_error() {
     assert_eq!(check(&body, "clickhouse")["status"], "up");
 }
 
-/// Python `test_clickhouse_health_check_exception_returns_generic_error`.
+/// A ClickHouse outage fails readiness with a generic error.
 #[tokio::test]
 async fn clickhouse_going_down_fails_readiness_with_a_generic_error() {
     let (pg, redis) = tokio::join!(containers::postgres(), containers::redis());

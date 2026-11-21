@@ -46,9 +46,8 @@ async fn pgvector_extension_present() {
     );
 }
 
-/// Python `test_postgres_health_check_exception_logs_and_returns_generic_error`:
-/// a closed pool makes the probe fail. The registry turns the detail into
-/// "unavailable" for clients.
+/// A closed pool makes the probe fail (logged). The registry turns the detail
+/// into "unavailable" for clients.
 #[tokio::test]
 async fn probe_fails_once_the_pool_is_closed() {
     let store = PostgresStore::connect(&app_settings().await)

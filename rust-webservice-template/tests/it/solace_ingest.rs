@@ -211,7 +211,6 @@ async fn an_unmergeable_message_is_rejected() {
     wait_for_depth(&semp, &names.queue, 0).await;
     assert_settled_without_redelivery(&semp, &names.queue).await;
     assert_eq!(app.get_json("/data/cache?limit=100").await.1["total"], 0);
-    // Python asserts at caplog level ERROR.
     assert!(
         logs.line_with(&["ERROR", "rejecting message", "missing required columns"])
             .is_some(),
@@ -251,7 +250,7 @@ async fn an_oversized_message_is_rejected() {
 }
 
 /// Readiness, detailed status and metrics with the real transport
-/// (Python test_observability: readiness_all_up, status_structure_and_ingest_freshness).
+/// (readiness all up, status structure, ingest freshness).
 #[tokio::test]
 async fn health_and_metrics_report_the_solace_transport() {
     let lease = containers::solace().await;
@@ -326,8 +325,7 @@ async fn health_and_metrics_report_the_solace_transport() {
     p.close().await;
 }
 
-/// Python test_observability::test_streaming_assigns_distinct_per_message_ids:
-/// every delivery gets its own correlation ID, carried onto its
+/// Streaming assigns each delivery its own correlation ID, carried onto its
 /// "ingested batch" log line. `logs::capture()` is thread-local; a plain
 /// `#[tokio::test]` runs the ingest loop and the write task it spawns on
 /// this thread's runtime, so the guard sees them.

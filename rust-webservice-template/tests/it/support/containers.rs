@@ -25,12 +25,11 @@ use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::redis::Redis;
 use tokio::sync::OnceCell;
 
-/// The tag the sibling services pin.
+// Image tags pinned for the integration tests.
 pub const PG_IMAGE: (&str, &str) = ("pgvector/pgvector", "0.8.4-pg18");
-/// Python's tags (python-webservice-template/tests/conftest.py).
 pub const CH_IMAGE: (&str, &str) = ("clickhouse/clickhouse-server", "26.8.40.7");
 pub const REDIS_STACK_IMAGE: (&str, &str) = ("redis/redis-stack-server", "7.4.0-v8");
-/// Stock Redis, without RedisJSON (Python's test_startup_resilience.py).
+/// Stock Redis, without RedisJSON.
 pub const STOCK_REDIS_IMAGE: (&str, &str) = ("redis", "7");
 
 pub const PG_USER: &str = "appuser";
@@ -294,7 +293,7 @@ pub async fn postgres() -> Endpoint {
 }
 
 /// The shared ClickHouse, with `scripts/clickhouse-init.sql` applied and the
-/// Python seed rows inserted (exactly once per run, so `total == 3`).
+/// seed rows inserted (exactly once per run, so `total == 3`).
 pub async fn clickhouse() -> Endpoint {
     CLICKHOUSE
         .get_or_init(|| async {
@@ -437,7 +436,7 @@ pub struct SeedRow {
     pub value: String,
 }
 
-/// Python's seed file (Arrow IPC file format), read with arrow-rs and cast to
+/// The seed file (Arrow IPC file format), read with arrow-rs and cast to
 /// the table's types: `id` uint32 -> UInt64, `name` string_view -> String,
 /// `value` int64 -> String.
 pub fn seed_rows() -> Vec<SeedRow> {

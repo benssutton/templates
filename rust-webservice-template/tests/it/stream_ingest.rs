@@ -1,8 +1,7 @@
-//! Python tests/test_stream_ingest_settlement.py and the in-process half of
-//! tests/test_ingest_health.py: StreamIngestService decides HOW each delivery
-//! is settled, backs off, and requests shutdown. Real (non-mock) trait
-//! implementations: a scripted consumer, recording settlements, a store
-//! whose write always fails, and an LSM store behind a gate.
+//! StreamIngestService decides HOW each delivery is settled, backs off, and
+//! requests shutdown. Real (non-mock) trait implementations: a scripted
+//! consumer, recording settlements, a store whose write always fails, and an
+//! LSM store behind a gate.
 
 use crate::probes::NoopIngestHealth;
 use crate::support::batches::{batch_without_id, make_batch};
@@ -184,8 +183,7 @@ impl StreamStore for FailingStore {
     }
 }
 
-/// The first next_delivery() fails (Python _InterruptedOnceConsumer); later
-/// calls idle until closed.
+/// The first next_delivery() fails; later calls idle until closed.
 #[derive(Default)]
 struct FailsThenIdles {
     attempts: AtomicU32,
@@ -303,7 +301,7 @@ async fn an_oversized_batch_rejects_and_writes_nothing() {
     svc.close().await;
 }
 
-/// Python 12f07ff `_decide`: every batch is validated before any is written.
+/// Every batch is validated before any is written.
 #[tokio::test]
 async fn an_invalid_later_batch_rejects_the_whole_delivery_and_writes_nothing() {
     let log = Log::default();
@@ -457,8 +455,8 @@ async fn five_consecutive_consumer_errors_request_shutdown() {
     svc.close().await;
 }
 
-/// A bind between failures resets the count (Python `on_bound`, Java's bind
-/// epoch): 4 failures, a re-bind, 4 more failures is no shutdown.
+/// A bind between failures resets the count: 4 failures, a re-bind and 4
+/// more failures request no shutdown.
 #[tokio::test(start_paused = true)]
 async fn a_rebind_resets_the_consecutive_failure_count() {
     let consumer = Arc::new(RebindingConsumer::default());
@@ -535,7 +533,6 @@ async fn a_delivery_resets_the_consecutive_failure_count() {
     svc.close().await;
 }
 
-/// Python test_transport_error_backs_off_then_next_call_delivers.
 #[tokio::test(start_paused = true)]
 async fn a_transport_error_backs_off_then_the_next_call_delivers() {
     let log = Log::default();
@@ -568,7 +565,6 @@ async fn a_transport_error_backs_off_then_the_next_call_delivers() {
     svc.close().await;
 }
 
-/// Python test_close_during_transport_backoff_is_prompt.
 #[tokio::test]
 async fn close_during_a_transport_backoff_is_prompt() {
     let consumer = Arc::new(FailsThenIdles::default());
@@ -650,7 +646,6 @@ async fn consumer_errors_never_request_shutdown_when_the_limit_is_unset() {
     svc.close().await;
 }
 
-/// Python test_ingest_health.py::test_disconnect_watchdog_invokes_shutdown_hook.
 #[tokio::test(start_paused = true)]
 async fn the_watchdog_requests_shutdown_when_the_transport_stays_down() {
     let (svc, shutdown) = start(
@@ -682,7 +677,6 @@ async fn the_watchdog_stays_quiet_while_connected() {
     svc.close().await;
 }
 
-/// Python test_ingest_health.py::test_ingest_health_tracks_freshness_after_ingest.
 #[tokio::test]
 async fn ingest_health_tracks_freshness_after_an_http_ingest() {
     let (svc, _) = start(
@@ -749,8 +743,8 @@ async fn ingest_health_serialises_with_the_contract_field_names() {
     svc.close().await;
 }
 
-/// Python test_observability.py::test_idle_ingest_is_stale_but_ready: stale
-/// fails readiness only with ingest_stale_fails_readiness.
+/// An idle ingest is stale but ready: staleness fails readiness only with
+/// ingest_stale_fails_readiness.
 #[tokio::test]
 async fn staleness_fails_readiness_only_when_configured() {
     for fails_readiness in [false, true] {

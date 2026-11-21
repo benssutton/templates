@@ -157,11 +157,10 @@ pub(super) fn drop_columns(batch: &RecordBatch, names: &[&str]) -> Result<Record
 
 /// The store's frame schema (data columns, all nullable, then `seqno`) and the
 /// batch's data columns in that schema's order. The first batch fixes the
-/// schema; later batches must match it by name and type. An incoming
-/// `seqno` column is ignored: the store assigns the write order.
-/// Types are compared with `DataType` equality, so nested field names and
-/// nullability are part of schema equality (top-level nullability is not).
-/// A batch with duplicate column names is invalid: names address columns.
+/// schema; later batches must match it by name and type (`DataType` equality:
+/// nested field names and nullability count, top-level nullability does not).
+/// An incoming `seqno` column is ignored: the store assigns the write order.
+/// Duplicate column names are invalid: names address columns.
 pub(super) fn conform(
     batch: &RecordBatch,
     existing: Option<&SchemaRef>,
@@ -226,7 +225,7 @@ fn mismatch(store: &Schema, batch: &Schema) -> StoreError {
     ))
 }
 
-/// `['id', 'op']`: the same wording the sibling services use.
+/// Formats names as `['id', 'op']`.
 pub(super) fn quoted_list(names: &[&str]) -> String {
     let quoted: Vec<String> = names.iter().map(|n| format!("'{n}'")).collect();
     format!("[{}]", quoted.join(", "))

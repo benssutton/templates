@@ -49,7 +49,7 @@ fn ingest_check(body: &Value) -> &Value {
 }
 
 /// GET /health/ready until `status` comes back and `until` holds for the
-/// ingest check (Python's `poll_ready(.., until=...)`).
+/// ingest check.
 async fn poll_ready_until(
     app: &TestApp,
     status: u16,
@@ -72,10 +72,7 @@ async fn poll_ready_until(
 
 /// Spec §6: broker paused -> Reconnecting and /health/ready 503; unpaused ->
 /// Connected, re-bound (`bound_epoch` rises) and ready again; a message
-/// published afterwards is ingested. Python
-/// test_reconnects_and_resumes_after_network_partition,
-/// test_broker_partition_fails_readiness_then_recovers and the "reports
-/// bound" half of test_interruption_between_calls_reconnects_on_entry_and_reports_bound.
+/// published afterwards is ingested.
 #[tokio::test]
 async fn a_paused_broker_reconnects_and_ingest_resumes() {
     let broker = containers::solace_exclusive().await;
@@ -138,10 +135,9 @@ async fn a_paused_broker_reconnects_and_ingest_resumes() {
 }
 
 /// Spec §6: broker unreachable -> the watchdog cancels Shutdown within
-/// ingest_max_disconnect_seconds (Python
-/// test_watchdog_requests_shutdown_when_broker_unreachable, which also pauses
-/// the broker). SASL rule: there is no per-test username to disable, and
-/// disabling `default` would break concurrent tests, so this takes the write lease.
+/// ingest_max_disconnect_seconds. SASL rule: there is no per-test username to
+/// disable, and disabling `default` would break concurrent tests, so this
+/// takes the write lease.
 #[tokio::test]
 async fn a_paused_broker_trips_the_watchdog() {
     let (logs, _guard) = logs::capture();
@@ -182,9 +178,9 @@ async fn a_paused_broker_trips_the_watchdog() {
     semp.delete_queue(&names.queue).await;
 }
 
-/// Spec §6: queue bind denied -> consecutive failures cancel Shutdown
-/// (Python test_repeated_bind_denial_requests_shutdown). The connection is
-/// up, so the watchdog stays quiet. Real backoff: 1 + 2 + 4 + 8 s (+25 %).
+/// Spec §6: queue bind denied -> consecutive failures cancel Shutdown. The
+/// connection is up, so the watchdog stays quiet. Real backoff: 1 + 2 + 4 + 8 s
+/// (+25 %).
 #[tokio::test]
 async fn a_denied_bind_requests_shutdown_after_five_consecutive_failures() {
     let (logs, _guard) = logs::capture();

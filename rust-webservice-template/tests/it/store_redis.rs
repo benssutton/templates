@@ -20,7 +20,7 @@ async fn connects_and_answers_the_probe() {
     assert_eq!(pong, "PONG");
 }
 
-/// Python `test_stock_redis_without_json_module_aborts_startup`, at store level
+/// A stock Redis without RedisJSON is rejected at store level
 /// (`stores.rs` repeats it through `create_app`).
 #[tokio::test]
 async fn stock_redis_without_redisjson_is_rejected() {

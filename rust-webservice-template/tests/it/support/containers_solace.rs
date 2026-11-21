@@ -8,7 +8,7 @@ use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 // ── Solace: one shared broker, leased ────────────────────────────────────────
 
-/// The tag Python pins (python-webservice-template/tests/support/solace.py).
+/// The pinned broker image.
 pub const SOLACE_IMAGE: (&str, &str) = ("solace/solace-pubsub-standard", "10.26.10");
 pub const SOLACE_ADMIN: (&str, &str) = ("admin", "admin");
 /// True only if AMQP plain text must be
@@ -44,8 +44,8 @@ impl SolaceEndpoints {
     }
 }
 
-/// Python's fixture: POST needs nofile >= 1048576 and ~1 GiB at the
-/// minimum scaling tier; readiness is polled (`WaitFor::Nothing`).
+/// The broker needs nofile >= 1048576 and ~1 GiB at the minimum scaling tier;
+/// readiness is polled (`WaitFor::Nothing`).
 pub fn solace_request() -> ContainerRequest<GenericImage> {
     GenericImage::new(SOLACE_IMAGE.0, SOLACE_IMAGE.1)
         .with_exposed_port(SOLACE_AMQP.tcp())
@@ -102,8 +102,7 @@ async fn shared_broker() -> &'static SharedBroker {
 }
 
 /// Router up (guaranteed-active), then AMQP actually serving clients: the VPN
-/// can refuse logins for a while after the health check turns green
-/// (Python's `wait_for_solace_messaging`).
+/// can refuse logins for a while after the health check turns green.
 async fn wait_for_solace(broker: &SolaceEndpoints) {
     rust_template::core::install_crypto_provider();
     let http = reqwest::Client::builder()
