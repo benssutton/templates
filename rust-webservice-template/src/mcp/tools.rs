@@ -59,23 +59,13 @@ fn rest_body<T: Serialize>(value: &T) -> Result<CallToolResult, ErrorData> {
     ContentBlock::json(value).map(|c| CallToolResult::success(vec![c]))
 }
 
-/// The same detail an HTTP client would get; a 503 or 500 never carries
-/// the cause, which is logged instead.
+/// The detail an HTTP client would get; the cause of a 5xx is logged, not returned.
 fn tool_error(err: AppError) -> ErrorData {
-    use axum::response::IntoResponse;
-    let status = err.status();
-    let detail = match &err {
-        AppError::NotFound(_) | AppError::Unprocessable(_) | AppError::BadRequest(_) => {
-            err.to_string()
-        }
-        _ => status.canonical_reason().unwrap_or("Error").to_owned(),
-    };
-    // Rendering logs the cause of a 5xx inside the current span.
-    drop(err.into_response());
-    if status.is_client_error() {
-        ErrorData::invalid_params(detail, None)
+    err.log();
+    if err.status().is_client_error() {
+        ErrorData::invalid_params(err.detail(), None)
     } else {
-        ErrorData::internal_error(detail, None)
+        ErrorData::internal_error(err.detail(), None)
     }
 }
 
