@@ -59,7 +59,7 @@ What every sibling implements, and the integration tests here pin:
 | Errors and extractors | [src/error.rs](src/error.rs), [src/extract.rs](src/extract.rs) |
 | `/config` (Postgres) | [src/routers/config.rs](src/routers/config.rs), [src/services/config.rs](src/services/config.rs), [src/persistence/transaction_store/postgres.rs](src/persistence/transaction_store/postgres.rs) |
 | `/data` (ClickHouse) | [src/routers/data.rs](src/routers/data.rs), [src/services/data.rs](src/services/data.rs), [src/persistence/analytics_store/clickhouse.rs](src/persistence/analytics_store/clickhouse.rs) |
-| `/data/cache` + `/data/ingest` (LSM) | [src/routers/data.rs](src/routers/data.rs), [src/services/stream_ingest.rs](src/services/stream_ingest.rs), [src/persistence/stream_store/lsm.rs](src/persistence/stream_store/lsm.rs) |
+| `/data/cache` + `/data/ingest` (LSM) | [src/routers/data.rs](src/routers/data.rs), [src/services/stream_ingest.rs](src/services/stream_ingest.rs), [src/persistence/stream_store/lsm/mod.rs](src/persistence/stream_store/lsm/mod.rs) |
 | `/cache` (Redis + RedisJSON) | [src/routers/cache.rs](src/routers/cache.rs), [src/services/cache.rs](src/services/cache.rs) |
 | `/health/{live,ready,status}` (cached probes) | [src/routers/health.rs](src/routers/health.rs), [src/services/health.rs](src/services/health.rs), [src/health/](src/health/) |
 | `/metrics` (Prometheus) | [src/routers/metrics.rs](src/routers/metrics.rs), [src/services/metrics.rs](src/services/metrics.rs) |

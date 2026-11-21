@@ -131,7 +131,8 @@ into the LSM store; `/data/cache` serves them.
 - **Deliberate divergences from the Java template.** *Startup:* Python connects to
   Solace with backoff in the lifespan and fails startup if the broker is
   unreachable; Java connects lazily. *Size limit:* Python measures each batch's
-  decoded Arrow `nbytes`; Java measures the encoded payload.
+  decoded Arrow `nbytes`; Java measures the encoded payload on Solace deliveries
+  only.
 - **Extension point: message replay.** The durable queue buffers only unacked
   messages; to rebuild the cache after a restart, start the receiver with a replay
   strategy (`with_message_replay`) against a broker replay log.

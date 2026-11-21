@@ -21,7 +21,7 @@ src/extract.rs     ValidJson / ValidQuery (garde) / ArrowStream: rejections are 
 src/error.rs       AppError -> {"detail"}; From<store errors> splits outage (503) from bug (500)
 src/core/          request_id, json_errors, auth, telemetry, boundary_timing, cors, retry, shutdown, ...
 src/services/      config, data, cache, health (cached probes), metrics, stream_ingest
-src/persistence/   stores (connect + smoke test + probe + migrate); stream_store/lsm.rs
+src/persistence/   stores (connect + smoke test + probe + migrate); stream_store/lsm/ (mod, kernels, tests)
 src/ingestion/     BatchConsumer / Settle seam, noop, ipc; solace/ behind the `solace` feature
 src/mcp/           rmcp service + tools mirroring the REST reads
 migrations/        postgres/ (sqlx, embedded) and clickhouse/ (applied by the app)

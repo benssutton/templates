@@ -45,9 +45,8 @@ async def test_secrets_absent_from_live_endpoints(test_client, postgres_containe
             "This test activates automatically in any environment where POSTGRES_PASSWORD "
             "is set to a longer value (real CI pipelines, staging, production smoke tests)."
         )
-    # NOTE: /health/ready can still leak DSN text through error=str(exc) in
-    # health probes when a dependency is unavailable. That gap is addressed in
-    # Task 10 (generic health probe errors), not here.
+    # /health/ready is included to check that probe failures report a generic
+    # error rather than exception text that could carry the DSN.
     for path in ("/", "/health/status", "/config/", "/health/ready"):
         resp = await test_client.get(path)
         # status may be 200 or 503 (readiness failure) — either is fine;
