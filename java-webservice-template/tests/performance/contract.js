@@ -4,16 +4,19 @@
 // and runs in the k6-smoke step against each service's compose stack, so the three
 // cannot drift apart without that step failing. It pins what a client may rely on:
 // paths, status codes, snake_case field names, the {"detail"} error body, ingest
-// media types and the X-Request-ID rule. Service-specific extras (for example
+// media types, the merged /data/cache view, the MCP tools and their REST-identical
+// results, the shared metric names and the X-Request-ID rule. Env var names are
+// pinned by tests/cicd/test_env_contract.py. Service-specific extras (for example
 // stream-store statistics under /health/status ingest) are allowed.
 //
 // 401 (auth is off by default), 500 and 503 need a configured or broken stack,
 // so each service pins those in its own test suite.
 import http from 'k6/http';
-import { check, group } from 'k6';
+import { check, group, sleep } from 'k6';
 
 const BASE_URL = __ENV.BASE_URL || 'https://localhost';
 const BATCH = open('./data/ingest_batch.ipc', 'b');
+const CONTRACT_BATCH = open('./data/contract_batch.ipc', 'b');
 const ARROW = 'application/vnd.apache.arrow.stream';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
@@ -38,6 +41,30 @@ function hasKeys(obj, expected) {
 
 function sameKeys(obj, expected) {
   return JSON.stringify(keys(obj)) === JSON.stringify([...expected].sort());
+}
+
+// Object keys sorted at every level, so deep equality is a string compare.
+function canon(v) {
+  if (Array.isArray(v)) return v.map(canon);
+  if (v && typeof v === 'object') {
+    return Object.keys(v).sort().reduce((o, k) => { o[k] = canon(v[k]); return o; }, {});
+  }
+  return v;
+}
+
+function same(a, b) {
+  return a !== undefined && JSON.stringify(canon(a)) === JSON.stringify(canon(b));
+}
+
+// Ingest may be written after its 202, so reads poll briefly.
+function eventually(fn, seconds) {
+  const deadline = Date.now() + seconds * 1000;
+  let result = fn();
+  while (!result && Date.now() < deadline) {
+    sleep(0.2);
+    result = fn();
+  }
+  return result;
 }
 
 // Every error: the given status, application/json, {"detail": <string or list>}.
@@ -178,8 +205,32 @@ export default function () {
           res.status === 202 && JSON.stringify(body(res)) === JSON.stringify({ accepted: true }),
       });
     }
-    check(http.get(`${BASE_URL}/data/cache?limit=1`), {
-      'data cache: keys': (res) => res.status === 200 && sameKeys(body(res), ['rows', 'total', 'limit']),
+  });
+
+  group('data cache', () => {
+    check(http.post(`${BASE_URL}/data/ingest`, CONTRACT_BATCH, { headers: { 'Content-Type': ARROW } }), {
+      'data cache: contract batch accepted': (res) => res.status === 202,
+    });
+    const expected = [
+      { id: -3, name: 'contract', value: 'v2' },
+      { id: -1, name: 'contract', value: 'v1' },
+    ];
+    let b = {};
+    const merged = eventually(() => {
+      const r = http.get(`${BASE_URL}/data/cache?limit=100`);
+      b = body(r) || {};
+      return r.status === 200 && Array.isArray(b.rows) &&
+        same(b.rows.filter((row) => row.id < 0), expected);
+    }, 5);
+    check(b, {
+      'data cache: keys': () => sameKeys(b, ['rows', 'total', 'limit']),
+      'data cache: limit echoed': () => b.limit === 100,
+      'data cache: rows are exactly id, name, value': () =>
+        Array.isArray(b.rows) && b.rows.every((row) => sameKeys(row, ['id', 'name', 'value'])),
+      'data cache: one row per key, ascending': () =>
+        Array.isArray(b.rows) && b.rows.every((row, i) => i === 0 || b.rows[i - 1].id < row.id),
+      'data cache: newest version wins, tombstones removed': () => merged,
+      'data cache: total counts live rows': () => typeof b.total === 'number' && b.total >= b.rows.length,
     });
   });
 
