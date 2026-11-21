@@ -23,14 +23,15 @@ LOAD_ROWS = [
     (2, "beta", "v1", "delete"),  # tombstone for id=2
 ]
 
-# contract.js expects exactly [{-3, contract, v2}, {-1, contract, v1}] back from
-# /data/cache. Negative ids sort before every id the demo publishers write.
+# contract.js expects exactly [{9000000001, contract, v2}, {9000000003, contract, v1}]
+# back from /data/cache. The ids are reserved above every id the demo publishers
+# write, and non-negative because `id` is UInt64 in every template.
 CONTRACT_ROWS = [
-    (-3, "contract", "v1", "upsert"),
-    (-2, "contract", "v1", "upsert"),
-    (-1, "contract", "v1", "upsert"),
-    (-3, "contract", "v2", "upsert"),
-    (-2, "contract", "v1", "delete"),
+    (9_000_000_001, "contract", "v1", "upsert"),
+    (9_000_000_002, "contract", "v1", "upsert"),
+    (9_000_000_003, "contract", "v1", "upsert"),
+    (9_000_000_001, "contract", "v2", "upsert"),
+    (9_000_000_002, "contract", "v1", "delete"),
 ]
 
 

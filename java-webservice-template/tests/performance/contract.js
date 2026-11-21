@@ -244,19 +244,21 @@ export default function () {
   });
 
   group('data cache', () => {
+    // Ids from 9_000_000_000 up are reserved for this batch: above every id the demo publishers write.
+    const CONTRACT_IDS_FROM = 9000000000;
     check(http.post(`${BASE_URL}/data/ingest`, CONTRACT_BATCH, { headers: { 'Content-Type': ARROW } }), {
       'data cache: contract batch accepted': (res) => res.status === 202,
     });
     const expected = [
-      { id: -3, name: 'contract', value: 'v2' },
-      { id: -1, name: 'contract', value: 'v1' },
+      { id: 9000000001, name: 'contract', value: 'v2' },
+      { id: 9000000003, name: 'contract', value: 'v1' },
     ];
     let b = {};
     const merged = eventually(() => {
       const r = http.get(`${BASE_URL}/data/cache?limit=100`);
       b = body(r) || {};
       return r.status === 200 && Array.isArray(b.rows) &&
-        same(b.rows.filter((row) => row.id < 0), expected);
+        same(b.rows.filter((row) => row.id >= CONTRACT_IDS_FROM), expected);
     }, 5);
     // The per-row checks pass on an empty rows; `merged` is what catches that.
     check(b, {
