@@ -68,7 +68,8 @@ impl MetricsService {
         let (title, version) = (settings.app_title.clone(), settings.app_version.clone());
         service.with(|| {
             gauge!("app_info", "title" => title, "version" => version).set(1.0);
-            // Exist at 0 before the first delivery.
+            // Exported at 0 from startup, so rate() and absent-series alerts
+            // work before the first delivery.
             for outcome in ["accepted", "failed", "rejected"] {
                 counter!("ingest_outcomes_total", "outcome" => outcome).absolute(0);
             }

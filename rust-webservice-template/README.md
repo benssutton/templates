@@ -200,7 +200,8 @@ it). It is for development only: CN `localhost`, SANs `localhost`, `app` and
   `Unavailable`. Schema changes are new files in `migrations/`.
 - **An MCP tool.** Add a `#[tool]` method in `src/mcp/tools.rs` that calls
   the same service as the REST endpoint it mirrors, and return
-  `rest_body(&...)` (one text item holding the REST body); extend `the_tools_mirror_the_rest_read_endpoints`.
+  `rest_body(&...)` (one text item holding the REST body); extend
+  `the_tools_mirror_the_rest_read_endpoints`.
 
 ## Performance profiling
 See [PERF_PROFILING_RUNBOOK.md](PERF_PROFILING_RUNBOOK.md): Layer 1 (k6 +

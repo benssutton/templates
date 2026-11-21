@@ -259,10 +259,10 @@ impl StreamIngestService {
     }
 
     /// Write one batch, then record it (`last_batch_at`, the row total,
-    /// `ingest_rows_total`). The write and its bookkeeping are one detached
-    /// task: if this future is dropped (an HTTP client disconnects) the task
-    /// still runs to the end, so a committed batch is always counted. The
-    /// caller's span (the request id) is carried into it.
+    /// `ingest_rows_ingested_total`). The write and its bookkeeping are one
+    /// detached task: if this future is dropped (an HTTP client disconnects)
+    /// the task still runs to the end, so a committed batch is always
+    /// counted. The caller's span (the request id) is carried into it.
     async fn write(&self, batch: RecordBatch) -> Result<(), StoreError> {
         let store = self.store.clone();
         let progress = self.progress.clone();
@@ -297,12 +297,12 @@ impl StreamIngestService {
     async fn decide(&self, batches: Vec<RecordBatch>) -> Settlement {
         let result = self.ingest(batches).await;
         let outcome = outcome_of(&result);
-        match (&result, outcome) {
-            (Err(err), Settlement::Reject) => tracing::error!(error = %err, "rejecting message"),
-            (Err(err), _) => {
+        if let Err(err) = &result {
+            if outcome == Settlement::Reject {
+                tracing::error!(error = %err, "rejecting message");
+            } else {
                 tracing::error!(error = %err, "ingest failed; message will be redelivered");
             }
-            (Ok(()), _) => {}
         }
         outcome
     }
