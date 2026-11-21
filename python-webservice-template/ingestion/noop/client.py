@@ -1,5 +1,5 @@
 import threading
-from typing import Iterator
+from collections.abc import Iterator
 
 from ingestion.base import ConnectionState, Delivery, OnBound
 from settings import Settings

@@ -15,9 +15,10 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from core.boundary_timing import record_boundary
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from core.boundary_timing import record_boundary
 
 correlation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
     "correlation_id", default="-"

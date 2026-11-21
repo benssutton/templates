@@ -1,6 +1,8 @@
+import itertools
 import time
 
 import pytest
+
 from core.retry import connect_with_backoff, connect_with_backoff_sync
 
 
@@ -66,7 +68,7 @@ async def test_delays_are_positive_and_increasing():
 
     await connect_with_backoff(connect, label="test", max_attempts=5, base_delay=0.1)
 
-    deltas = [b - a for a, b in zip(timestamps, timestamps[1:])]
+    deltas = [b - a for a, b in itertools.pairwise(timestamps)]
     assert len(deltas) == 3
     assert all(d > 0 for d in deltas)
     assert deltas[1] > deltas[0]

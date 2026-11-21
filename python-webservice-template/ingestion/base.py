@@ -1,11 +1,12 @@
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from enum import Enum
-from typing import Callable, Iterator, Protocol
+from enum import StrEnum
+from typing import Protocol
 
 import pyarrow as pa
 
 
-class ConnectionState(str, Enum):
+class ConnectionState(StrEnum):
     CONNECTED = "connected"
     RECONNECTING = "reconnecting"
     DOWN = "down"

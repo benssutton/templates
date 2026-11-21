@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import math
 import threading
@@ -9,8 +10,8 @@ from testcontainers.redis import RedisContainer
 
 from settings import Settings
 from tests.app_client import lifespan_test_client
-from tests.support.images import CH_IMAGE, REDIS_IMAGE
 from tests.publishers.batches import make_batch
+from tests.support.images import CH_IMAGE, REDIS_IMAGE
 from tests.support.settings import app_settings
 from tests.support.solace import broker_paused, wait_for_queue
 from tests.support.wait import check, poll_cache, poll_json, poll_ready
@@ -176,10 +177,8 @@ async def test_dependency_down_fails_readiness(
                 "status"
             ] == "down"
     finally:
-        try:
+        with contextlib.suppress(Exception):
             dedicated_redis.stop()
-        except Exception:
-            pass
 
 
 async def test_health_probe_error_is_generic_not_leaky(
@@ -202,10 +201,8 @@ async def test_health_probe_error_is_generic_not_leaky(
             assert error in {"unavailable", "timeout"}
             assert "localhost" not in error and "Error" not in error
     finally:
-        try:
+        with contextlib.suppress(Exception):
             dedicated_redis.stop()
-        except Exception:
-            pass
 
 
 async def test_clickhouse_health_check_exception_returns_generic_error(
@@ -226,10 +223,8 @@ async def test_clickhouse_health_check_exception_returns_generic_error(
         assert error in {"unavailable", "timeout"}
         assert "localhost" not in error and "Error" not in error
     finally:
-        try:
+        with contextlib.suppress(Exception):
             dedicated_ch.stop()
-        except Exception:
-            pass
 
 
 async def test_postgres_health_check_exception_logs_and_returns_generic_error(

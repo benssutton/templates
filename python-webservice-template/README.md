@@ -209,7 +209,7 @@ into the LSM store; `/data/cache` serves them.
 - **Configured by `Settings`, not monkeypatching.**
 
 ```bash
-pytest tests/ -v --cov --cov-report=html   # coverage gate in .coveragerc
+pytest tests/ -v --cov --cov-report=html   # coverage gate in pyproject.toml
 ```
 
 ---

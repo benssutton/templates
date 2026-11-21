@@ -32,6 +32,7 @@ async def test_cache_read_emits_lsm_boundary(test_client):
 async def test_http_ingest_emits_decode_and_write_boundaries(test_client):
     import pyarrow as pa
     import pyarrow.ipc as pa_ipc
+
     from tests.publishers.batches import make_batch
 
     batch = make_batch([(900, "perf", "v1", "upsert")])

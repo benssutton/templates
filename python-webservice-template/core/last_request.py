@@ -5,7 +5,7 @@ Pure ASGI for the same reason as CorrelationIdMiddleware: BaseHTTPMiddleware
 413 raised mid-read by MaxBodySizeMiddleware into an ExceptionGroup.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -24,5 +24,5 @@ class LastRequestMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http":
-            self._last_request.at = datetime.now(timezone.utc)
+            self._last_request.at = datetime.now(UTC)
         await self.app(scope, receive, send)

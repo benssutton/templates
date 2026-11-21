@@ -1,9 +1,8 @@
 import time
 
 import pytest
-from testcontainers.redis import RedisContainer
-
 from pydantic import SecretStr
+from testcontainers.redis import RedisContainer
 
 from settings import Settings
 from tests.app_client import lifespan_test_client
@@ -36,7 +35,7 @@ async def test_clickhouse_unreachable_aborts_startup_after_bounded_retries(
     # Broad Exception: connect_with_backoff re-raises the last attempt's
     # exception, which varies by library version (aiohttp, clickhouse_connect).
     # The assertion below validates the test does not hang, which is the core invariant.
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         async with lifespan_test_client(settings):
             pass
     assert (

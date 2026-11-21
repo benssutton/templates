@@ -2,8 +2,8 @@ import asyncio
 import logging
 import queue
 import threading
+from collections.abc import Iterator
 from enum import Enum
-from typing import Iterator
 
 import pyarrow as pa
 import pyarrow.ipc as pa_ipc
@@ -114,7 +114,7 @@ class _StateListener(
         self._consumer = consumer
         self._session = session
 
-    def on_reconnected(self, event: ServiceEvent) -> None:
+    def on_reconnected(self, service_event: ServiceEvent) -> None:
         self._consumer._set_state(ConnectionState.CONNECTED, self._session)
 
     def on_reconnecting(self, event: ServiceEvent) -> None:

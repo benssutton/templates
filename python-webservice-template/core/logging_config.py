@@ -12,7 +12,7 @@ and a later app must not reset a level a test has set.
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from core.correlation import CorrelationIdFilter
 
@@ -22,7 +22,7 @@ _HANDLER_NAME = "app-json"
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         entry = {
-            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(
+            "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat(
                 timespec="milliseconds"
             ),
             "level": record.levelname,

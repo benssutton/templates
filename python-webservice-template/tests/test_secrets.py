@@ -23,7 +23,7 @@ def test_credential_fields_are_secretstr():
         if field.get_secret_value():
             assert "**" in repr(
                 field
-            ), f"Non-empty SecretStr must mask its value in repr: {repr(field)}"
+            ), f"Non-empty SecretStr must mask its value in repr: {field!r}"
         else:
             assert field.get_secret_value() == ""
 

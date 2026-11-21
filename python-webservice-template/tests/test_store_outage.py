@@ -1,6 +1,7 @@
 """A store outage on a request path answers 503 {"detail": "Service Unavailable"}
 within a bounded time, instead of hanging or leaking a 500."""
 
+import contextlib
 import time
 
 from testcontainers.redis import RedisContainer
@@ -49,7 +50,5 @@ async def test_paused_then_stopped_redis_returns_bounded_503(
             assert response.json() == {"detail": "Service Unavailable"}
             assert time.monotonic() - started < SOCKET_TIMEOUT * 3
     finally:
-        try:
+        with contextlib.suppress(Exception):
             redis.stop()
-        except Exception:
-            pass

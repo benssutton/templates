@@ -1,18 +1,17 @@
 from pathlib import Path
 
-import pytest
 import pyarrow.ipc as pa_ipc
+import pytest
+from pydantic import SecretStr
 from testcontainers.clickhouse import ClickHouseContainer
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
 
-from pydantic import SecretStr
-
-from settings import Settings
 from persistence.analytics_store.clickhouse.clickhouse_client import ClickHouseClient
+from settings import Settings
 from tests.app_client import lifespan_test_client
-from tests.support.images import CH_IMAGE, PG_IMAGE, REDIS_IMAGE
 from tests.publishers.solace_publisher import SolacePublisher
+from tests.support.images import CH_IMAGE, PG_IMAGE, REDIS_IMAGE
 from tests.support.semp import Semp
 from tests.support.settings import (
     SolaceNames,

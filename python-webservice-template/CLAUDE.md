@@ -22,7 +22,7 @@ python -m pyright                              # typecheck
 pytest tests/test_cache.py::test_post_cache_without_ttl -v   # one test
 ```
 
-Tests run under pytest-xdist (`-n auto`, at most 2 workers, see `pytest.ini`): each
+Tests run under pytest-xdist (`-n auto`, at most 2 workers, see `pyproject.toml`): each
 worker starts its own Postgres, ClickHouse and Redis; tests that use the Solace
 broker share one worker (`xdist_group("solace")`, set in `tests/conftest.py`).
 `pytest -n 0` runs serially for debugging. Use `unique()` from

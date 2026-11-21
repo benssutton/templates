@@ -1,11 +1,12 @@
 import asyncio
+import contextlib
 import logging
 import os
 import signal
 import threading
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Callable
 
 import pyarrow as pa
 
@@ -53,7 +54,7 @@ class StreamIngestService:
         self._stop = threading.Event()
         self._watchdog_task: asyncio.Task | None = None
         self._last_batch_at: datetime | None = None
-        self._started_at: datetime = datetime.now(timezone.utc)
+        self._started_at: datetime = datetime.now(UTC)
         # Counters written by the ingest thread and HTTP worker threads alike.
         self._counts_lock = threading.Lock()
         self._rows_total = 0
@@ -70,10 +71,8 @@ class StreamIngestService:
         self._stop.set()
         if self._watchdog_task is not None:
             self._watchdog_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._watchdog_task
-            except asyncio.CancelledError:
-                pass
             self._watchdog_task = None
         # close() may block in the SDK (receiver terminate, disconnect): off-loop.
         await asyncio.to_thread(self._consumer.close)
@@ -103,7 +102,7 @@ class StreamIngestService:
 
     def _write(self, batch: pa.RecordBatch) -> None:
         self._store.ingest(batch)
-        self._last_batch_at = datetime.now(timezone.utc)
+        self._last_batch_at = datetime.now(UTC)
         with self._counts_lock:
             self._rows_total += batch.num_rows
         log.debug("ingested batch: rows=%d", batch.num_rows)
@@ -244,7 +243,7 @@ class StreamIngestService:
     async def health_check(self) -> IngestHealth:
         state = self._consumer.connection_state()
         last = self._last_batch_at
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         seconds_since = (now - last).total_seconds() if last is not None else None
         threshold = self._settings.ingest_staleness_threshold_seconds
         # Stale when explicitly configured and either:

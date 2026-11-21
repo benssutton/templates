@@ -171,10 +171,12 @@ async def test_watchdog_requests_shutdown_when_broker_unreachable(
                 what="consumer connected before partition",
             )
             assert not triggered.is_set()
-            with caplog.at_level(logging.CRITICAL, logger="services.stream_ingest"):
-                with broker_paused(solace_container):
-                    # SDK keepalive needs ~30-35 s to notice a frozen broker.
-                    await asyncio.wait_for(triggered.wait(), timeout=120.0)
+            with (
+                caplog.at_level(logging.CRITICAL, logger="services.stream_ingest"),
+                broker_paused(solace_container),
+            ):
+                # SDK keepalive needs ~30-35 s to notice a frozen broker.
+                await asyncio.wait_for(triggered.wait(), timeout=120.0)
     assert "ingest transport not connected" in caplog.text
 
 

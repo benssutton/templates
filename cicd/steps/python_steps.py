@@ -29,7 +29,7 @@ def typecheck(s: Service) -> None:
 
 
 def test(s: Service) -> None:
-    # pytest.ini sets asyncio mode; .coveragerc enforces fail_under.
+    # pyproject.toml sets asyncio mode and the coverage gate.
     run([PY, "-m", "pytest", "tests/", "-v", "--cov"], _dir(s))
 
 
