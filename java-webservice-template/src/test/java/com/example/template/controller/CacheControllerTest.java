@@ -26,14 +26,14 @@ class CacheControllerTest extends IntegrationSupport {
 
     @Test
     void setThenGetRoundTripsJson() {
+        String key = unique("cache");
         client.toBlocking()
                 .exchange(
                         HttpRequest.POST(
-                                "/cache",
-                                Map.of("key", "k1", "value", Map.of("a", 1, "b", "two"))));
+                                "/cache", Map.of("key", key, "value", Map.of("a", 1, "b", "two"))));
         CacheEntry got =
-                client.toBlocking().retrieve(HttpRequest.GET("/cache/k1"), CacheEntry.class);
-        assertThat(got.key()).isEqualTo("k1");
+                client.toBlocking().retrieve(HttpRequest.GET("/cache/" + key), CacheEntry.class);
+        assertThat(got.key()).isEqualTo(key);
         assertThat(got.value().get("b").getStringValue()).isEqualTo("two");
         assertThat(got.value().get("a").getNumberValue()).isEqualTo(1);
     }
@@ -71,12 +71,13 @@ class CacheControllerTest extends IntegrationSupport {
 
     @Test
     void ttlIsAppliedWithTheValue() {
+        String key = unique("ttl");
         client.toBlocking()
                 .exchange(
                         HttpRequest.POST(
-                                "/cache", Map.of("key", "k-ttl", "value", "v", "ttl_seconds", 60)));
+                                "/cache", Map.of("key", key, "value", "v", "ttl_seconds", 60)));
         CacheEntry got =
-                client.toBlocking().retrieve(HttpRequest.GET("/cache/k-ttl"), CacheEntry.class);
+                client.toBlocking().retrieve(HttpRequest.GET("/cache/" + key), CacheEntry.class);
         assertThat(got.ttlSeconds()).isBetween(1, 60);
     }
 
@@ -85,7 +86,8 @@ class CacheControllerTest extends IntegrationSupport {
     /** JSON.SET on a key holding a plain string fails inside EXEC; that must not read as 201. */
     @Test
     void setOnKeyOfWrongTypeIsAnError() {
-        jedis.set("plain-string-key", "x");
+        String key = unique("plain");
+        jedis.set(key, "x");
         HttpClientResponseException ex =
                 catchThrowableOfType(
                         HttpClientResponseException.class,
@@ -96,7 +98,7 @@ class CacheControllerTest extends IntegrationSupport {
                                                         "/cache",
                                                         Map.of(
                                                                 "key",
-                                                                "plain-string-key",
+                                                                key,
                                                                 "value",
                                                                 Map.of("a", 1),
                                                                 "ttl_seconds",

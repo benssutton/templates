@@ -25,38 +25,34 @@ class ConfigControllerTest extends IntegrationSupport {
 
     @Test
     void postReturns201AndGetListsTheEntry() {
+        String key = unique("feature");
         HttpResponse<ConfigEntry> created =
                 client.toBlocking()
                         .exchange(
-                                HttpRequest.POST("/config", new ConfigSetRequest("featureX", "on")),
+                                HttpRequest.POST("/config", new ConfigSetRequest(key, "on")),
                                 ConfigEntry.class);
         // Micronaut 5: HttpStatus implements CharSequence, so the bare assertThat(...) overload
         // is ambiguous against AssertJ's assertThat(CharSequence). Cast to Object to select the
         // generic ObjectAssert overload while keeping the equality contract intact.
         assertThat((Object) created.getStatus()).isEqualTo(HttpStatus.CREATED);
-        assertThat(created.body()).isEqualTo(new ConfigEntry("featureX", "on"));
+        assertThat(created.body()).isEqualTo(new ConfigEntry(key, "on"));
 
         List<ConfigEntry> all =
                 client.toBlocking()
                         .retrieve(HttpRequest.GET("/config"), Argument.listOf(ConfigEntry.class));
-        assertThat(all).contains(new ConfigEntry("featureX", "on"));
+        assertThat(all).contains(new ConfigEntry(key, "on"));
     }
 
     @Test
     void postIsUpsert() {
-        client.toBlocking()
-                .exchange(HttpRequest.POST("/config", new ConfigSetRequest("upsertKey", "v1")));
-        client.toBlocking()
-                .exchange(HttpRequest.POST("/config", new ConfigSetRequest("upsertKey", "v2")));
+        String key = unique("upsert");
+        client.toBlocking().exchange(HttpRequest.POST("/config", new ConfigSetRequest(key, "v1")));
+        client.toBlocking().exchange(HttpRequest.POST("/config", new ConfigSetRequest(key, "v2")));
 
         List<ConfigEntry> all =
                 client.toBlocking()
                         .retrieve(HttpRequest.GET("/config"), Argument.listOf(ConfigEntry.class));
-        assertThat(
-                        all.stream()
-                                .filter(e -> e.key().equals("upsertKey"))
-                                .map(ConfigEntry::value)
-                                .toList())
+        assertThat(all.stream().filter(e -> e.key().equals(key)).map(ConfigEntry::value).toList())
                 .containsExactly("v2");
     }
 }

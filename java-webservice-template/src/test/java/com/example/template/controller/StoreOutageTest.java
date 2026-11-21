@@ -100,10 +100,11 @@ class StoreOutageTest extends IntegrationSupport {
 
     @Test
     void frozenRedisIsABounded503() {
-        timed(HttpRequest.POST("/cache", Map.of("key", "outage-k", "value", 1)));
+        String key = unique("outage");
+        timed(HttpRequest.POST("/cache", Map.of("key", key, "value", 1)));
         pause(OWN_REDIS);
         try {
-            Res res = timed(HttpRequest.GET("/cache/outage-k"));
+            Res res = timed(HttpRequest.GET("/cache/" + key));
             assertThat(res.status()).as(res.body()).isEqualTo(503);
             assertThat(res.body()).isEqualTo(UNAVAILABLE);
             assertThat(res.took()).isLessThan(BOUND);
