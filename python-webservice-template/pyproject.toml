@@ -12,7 +12,10 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # Test polling helpers take a deadline in seconds; they are not cancel scopes.
-"tests/**" = ["ASYNC109"]
+"tests/support/solace.py" = ["ASYNC109"]
+"tests/support/wait.py" = ["ASYNC109"]
+"tests/test_http_ingest.py" = ["ASYNC109"]
+"tests/test_solace_consumer.py" = ["ASYNC109"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["core", "ingestion", "mcp_routers", "observability", "persistence", "routers", "schemas", "services", "settings", "main"]

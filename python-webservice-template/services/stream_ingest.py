@@ -190,11 +190,16 @@ class StreamIngestService:
             except Exception:
                 delay = transport.fail()
                 limit = s.ingest_max_consecutive_failures
-                log.exception(
-                    "consumer deliveries() failed (failure %d/%d)",
-                    transport.failures,
-                    limit,
-                )
+                if limit:
+                    log.exception(
+                        "consumer deliveries() failed (failure %d/%d)",
+                        transport.failures,
+                        limit,
+                    )
+                else:
+                    log.exception(
+                        "consumer deliveries() failed (failure %d)", transport.failures
+                    )
                 if limit and transport.failures >= limit:
                     log.critical(
                         "ingest: %d consecutive failures; requesting shutdown",

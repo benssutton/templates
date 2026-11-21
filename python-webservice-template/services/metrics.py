@@ -157,5 +157,6 @@ class MetricsService:
 
     def render(self, status: DetailedStatusResponse) -> tuple[bytes, str]:
         """Exposition text for this scrape's status snapshot."""
+        # Keep sync and await-free: it sets the shared collector's status, then generates.
         self._collector.status = status
         return generate_latest(self.registry), CONTENT_TYPE_LATEST

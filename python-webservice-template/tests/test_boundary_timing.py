@@ -36,7 +36,6 @@ def test_render_header_sums_duplicates_and_sanitizes_labels():
 
 
 async def test_timed_records_boundary_sample_when_active():
-
     token = boundary_samples_var.set([])
     try:
         async with timed("clickhouse.select"):
@@ -51,7 +50,6 @@ async def test_timed_records_boundary_sample_when_active():
 
 
 async def test_timed_is_silent_when_no_request_active():
-
     assert boundary_samples_var.get() is None
     async with timed("clickhouse.select"):  # must not raise
         pass
