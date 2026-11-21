@@ -25,19 +25,27 @@ public final class EnvContract implements ApplicationContextConfigurer {
         }
     }
 
+    /** Blank values count as absent, so an empty assignment in a .env file means "unset". */
     static Map<String, Object> translate(Map<String, String> env) {
         Map<String, Object> props = new HashMap<>();
         // Not in application.yml: a default micronaut.server.host would also become the Host header
         // of the test client, and Micronaut already binds every interface when it is unset.
-        if (env.containsKey("SERVER_HOST")) {
-            props.put("micronaut.server.host", env.get("SERVER_HOST"));
+        String host = value(env, "SERVER_HOST");
+        if (host != null) {
+            props.put("micronaut.server.host", host);
         }
-        String pg = env.get("POSTGRES_URL");
+        String pg = value(env, "POSTGRES_URL");
         if (pg != null) {
             URI uri = URI.create(pg);
+            String query = uri.getRawQuery();
             props.put(
                     "datasources.default.url",
-                    "jdbc:postgresql://" + uri.getHost() + ":" + port(uri, 5432) + uri.getPath());
+                    "jdbc:postgresql://"
+                            + uri.getHost()
+                            + ":"
+                            + port(uri, 5432)
+                            + uri.getRawPath()
+                            + (query == null ? "" : "?" + query));
             String userInfo = uri.getRawUserInfo();
             if (userInfo != null) {
                 String[] parts = userInfo.split(":", 2);
@@ -47,22 +55,43 @@ public final class EnvContract implements ApplicationContextConfigurer {
                 }
             }
         }
-        if (env.containsKey("CLICKHOUSE_HOST")) {
+        String chHost = value(env, "CLICKHOUSE_HOST");
+        if (chHost != null) {
             props.put(
                     "datasources.clickhouse.url",
                     "jdbc:ch://%s:%s/%s"
                             .formatted(
-                                    env.get("CLICKHOUSE_HOST"),
-                                    env.getOrDefault("CLICKHOUSE_PORT", "8123"),
-                                    env.getOrDefault("CLICKHOUSE_DATABASE", "default")));
+                                    chHost,
+                                    valueOr(env, "CLICKHOUSE_PORT", "8123"),
+                                    valueOr(env, "CLICKHOUSE_DATABASE", "default")));
         }
-        String acquire = env.get("POSTGRES_ACQUIRE_TIMEOUT_SECONDS");
+        String acquire = value(env, "POSTGRES_ACQUIRE_TIMEOUT_SECONDS");
         if (acquire != null) {
-            props.put(
-                    "datasources.default.connection-timeout",
-                    String.valueOf(Math.round(Double.parseDouble(acquire) * 1000)));
+            props.put("datasources.default.connection-timeout", String.valueOf(millis(acquire)));
         }
         return props;
+    }
+
+    private static long millis(String seconds) {
+        try {
+            return Math.round(Double.parseDouble(seconds) * 1000);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    "POSTGRES_ACQUIRE_TIMEOUT_SECONDS must be a number of seconds, got '"
+                            + seconds
+                            + "'",
+                    e);
+        }
+    }
+
+    private static String value(Map<String, String> env, String name) {
+        String v = env.get(name);
+        return v == null || v.isBlank() ? null : v.strip();
+    }
+
+    private static String valueOr(Map<String, String> env, String name, String fallback) {
+        String v = value(env, name);
+        return v == null ? fallback : v;
     }
 
     private static int port(URI uri, int fallback) {
