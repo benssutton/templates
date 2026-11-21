@@ -47,9 +47,9 @@ The app applies its Postgres and ClickHouse migrations (`migrations/`) at startu
 python main.py
 ```
 
-Swagger is at https://localhost/docs. `python main.py` serves HTTPS on 443; the
-container listens on 8443 and compose publishes it as `443:8443`, so both are
-reached at `https://localhost/`. Your browser will warn about the self-signed
+Swagger is at https://localhost:8443/docs when run with `python main.py` (HTTPS on
+8443). Under compose the container listens on 8443 and publishes it as `443:8443`,
+so it is reached at `https://localhost/`. Your browser will warn about the self-signed
 certificate: accept it (dev only).
 
 ## Running the Tests
@@ -72,7 +72,8 @@ docker run --rm --network python-template_default -e BASE_URL=https://app:8443 -
 
 ## Integrating with Claude Desktop
 
-Start the app; `/mcp` is mounted at https://localhost/mcp. Add to Claude Desktop's
+Start the app with `python main.py`; `/mcp` is mounted at https://localhost:8443/mcp
+(under compose, https://localhost/mcp). Add to Claude Desktop's
 `claude_desktop_config.json`. Because the dev cert is self-signed, mcp-remote must
 be told to accept it via `NODE_TLS_REJECT_UNAUTHORIZED=0` (dev only; never against
 production endpoints):
@@ -81,12 +82,13 @@ production endpoints):
 "mcpServers": {
   "python-template": {
     "command": "npx",
-    "args": ["-y", "mcp-remote", "https://localhost/mcp"],
+    "args": ["-y", "mcp-remote", "https://localhost:8443/mcp"],
     "env": { "NODE_TLS_REJECT_UNAUTHORIZED": "0" }
   }
 }
 ```
 
-Restart Claude Desktop. The tools `get_health_status`, `list_config`,
-`get_cache_entry`, `get_data` and `get_cached_data` should appear. With
+Restart Claude Desktop. The tools `get_health_status`, `get_config`,
+`get_cache`, `get_data` and `get_cached_data` should appear; each returns the
+same JSON body as its REST endpoint. With
 `AUTH_ENABLED=true`, add `"--header", "Authorization: Bearer <jwt>"` to `args`.

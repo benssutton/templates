@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     status: str = "running"
 
     server_host: str = "0.0.0.0"
-    server_port: int = 443
+    server_port: int = 8443
     ssl_keyfile: str = "./certs/key.pem"
     ssl_certfile: str = "./certs/cert.pem"
     # Seconds uvicorn waits for in-flight requests on SIGTERM before closing them.
@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     health_check_timeout_seconds: float = 2.0  # per-dependency ping timeout
     # Dependency probe results are reused for this long, so frequent scrapes of
     # /metrics and /health/* do not ping every store each time. 0 disables.
-    health_probe_cache_seconds: float = Field(default=5.0, ge=0)
+    health_cache_ttl_seconds: float = Field(default=5.0, ge=0)
     ingest_staleness_threshold_seconds: float | None = (
         None  # None = staleness never reported
     )

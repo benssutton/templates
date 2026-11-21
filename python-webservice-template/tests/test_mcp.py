@@ -212,7 +212,7 @@ def test_mcp_allowed_hosts_accepts_json_or_comma_separated(tmp_path, raw, expect
     assert settings.mcp_allowed_hosts == expected
 
 
-async def _call_tool(client, headers, name: str, arguments: dict) -> dict:
+async def _call_tool_raw(client, headers, name: str, arguments: dict) -> dict:
     response = await client.post(
         "/mcp/",
         headers=headers,
@@ -224,9 +224,16 @@ async def _call_tool(client, headers, name: str, arguments: dict) -> dict:
         },
     )
     assert response.status_code == 200
-    result = parse_mcp_response(response)["result"]
+    return parse_mcp_response(response)["result"]
+
+
+async def _call_tool(client, headers, name: str, arguments: dict) -> Any:
+    """Call a tool; the result is one text item holding the REST body as JSON."""
+    result = await _call_tool_raw(client, headers, name, arguments)
     assert result["isError"] is False, result
-    return result["structuredContent"]
+    assert len(result["content"]) == 1, result
+    assert result["content"][0]["type"] == "text"
+    return json.loads(result["content"][0]["text"])
 
 
 async def test_mcp_tools_mirror_rest_endpoints(test_client):
@@ -247,29 +254,63 @@ async def test_mcp_tools_mirror_rest_endpoints(test_client):
         "redis",
     }
 
-    configs = await _call_tool(test_client, headers, "list_config", {})
-    assert {"key": "mcp_key", "value": "v"} in configs["result"]
+    configs = await _call_tool(test_client, headers, "get_config", {})
+    assert configs == (await test_client.get("/config")).json()
+    assert {"key": "mcp_key", "value": "v"} in configs
 
-    entry = await _call_tool(
-        test_client, headers, "get_cache_entry", {"key": "mcp_key"}
-    )
+    entry = await _call_tool(test_client, headers, "get_cache", {"key": "mcp_key"})
     assert entry["value"] == {"a": 1}
 
-    # Absent key: REST answers 404, the tool reports an error result.
-    missing = await test_client.post(
-        "/mcp/",
-        headers=headers,
-        json={
-            "jsonrpc": "2.0",
-            "id": 8,
-            "method": "tools/call",
-            "params": {"name": "get_cache_entry", "arguments": {"key": "absent"}},
-        },
-    )
-    assert parse_mcp_response(missing)["result"]["isError"] is True
+    # Absent key: REST answers 404, the tool reports an error result with the same body.
+    missing = await _call_tool_raw(test_client, headers, "get_cache", {"key": "absent"})
+    assert missing["isError"] is True
+    assert len(missing["content"]) == 1
+    assert json.loads(missing["content"][0]["text"]) == {
+        "detail": "Key 'absent' not found"
+    }
 
     rest = (await test_client.get("/data", params={"limit": 2})).json()
     assert await _call_tool(test_client, headers, "get_data", {"limit": 2}) == rest
 
     cached = await _call_tool(test_client, headers, "get_cached_data", {"limit": 5})
     assert cached == (await test_client.get("/data/cache", params={"limit": 5})).json()
+
+
+async def test_get_health_status_matches_rest_shape(test_client):
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    init = await test_client.post("/mcp/", headers=headers, json=_INIT)
+    headers["mcp-session-id"] = init.headers["mcp-session-id"]
+
+    # _call_tool asserts exactly one text item and parses it as JSON.
+    tool = await _call_tool(test_client, headers, "get_health_status", {})
+    rest = (await test_client.get("/health/status")).json()
+
+    # Uptime, latencies and request times differ between the two calls, so
+    # compare the top-level shape and the static `app` object only.
+    assert tool.keys() == rest.keys()
+    assert tool["app"] == rest["app"]
+
+
+async def test_mcp_tool_names(test_client):
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    init = await test_client.post("/mcp/", headers=headers, json=_INIT)
+    headers["mcp-session-id"] = init.headers["mcp-session-id"]
+    response = await test_client.post(
+        "/mcp/",
+        headers=headers,
+        json={"jsonrpc": "2.0", "id": 3, "method": "tools/list"},
+    )
+    names = sorted(t["name"] for t in parse_mcp_response(response)["result"]["tools"])
+    assert names == [
+        "get_cache",
+        "get_cached_data",
+        "get_config",
+        "get_data",
+        "get_health_status",
+    ]

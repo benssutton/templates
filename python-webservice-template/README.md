@@ -45,7 +45,7 @@ is what lets the whole test suite run in one pytest session.
 | **Dependency injection** | The lifespan stores a frozen `AppServices` dataclass on `app.state.services`; typed `Annotated` getters hand each route its service | [services/app_services.py](services/app_services.py), [core/dependencies.py](core/dependencies.py) |
 | **REST-first routers** | Every capability (data, config, cache, health, metrics) is a REST endpoint. Routers are thin; logic lives in services | [routers/](routers/) |
 | **Pydantic schemas** | Request/response models give validation and OpenAPI docs (`/docs`) | [schemas/](schemas/) |
-| **MCP server** | `FastMCP` mounted at `/mcp`. Its tools mirror the REST read endpoints by calling the same service methods: `get_health_status`, `list_config`, `get_cache_entry`, `get_data`, `get_cached_data` | [mcp_routers/tools.py](mcp_routers/tools.py) |
+| **MCP server** | `FastMCP` mounted at `/mcp`. Its tools mirror the REST read endpoints by calling the same service methods: `get_health_status`, `get_config`, `get_cache`, `get_data`, `get_cached_data`. Each returns the same JSON body as its REST endpoint, as one text content item (a missing cache key gives `isError: true` with the REST 404 body) | [mcp_routers/tools.py](mcp_routers/tools.py) |
 
 ---
 
@@ -142,7 +142,7 @@ into the LSM store; `/data/cache` serves them.
 
 | Feature | What it gives you | Entry point |
 | --- | --- | --- |
-| **Liveness / readiness / status** | `/health/live` (always 200), `/health/ready` (503 if any dependency is down), `/health/status` (full detail incl. system metrics). Probe results are cached for `health_probe_cache_seconds` so scrapes do not ping every store each time | [routers/health.py](routers/health.py), [services/health.py](services/health.py) |
+| **Liveness / readiness / status** | `/health/live` (always 200), `/health/ready` (503 if any dependency is down), `/health/status` (full detail incl. system metrics). Probe results are cached for `health_cache_ttl_seconds` so scrapes do not ping every store each time | [routers/health.py](routers/health.py), [services/health.py](services/health.py) |
 | **Prometheus metrics** | `/metrics`: dependency up/latency, ingest state and freshness, counters `ingest_rows_ingested_total` and `ingest_outcomes_total{outcome=accepted\|failed\|rejected}`, `app_process_*` and `system_*` gauges, the standard `process_*`/`python_*` collectors, request histograms | [routers/metrics.py](routers/metrics.py), [services/metrics.py](services/metrics.py) |
 | **Structured logs** | One JSON object per line (`timestamp`, `level`, `logger`, `message`, `correlation_id`, `exception`), level from `LOG_LEVEL`; uvicorn's access and error logs go through the same handler | [core/logging_config.py](core/logging_config.py) |
 | **Correlation id** | Adopts a safe inbound `X-Request-ID` or generates one, stamps every log line, echoes it back; carried across `to_thread` into the store-write thread | [core/correlation.py](core/correlation.py) |
