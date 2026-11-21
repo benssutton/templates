@@ -23,7 +23,8 @@ class Delivery:
 
     CREATE_ON_START queues get the broker default of unlimited redelivery and no
     DMQ, so a persistently failing message retries forever (the ingest loop backs
-    off between fail()s). Production queues need max-redelivery and a DMQ.
+    off between fail()s: jittered, doubling, capped). Production queues need
+    max-redelivery and a DMQ.
     """
 
     batches: list[pa.RecordBatch]
@@ -39,7 +40,8 @@ OnBound = Callable[[], None]
 class BatchConsumer(Protocol):
     """Synchronous transport interface, run on the dedicated ingest thread.
 
-    deliveries() blocks; close() must be thread-safe and unblock it. deliveries()
+    deliveries() blocks; close() must be thread-safe and unblock it so the ingest
+    thread can exit. deliveries()
     calls on_bound(), if given, once bound: proof of health, so the ingest loop
     resets its failure count even if no message arrives. connection_state() is a
     cached read (no I/O).

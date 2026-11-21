@@ -23,9 +23,11 @@ def get_correlation_id() -> str:
 
 
 def set_correlation_id(value: str) -> contextvars.Token:
-    """Set the correlation ID and return the token that restores the previous one.
+    """Set the correlation ID and return the reset token.
 
-    The ingest loop resets after each batch so its backoff logs don't get that ID."""
+    Pair with correlation_id_var.reset(token) to restore (the ingest loop does after
+    each batch, so backoff logs don't get that ID); callers that don't may discard
+    the token."""
     return correlation_id_var.set(value)
 
 

@@ -1,7 +1,8 @@
 """Per-request boundary timings, returned as a W3C Server-Timing header.
 
-ServerTimingMiddleware puts a fresh sample list on a ContextVar per HTTP request;
-timed() appends (label, ms) and the header adds a `total` for the whole handler.
+ServerTimingMiddleware puts a fresh sample list on a ContextVar per HTTP request
+(so the ingest thread never pollutes request samples); timed() appends
+(label, ms) and the header adds a `total` for the whole handler.
 Pure ASGI, so streaming responses (/mcp) aren't buffered and the ContextVar
 reaches the endpoint.
 """

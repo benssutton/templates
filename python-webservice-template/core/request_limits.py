@@ -1,7 +1,8 @@
-"""Caps the inbound request body size, app-wide.
+"""Caps the inbound request body size; app-wide, so future POST routes inherit it.
 
-Counts bytes as they stream and aborts with 413 once the limit is crossed, so an
-oversized body is never buffered or handled, even without Content-Length.
+Counts bytes as they stream and answers 413 {"detail": ...} once the limit is
+crossed, so an oversized body is never buffered or handled, even without
+Content-Length.
 """
 
 import json

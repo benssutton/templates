@@ -6,8 +6,9 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 class CanonicalPathMiddleware:
     """`/config/` is routed as `/config`; a mount root `/mcp` as `/mcp/`, no redirect.
 
-    Only a literal trailing `/` is stripped: the check uses the still-encoded
-    `raw_path`, so `/x/a%2F` is left alone; the new `raw_path` keeps its encoding."""
+    Only a literal trailing `/` is stripped. `scope["path"]` is percent-decoded, so
+    the check uses the still-encoded `raw_path` (`/x/a%2F` is left alone); the new
+    `raw_path` keeps its encoding."""
 
     def __init__(self, app: ASGIApp, mount_roots: tuple[str, ...] = ("/mcp",)) -> None:
         self.app = app

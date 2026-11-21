@@ -150,7 +150,8 @@ class SolaceBatchConsumer:
     """Solace Guaranteed messaging: binds a durable exclusive queue (created on
     start, with the topic subscription) and yields one Delivery per message.
 
-    Threading: each deliveries() call (ingest thread) owns one receiver and inbox
+    Threading: `__aenter__` connects with backoff; startup fails if the broker is
+    unreachable. Each deliveries() call (ingest thread) owns one receiver and inbox
     and terminates the receiver in `finally`, so a retry can re-bind the exclusive
     queue and never sees stale deliveries. close() (any thread) sets `_closed`,
     wakes deliveries() with an inbox sentinel and terminates the current receiver
@@ -159,7 +160,8 @@ class SolaceBatchConsumer:
 
     Recovery: the SDK rides out network blips (forever retry; the flow re-binds).
     On a terminal interruption deliveries() raises SolaceServiceInterrupted; the
-    ingest loop backs off and the next call connects a fresh service. A flow
+    ingest loop backs off, and the next deliveries() call disconnects the dead
+    service and connects a fresh one (same backoff as startup). A flow
     terminated on a live service is not signalled: deliveries() stays blocked and
     the disconnect watchdog sees CONNECTED.
     """

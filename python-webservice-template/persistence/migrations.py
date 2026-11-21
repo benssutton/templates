@@ -1,6 +1,7 @@
-"""Versioned SQL migrations (migrations/<store>/NNN_name.sql), applied at startup.
+"""Versioned SQL migrations, applied at startup.
 
-Each store records applied versions in `schema_migrations`. Never edit an applied
+Files are migrations/<store>/NNN_description.sql, applied in version order; each
+store records applied versions in `schema_migrations`. Never edit an applied
 file: add the next number. Postgres runs all pending files in ONE transaction
 under an advisory lock, so concurrent replicas apply each version once and a
 failure leaves nothing behind. ClickHouse has neither, so each file must be one

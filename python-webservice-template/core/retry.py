@@ -38,7 +38,8 @@ async def connect_with_backoff[T](
     base_delay: float = 1.0,
     max_delay: float = 30.0,
 ) -> T:
-    """Call connect(), waiting backoff_delay() after each failure.
+    """Call connect(), waiting base_delay * 2^(attempt-1) s (capped at max_delay)
+    plus up to 25% jitter between attempts.
 
     After max_attempts failures the last exception propagates, aborting startup."""
     for attempt in range(1, max_attempts + 1):
