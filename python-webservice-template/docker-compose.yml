@@ -6,7 +6,7 @@ name: python-template
 
 services:
   db:
-    image: pgvector/pgvector:0.8.4-pg18
+    image: pgvector/pgvector:0.8.7-pg18
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
@@ -22,7 +22,7 @@ services:
       retries: 10
 
   clickhouse:
-    image: clickhouse/clickhouse-server:26.8.40.7
+    image: clickhouse/clickhouse-server:26.10.4.207
     ports:
       - "8123:8123"
     environment:
@@ -108,7 +108,7 @@ services:
   # One-shot: writes the dev key/cert only if absent. Runs as root because a new
   # named volume is root-owned; the files are handed to the app user (uid 10001).
   certs:
-    image: python:3.12.16-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+    image: python:3.15.2-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
     volumes:
       - certs:/certs
     entrypoint:
@@ -161,7 +161,7 @@ services:
 
   prometheus:
     profiles: [observability]
-    image: prom/prometheus:v3.8.0
+    image: prom/prometheus:v3.16.0
     ports:
       - "9090:9090"
     volumes:
@@ -172,7 +172,7 @@ services:
 
   grafana:
     profiles: [observability]
-    image: grafana/grafana:12.3.0
+    image: grafana/grafana:13.3.1
     ports:
       - "3000:3000"
     environment:
