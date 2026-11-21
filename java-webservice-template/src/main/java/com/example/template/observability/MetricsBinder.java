@@ -9,6 +9,7 @@ import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micronaut.context.annotation.Context;
+import io.micronaut.context.annotation.Requires;
 
 /**
  * Registers the template's custom meters once, at startup. Each reads its value when scraped:
@@ -17,6 +18,7 @@ import io.micronaut.context.annotation.Context;
  * are counters (exported with {@code _total}). Standard JVM/process metrics come from Micrometer's
  * built-in binders (application.yml).
  */
+@Requires(property = "micronaut.metrics.enabled", notEquals = "false")
 @Context
 public class MetricsBinder {
 

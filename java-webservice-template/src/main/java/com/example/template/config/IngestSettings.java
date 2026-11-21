@@ -23,6 +23,8 @@ import java.util.List;
  *     disconnected this long; 0 disables the watchdog
  * @param maxConsecutiveFailures the ingest loop exits the process after this many transport
  *     failures in a row without a successful bind; 0 disables it
+ * @param staleFailsReadiness when true, a stale ingest (see {@code stalenessThresholdSeconds})
+ *     makes {@code /health/ready} report not ready
  * @param lsmMaxRows retention cap: over it the oldest live rows are evicted and counted
  * @param lsmFlushRows memtable size that triggers a flush to a sorted run
  * @param lsmCompactionRuns run count that triggers a full compaction
@@ -38,6 +40,7 @@ public record IngestSettings(
         @PositiveOrZero long maxDisconnectSeconds,
         @PositiveOrZero int maxConsecutiveFailures,
         @PositiveOrZero double stalenessThresholdSeconds,
+        boolean staleFailsReadiness,
         @Min(1) int lsmMaxRows,
         @Min(1) int lsmFlushRows,
         @Min(2) int lsmCompactionRuns,

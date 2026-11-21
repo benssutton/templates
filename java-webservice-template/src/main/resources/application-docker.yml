@@ -1,23 +1,11 @@
+# Container profile. Store and broker addresses come from the shared env vars
+# (POSTGRES_URL, CLICKHOUSE_HOST, REDIS_URL, SOLACE_HOST, ... see docker-compose.yml).
 micronaut:
   server:
     ssl:
       enabled: true
-      port: 8443   # published as 443 by compose
+      port: ${SERVER_PORT:8443}   # published as 443 by compose
       key-store:
         path: file:/app/certs/keystore.p12
         type: PKCS12
         password: ${KEYSTORE_PASSWORD:changeit}
-
-datasources:
-  default:
-    url: jdbc:postgresql://postgres:5432/appdb
-  clickhouse:
-    url: jdbc:ch://clickhouse:8123/default
-
-redis:
-  uri: redis://redis:6379/0
-
-template:
-  ingest:
-    solace:
-      host: solace

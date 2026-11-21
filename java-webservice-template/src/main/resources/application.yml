@@ -1,15 +1,17 @@
 micronaut:
   application:
-    name: java-template
+    name: ${OTEL_SERVICE_NAME:java-template}
   server:
     port: ${SERVER_PORT:8443}
-    max-request-size: 16MB
+    max-request-size: ${MAX_REQUEST_BODY_BYTES:16777216}
     cors:
       enabled: true
       configurations:
         default:
-          allowed-origins:
-            - "*"
+          allowed-origins: ${CORS_ALLOW_ORIGINS:*}
+          allowed-methods: ${CORS_ALLOW_METHODS:*}
+          allowed-headers: ${CORS_ALLOW_HEADERS:*}
+          allow-credentials: ${CORS_ALLOW_CREDENTIALS:false}
   # SIGTERM: stop accepting, let in-flight requests finish (bounded), then close beans.
   lifecycle:
     graceful-shutdown:
@@ -56,7 +58,7 @@ micronaut:
       - pattern: /**
         access: isAuthenticated()
   metrics:
-    enabled: true
+    enabled: ${METRICS_ENABLED:true}
     binders:
       jvm:
         enabled: true
@@ -87,44 +89,51 @@ otel:
     otlp:
       endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:`http://localhost:4317`}
 
+# Logging level for the application packages.
+logger:
+  levels:
+    com.example.template: ${LOG_LEVEL:INFO}
+
 template:
   auth:
     enabled: ${AUTH_ENABLED:false}
     jwt-secret: ${AUTH_JWT_SECRET:}
     jwt-issuer: ${AUTH_JWT_ISSUER:}
     jwt-audience: ${AUTH_JWT_AUDIENCE:}
-  app-title: "Template Micronaut Service"
-  app-version: "1.0.0"
-  app-description: "A Java Micronaut service mirroring the Python webservice template"
+  app-title: ${APP_TITLE:Template Micronaut Service}
+  app-version: ${APP_VERSION:1.0.0}
+  app-description: ${APP_DESCRIPTION:A Java Micronaut service mirroring the Python webservice template}
   status: "running"
-  correlation-id-header: "X-Request-ID"
-  health-check-timeout-seconds: 2.0
+  correlation-id-header: ${CORRELATION_ID_HEADER:X-Request-ID}
+  health-check-timeout-seconds: ${HEALTH_CHECK_TIMEOUT_SECONDS:2.0}
   # /health/status and /metrics reuse one probe round this long (readiness is always live).
   health-cache-ttl-seconds: ${HEALTH_CACHE_TTL_SECONDS:5}
-  mcp-name: "java-template"
-  mcp-instructions: "Tools for this template application. Each tool mirrors a read-only REST endpoint."
+  mcp-name: ${MCP_NAME:java-template}
+  mcp-instructions: ${MCP_INSTRUCTIONS:Tools for this template application. Each tool mirrors a read-only REST endpoint.}
   # /mcp DNS-rebinding protection (McpHostFilter): allowed Host header values, as a JSON
   # array or comma-separated host[:port]; Origin is checked against the same hosts. An
   # entry without a port matches any port. Must not be empty; a bad entry fails startup.
   mcp-allowed-hosts: ${MCP_ALLOWED_HOSTS:localhost}
-  connect-max-attempts: 5
-  connect-base-delay-seconds: 1.0
-  connect-max-delay-seconds: 30.0
+  connect-max-attempts: ${CONNECT_MAX_ATTEMPTS:5}
+  connect-base-delay-seconds: ${CONNECT_BASE_DELAY:1.0}
+  connect-max-delay-seconds: ${CONNECT_MAX_DELAY:30.0}
   ingest:
     transport: ${INGEST_TRANSPORT:noop}   # noop (HTTP ingest only) | solace
-    max-batch-bytes: 16777216
+    max-batch-bytes: ${MAX_INGEST_BATCH_BYTES:16777216}
     # Watchdog: exit when the transport stays disconnected this long (0 disables).
-    max-disconnect-seconds: 60
+    max-disconnect-seconds: ${INGEST_MAX_DISCONNECT_SECONDS:60}
     # Exit after this many transport failures in a row without a bind (0 disables).
-    max-consecutive-failures: 5
-    staleness-threshold-seconds: 0
-    lsm-max-rows: 1000000   # retention cap for the LSM store (oldest live rows evicted)
+    max-consecutive-failures: ${INGEST_MAX_CONSECUTIVE_FAILURES:5}
+    staleness-threshold-seconds: ${INGEST_STALENESS_THRESHOLD_SECONDS:0}
+    # Stale ingest fails /health/ready only when this is true.
+    stale-fails-readiness: ${INGEST_STALE_FAILS_READINESS:false}
+    lsm-max-rows: ${LSM_MAX_ROWS:1000000}   # retention cap for the LSM store (oldest live rows evicted)
     lsm-flush-rows: ${LSM_FLUSH_ROWS:1000}   # memtable -> sorted run threshold
     lsm-compaction-runs: ${LSM_COMPACTION_RUNS:4}   # run count -> full compaction threshold
     lsm-key-columns: ${LSM_KEY_COLUMNS:id}   # merge key; the Java store supports id only
     decoder-memory-bytes: 268435456   # direct memory bound shared by all Arrow decodes
-    retry-base-delay-seconds: 1.0
-    retry-max-delay-seconds: 60.0
+    retry-base-delay-seconds: ${INGEST_RETRY_BASE_DELAY:1.0}
+    retry-max-delay-seconds: ${INGEST_RETRY_MAX_DELAY:60.0}
     solace:
       host: ${SOLACE_HOST:localhost}
       port: ${SOLACE_PORT:55555}
@@ -137,14 +146,14 @@ template:
 # Every store client has bounded waits, so an outage is a prompt 503, not a hung request.
 datasources:
   default:
-    url: ${POSTGRES_URL:`jdbc:postgresql://localhost:5432/appdb`}
-    username: ${POSTGRES_USER:appuser}
-    password: ${POSTGRES_PASSWORD:password}
+    url: jdbc:postgresql://localhost:5432/appdb
+    username: appuser
+    password: password
     driver-class-name: org.postgresql.Driver
     dialect: POSTGRES
     schema-generate: NONE
-    minimum-idle: 2
-    maximum-pool-size: ${POSTGRES_POOL_SIZE:10}
+    minimum-idle: ${POSTGRES_POOL_MIN_SIZE:2}
+    maximum-pool-size: ${POSTGRES_POOL_MAX_SIZE:10}
     connection-timeout: 3000      # ms to wait for a pooled connection
     validation-timeout: 1000
     data-source-properties:
@@ -152,7 +161,7 @@ datasources:
       socketTimeout: 10           # s: a frozen server cannot hold a request longer
       options: "-c statement_timeout=5000"
   clickhouse:
-    url: ${CLICKHOUSE_URL:`jdbc:ch://localhost:8123/default`}
+    url: jdbc:ch://localhost:8123/default
     username: ${CLICKHOUSE_USER:default}
     password: ${CLICKHOUSE_PASSWORD:}
     driver-class-name: com.clickhouse.jdbc.ClickHouseDriver

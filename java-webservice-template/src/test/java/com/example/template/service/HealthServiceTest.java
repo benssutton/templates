@@ -7,6 +7,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.example.template.config.AppSettings;
+import com.example.template.config.IngestSettings;
 import com.example.template.core.CorrelationId;
 import com.example.template.core.LastRequestTracker;
 import com.example.template.core.MdcPropagationContext;
@@ -57,7 +58,10 @@ class HealthServiceTest {
     }
 
     private static HealthService service(
-            double timeoutSeconds, double cacheTtlSeconds, DependencyHealthProbe... probes) {
+            double timeoutSeconds,
+            double cacheTtlSeconds,
+            boolean staleFailsReadiness,
+            DependencyHealthProbe... probes) {
         AppSettings defaults = TestSettings.app(timeoutSeconds, 5, 1.0, 30.0);
         AppSettings settings =
                 new AppSettings(
@@ -74,18 +78,48 @@ class HealthServiceTest {
                         5,
                         1.0,
                         30.0);
+        IngestSettings d = TestSettings.ingest();
+        IngestSettings ingestSettings =
+                new IngestSettings(
+                        d.transport(),
+                        d.maxBatchBytes(),
+                        d.maxDisconnectSeconds(),
+                        d.maxConsecutiveFailures(),
+                        d.stalenessThresholdSeconds(),
+                        staleFailsReadiness,
+                        d.lsmMaxRows(),
+                        d.lsmFlushRows(),
+                        d.lsmCompactionRuns(),
+                        d.lsmKeyColumns(),
+                        d.decoderMemoryBytes(),
+                        d.retryBaseDelaySeconds(),
+                        d.retryMaxDelaySeconds(),
+                        d.solace());
         return new HealthService(
                 settings,
+                ingestSettings,
                 List.of(probes),
                 () ->
                         new IngestHealth(
-                                "noop", ConnectionState.CONNECTED, true, null, null, 0, 0, false),
+                                "noop", ConnectionState.CONNECTED, true, null, null, 0, 0, true),
                 new SystemMetrics(),
                 new LastRequestTracker());
     }
 
+    private static HealthService service(
+            double timeoutSeconds, double cacheTtlSeconds, DependencyHealthProbe... probes) {
+        return service(timeoutSeconds, cacheTtlSeconds, false, probes);
+    }
+
     private static HealthService service(double timeoutSeconds, DependencyHealthProbe... probes) {
-        return service(timeoutSeconds, 0, probes);
+        return service(timeoutSeconds, 0, false, probes);
+    }
+
+    /** The stub ingest is stale: it fails readiness only when stale-fails-readiness is on. */
+    @Test
+    void staleIngestFailsReadinessOnlyWhenConfigured() {
+        assertThat(service(1.0, 0, false).readiness().status()).isEqualTo(ReadinessStatus.READY);
+        assertThat(service(1.0, 0, true).readiness().status()).isEqualTo(ReadinessStatus.NOT_READY);
     }
 
     @Test
