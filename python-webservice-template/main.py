@@ -9,6 +9,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from core.auth import BearerAuthMiddleware
 from core.boundary_timing import ServerTimingMiddleware
+from core.canonical_path import CanonicalPathMiddleware
 from core.correlation import CorrelationIdMiddleware
 from core.errors import JsonErrorBodyMiddleware, register_exception_handlers
 from core.last_request import LastRequest, LastRequestMiddleware
@@ -23,6 +24,7 @@ from persistence.cache_store.redis.redis_client import RedisClient
 from persistence.stream_store.lsm_store import LSMStore
 from persistence.transaction_store.postgres.postgres_client import PostgresClient
 from routers import cache, config, data, health, metrics
+from schemas.root import RootInfo
 from services.app_services import AppServices
 from services.cache import CacheService
 from services.config import ConfigService
@@ -164,7 +166,10 @@ def create_app(settings: Settings) -> FastAPI:
     # Every middleware here is pure ASGI (no BaseHTTPMiddleware), so the 413 that
     # MaxBodySizeMiddleware raises mid-read reaches the handler as a plain
     # HTTPException rather than an ExceptionGroup. Starlette applies them LIFO:
-    # the last one added is the outermost.
+    # the last one added is the outermost. Outside-in order: CanonicalPath (so every
+    # layer, auth included, sees the routed path), MaxBodySize, CorrelationId, CORS,
+    # BearerAuth (if enabled), ServerTiming, LastRequest, then routing and the /mcp
+    # mount (whose Host allow-list is FastMCP's own transport security).
     app.add_middleware(LastRequestMiddleware, last_request=last_request)
     # Just outside LastRequestMiddleware, so `total` covers handler + downstream I/O.
     app.add_middleware(ServerTimingMiddleware)
@@ -182,6 +187,8 @@ def create_app(settings: Settings) -> FastAPI:
         CorrelationIdMiddleware, header_name=settings.correlation_id_header
     )
     app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_request_body_bytes)
+    # Outermost: `/x/` is routed as `/x`, and `/mcp` as the mount root `/mcp/`.
+    app.add_middleware(CanonicalPathMiddleware)
 
     app.include_router(health.router, prefix="/health")
     app.include_router(data.router, prefix="/data")
@@ -196,14 +203,14 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.tracer_provider = configure_tracing(app, settings)
 
     @app.get("/", tags=["API Root Page"])
-    async def get_root():
-        return {
-            "title": settings.app_title,
-            "version": settings.app_version,
-            "description": settings.app_description,
-            "docs": "/docs",
-            "MCP": "/mcp",
-        }
+    async def get_root() -> RootInfo:
+        return RootInfo(
+            title=settings.app_title,
+            version=settings.app_version,
+            description=settings.app_description,
+            docs="/docs",
+            MCP="/mcp",
+        )
 
     return app
 
