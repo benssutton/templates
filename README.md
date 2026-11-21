@@ -17,7 +17,7 @@ This repo is intended to serve as a template for services in Python, Rust, Java 
 Testing
 1. Testing should use real services/dependenices wherever possible.  Avoid mocks and patches.
 2. Testing should exercise real endpoints (HTTP, websockets)
-3. Tests should be async and run in parallel where possible to shorten the test cycle.
+3. Tests should be async and run in parallel where possible to shorten the test cycle (Python: pytest-xdist, 2 workers; Java: JUnit class-level concurrency; Rust: cargo test's default).
 4. Tests should include performance benchmarks
 5. Tests should be runnable locally as well as in the build pipeline.  Results of tests should be used as control gates in the CI/CD process.
 
