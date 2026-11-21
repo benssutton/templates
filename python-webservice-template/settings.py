@@ -98,7 +98,8 @@ class Settings(BaseSettings):
     # Streaming ingest loop: transport and settlement backoff, give-up point.
     ingest_retry_base_delay: float = Field(default=1.0, gt=0)
     ingest_retry_max_delay: float = Field(default=60.0, gt=0)
-    ingest_max_consecutive_failures: int = Field(default=5, ge=1)
+    # 0 disables the failure-count shutdown
+    ingest_max_consecutive_failures: int = Field(default=5, ge=0)
     ingest_join_timeout_seconds: float = Field(default=10.0, gt=0)
 
     # Inbound size limits

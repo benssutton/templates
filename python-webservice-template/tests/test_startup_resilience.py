@@ -30,6 +30,7 @@ async def test_clickhouse_unreachable_aborts_startup_after_bounded_retries(
         connect_base_delay=0.001,
         connect_max_delay=0.005,
         ingest_max_disconnect_seconds=None,
+        ingest_max_consecutive_failures=0,
     )
     start = time.monotonic()
     # Broad Exception: connect_with_backoff re-raises the last attempt's
@@ -57,6 +58,7 @@ async def test_stock_redis_without_json_module_aborts_startup(postgres_container
             redis_url=SecretStr(f"redis://localhost:{redis_port}/0"),
             connect_max_attempts=1,
             ingest_max_disconnect_seconds=None,
+            ingest_max_consecutive_failures=0,
         )
         with pytest.raises(Exception, match="RedisJSON"):
             async with lifespan_test_client(settings):

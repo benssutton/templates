@@ -83,13 +83,13 @@ async def test_ingest_health_tracks_freshness_after_ingest():
         _FakeConsumer(ConnectionState.CONNECTED), LSMStore(100, 4), settings
     )
 
-    before = await svc.health_check()
+    before = svc.health_check()
     assert before.connection_state == "connected"
     assert before.last_batch_at is None
     assert before.rows_ingested_total == 0
 
     await svc.ingest_batches([make_batch([(1, "a", "v1", "upsert")])])
-    after = await svc.health_check()
+    after = svc.health_check()
     assert after.rows_ingested_total == 1
     assert after.last_batch_at is not None
     assert after.seconds_since_last_batch is not None

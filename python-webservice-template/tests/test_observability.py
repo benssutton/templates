@@ -94,7 +94,9 @@ async def test_broker_partition_fails_readiness_then_recovers(
     solace_settings, solace_container
 ):
     # watchdog off: this test is about readiness, not shutdown
-    settings = solace_settings(ingest_max_disconnect_seconds=None)
+    settings = solace_settings(
+        ingest_max_disconnect_seconds=None, ingest_max_consecutive_failures=0
+    )
     async with lifespan_test_client(settings) as client:
         await poll_ready(client, 200)
         with broker_paused(solace_container):
@@ -139,16 +141,17 @@ async def test_idle_ingest_is_stale_but_ready():
         ingest_staleness_threshold_seconds=2.0,
         ingest_stale_fails_readiness=False,
         ingest_max_disconnect_seconds=None,
+        ingest_max_consecutive_failures=0,
     )
     svc = StreamIngestService(
         _IdleConsumer(), LSMStore(flush_rows=100, compaction_runs=4), settings
     )
 
-    health = await svc.health_check()
+    health = svc.health_check()
     assert health.connection_state == "connected"
     assert health.stale is False
     await asyncio.sleep(2.5)
-    health2 = await svc.health_check()
+    health2 = svc.health_check()
     assert health2.connection_state == "connected"
     assert health2.stale is True
 

@@ -1,6 +1,7 @@
 """StreamIngestService decides HOW each delivery is settled. Driven through the
 real ingest loop with a scripted (non-mock) consumer and real LSMStores."""
 
+import asyncio
 import threading
 import time
 
@@ -59,6 +60,7 @@ async def _settle_one(
     settings = Settings(
         ingest_transport="noop",
         ingest_max_disconnect_seconds=None,
+        ingest_max_consecutive_failures=0,
         **settings_overrides,
     )
     svc = StreamIngestService(
@@ -126,6 +128,7 @@ def _service(deliveries: list[Delivery], store: LSMStore, **settings_overrides):
     settings = Settings(
         ingest_transport="noop",
         ingest_max_disconnect_seconds=None,
+        ingest_max_consecutive_failures=0,
         **settings_overrides,
     )
     return StreamIngestService(_ScriptedConsumer(deliveries), store, settings)
@@ -255,7 +258,11 @@ async def test_transport_error_backs_off_then_next_call_delivers():
 
 async def test_close_during_transport_backoff_is_prompt():
     consumer = _InterruptedOnceConsumer([])
-    settings = Settings(ingest_transport="noop", ingest_max_disconnect_seconds=None)
+    settings = Settings(
+        ingest_transport="noop",
+        ingest_max_disconnect_seconds=None,
+        ingest_max_consecutive_failures=0,
+    )
     svc = StreamIngestService(
         consumer, LSMStore(flush_rows=100, compaction_runs=4), settings
     )
@@ -284,3 +291,51 @@ async def test_close_during_settlement_backoff_is_prompt():
         started = time.monotonic()  # a ~2 s backoff is now pending
     assert time.monotonic() - started < 1.0
     assert len(fail_times) == 2  # the pending delivery was not processed
+
+
+class _AlwaysFailingConsumer(_ScriptedConsumer):
+    """deliveries() raises on every call and never binds."""
+
+    def deliveries(self, on_bound: OnBound | None = None):
+        raise ConnectionError("service terminally interrupted")
+        yield  # pragma: no cover - makes this a generator like the real one
+
+
+async def test_failure_shutdown_still_fires_without_a_disconnect_threshold():
+    # The watchdog and the consecutive-failure trigger are independent: turning
+    # one off (ingest_max_disconnect_seconds=None) leaves the other on.
+    settings = Settings(
+        ingest_transport="noop",
+        ingest_max_disconnect_seconds=None,
+        ingest_max_consecutive_failures=2,
+        ingest_retry_base_delay=0.01,
+        ingest_retry_max_delay=0.01,
+    )
+    shutdown = threading.Event()
+    service = StreamIngestService(
+        _AlwaysFailingConsumer([]),
+        LSMStore(flush_rows=100, compaction_runs=4),
+        settings,
+        shutdown_hook=shutdown.set,
+    )
+    async with service:
+        assert await asyncio.to_thread(shutdown.wait, 5)
+
+
+async def test_zero_consecutive_failures_disables_that_shutdown():
+    settings = Settings(
+        ingest_transport="noop",
+        ingest_max_disconnect_seconds=None,
+        ingest_max_consecutive_failures=0,
+        ingest_retry_base_delay=0.01,
+        ingest_retry_max_delay=0.01,
+    )
+    shutdown = threading.Event()
+    service = StreamIngestService(
+        _AlwaysFailingConsumer([]),
+        LSMStore(flush_rows=100, compaction_runs=4),
+        settings,
+        shutdown_hook=shutdown.set,
+    )
+    async with service:
+        assert not await asyncio.to_thread(shutdown.wait, 0.5)

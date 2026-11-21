@@ -5,6 +5,7 @@ import os
 import signal
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 
@@ -35,6 +36,29 @@ class _Outcome(Enum):
 
 def _default_shutdown() -> None:
     os.kill(os.getpid(), signal.SIGTERM)
+
+
+@dataclass
+class _Backoff:
+    """Doubling, jittered wait from `base` to `cap`, with a failure count."""
+
+    base: float
+    cap: float
+    current: float = field(init=False)
+    failures: int = field(init=False, default=0)
+
+    def __post_init__(self) -> None:
+        self.current = self.base
+
+    def reset(self) -> None:
+        self.current, self.failures = self.base, 0
+
+    def fail(self) -> float:
+        """Count a failure; return the wait before the next attempt."""
+        self.failures += 1
+        delay = jittered(self.current)
+        self.current = min(self.current * 2, self.cap)
+        return delay
 
 
 class StreamIngestService:
@@ -144,76 +168,56 @@ class StreamIngestService:
         return outcome
 
     def _ingest_loop(self) -> None:
-        base_delay = self._settings.ingest_retry_base_delay
-        max_delay = self._settings.ingest_retry_max_delay
-        max_failures = self._settings.ingest_max_consecutive_failures
-        consecutive_failures = 0
-        delay = base_delay
-        # Settlement backoff, separate from the transport backoff (`delay`): fail()
-        # makes the broker redeliver immediately (CREATE_ON_START queues have
-        # unlimited max-redelivery and no DMQ), so a persistent store error
-        # would otherwise spin. This only prevents a hot loop; production
-        # queues should set max-redelivery + a DMQ (see Delivery docstring).
-        settle_delay = base_delay
-        # ingest_max_disconnect_seconds=None disables *all* automatic shutdown:
-        # the watchdog (see __aenter__) and this consecutive-failure trigger.
-        shutdown_on_failure = self._settings.ingest_max_disconnect_seconds is not None
-
-        def _healthy() -> None:
-            # A bind or a delivery proves the transport works: without this, healed
-            # interruptions on a quiet queue would add up to a shutdown over time.
-            nonlocal consecutive_failures, delay
-            consecutive_failures = 0
-            delay = base_delay
-
+        s = self._settings
+        transport = _Backoff(s.ingest_retry_base_delay, s.ingest_retry_max_delay)
+        # fail() makes the broker redeliver at once (CREATE_ON_START queues have
+        # unlimited redelivery and no DMQ), so a persistent store error would spin
+        # without its own backoff. Production queues should set max-redelivery + a DMQ.
+        settle = _Backoff(s.ingest_retry_base_delay, s.ingest_retry_max_delay)
         while True:
             try:
-                for delivery in self._consumer.deliveries(on_bound=_healthy):
-                    _healthy()
-                    outcome: _Outcome | None = None
-                    token = set_correlation_id(
-                        new_id()
-                    )  # per-message ID for this thread's logs
-                    try:
-                        outcome = self._settle(delivery)
-                    except Exception:
-                        # settle() calls into the SDK; if the session just dropped,
-                        # the broker still holds the unsettled message and will
-                        # redeliver it.
-                        if self._stop.is_set():  # expected while shutting down
-                            log.warning(
-                                "settlement failed during shutdown; broker will redeliver"
-                            )
-                        else:
-                            log.exception("settlement failed; broker will redeliver")
-                    finally:
-                        # Reset so backoff/disconnect logs on the error path below
-                        # are not mis-attributed to the last message's ID.
-                        correlation_id_var.reset(token)
+                # A bind or a delivery proves the transport works.
+                for delivery in self._consumer.deliveries(on_bound=transport.reset):
+                    transport.reset()
+                    outcome = self._settle_logged(delivery)
                     if outcome is _Outcome.FAIL:
-                        if self._stop.wait(jittered(settle_delay)):
-                            return  # shutting down
-                        settle_delay = min(settle_delay * 2, max_delay)
+                        if self._stop.wait(settle.fail()):
+                            return
                     elif outcome is not None:
-                        settle_delay = base_delay
-                return  # deliveries() returned cleanly - consumer was closed
+                        settle.reset()
+                return  # the consumer was closed
             except Exception:
-                consecutive_failures += 1
+                delay = transport.fail()
+                limit = s.ingest_max_consecutive_failures
                 log.exception(
                     "consumer deliveries() failed (failure %d/%d)",
-                    consecutive_failures,
-                    max_failures,
+                    transport.failures,
+                    limit,
                 )
-                if shutdown_on_failure and consecutive_failures >= max_failures:
+                if limit and transport.failures >= limit:
                     log.critical(
                         "ingest: %d consecutive failures; requesting shutdown",
-                        consecutive_failures,
+                        transport.failures,
                     )
                     self._request_shutdown()
                     return
-                if self._stop.wait(jittered(delay)):
-                    return  # shutting down
-                delay = min(delay * 2, max_delay)
+                if self._stop.wait(delay):
+                    return
+
+    def _settle_logged(self, delivery: Delivery) -> _Outcome | None:
+        """Settle under a fresh correlation id. None when settling itself failed:
+        the broker still holds the message and redelivers it."""
+        token = set_correlation_id(new_id())
+        try:
+            return self._settle(delivery)
+        except Exception:
+            if self._stop.is_set():
+                log.warning("settlement failed during shutdown; broker will redeliver")
+            else:
+                log.exception("settlement failed; broker will redeliver")
+            return None
+        finally:
+            correlation_id_var.reset(token)
 
     async def _disconnect_watchdog(self) -> None:
         threshold = self._settings.ingest_max_disconnect_seconds
@@ -240,7 +244,7 @@ class StreamIngestService:
         except asyncio.CancelledError:
             return
 
-    async def health_check(self) -> IngestHealth:
+    def health_check(self) -> IngestHealth:
         state = self._consumer.connection_state()
         last = self._last_batch_at
         now = datetime.now(UTC)
