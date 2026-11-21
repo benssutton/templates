@@ -10,6 +10,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -51,6 +52,24 @@ public record IngestSettings(
         @Positive double retryBaseDelaySeconds,
         @Positive double retryMaxDelaySeconds,
         @NotNull @Valid Solace solace) {
+
+    // Float-seconds env vars as Durations (see AppSettings); code uses these accessors only.
+
+    public Duration maxDisconnect() {
+        return Duration.ofSeconds(maxDisconnectSeconds);
+    }
+
+    public Duration stalenessThreshold() {
+        return Seconds.of(stalenessThresholdSeconds);
+    }
+
+    public Duration retryBaseDelay() {
+        return Seconds.of(retryBaseDelaySeconds);
+    }
+
+    public Duration retryMaxDelay() {
+        return Seconds.of(retryMaxDelaySeconds);
+    }
 
     /**
      * @param queue durable exclusive queue the consumer binds, created on start with the topic

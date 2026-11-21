@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -34,4 +35,24 @@ public record AppSettings(
         @NotEmpty List<@NotBlank String> mcpAllowedHosts,
         @Min(1) int connectMaxAttempts,
         @Positive double connectBaseDelaySeconds,
-        @Positive double connectMaxDelaySeconds) {}
+        @Positive double connectMaxDelaySeconds) {
+
+    // The env vars are float seconds (HEALTH_CHECK_TIMEOUT_SECONDS=2.5), which Micronaut's
+    // Duration converter cannot bind; code uses these accessors only.
+
+    public Duration healthCheckTimeout() {
+        return Seconds.of(healthCheckTimeoutSeconds);
+    }
+
+    public Duration healthCacheTtl() {
+        return Seconds.of(healthCacheTtlSeconds);
+    }
+
+    public Duration connectBaseDelay() {
+        return Seconds.of(connectBaseDelaySeconds);
+    }
+
+    public Duration connectMaxDelay() {
+        return Seconds.of(connectMaxDelaySeconds);
+    }
+}

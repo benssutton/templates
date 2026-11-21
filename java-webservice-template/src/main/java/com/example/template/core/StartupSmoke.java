@@ -53,8 +53,8 @@ public class StartupSmoke {
                         },
                         "smoke:" + probe.name(),
                         settings.connectMaxAttempts(),
-                        settings.connectBaseDelaySeconds(),
-                        settings.connectMaxDelaySeconds());
+                        settings.connectBaseDelay(),
+                        settings.connectMaxDelay());
                 LOG.info("startup smoke-test: {} is up", probe.name());
             } catch (Exception e) {
                 throw new IllegalStateException("startup smoke-test failed for " + probe.name(), e);

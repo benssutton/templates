@@ -77,7 +77,7 @@ public class HealthService {
      * callers share one probe round.
      */
     public synchronized List<ProbeResult> dependencies() {
-        long ttlNanos = (long) (settings.healthCacheTtlSeconds() * 1_000_000_000L);
+        long ttlNanos = settings.healthCacheTtl().toNanos();
         Snapshot s = cached;
         if (s == null || System.nanoTime() - s.takenAtNanos() >= ttlNanos) {
             s = new Snapshot(probeAll(), System.nanoTime());
@@ -92,7 +92,7 @@ public class HealthService {
      * of hanging the readiness probe. Results keep probe order.
      */
     private List<ProbeResult> probeAll() {
-        long timeoutNanos = (long) (settings.healthCheckTimeoutSeconds() * 1_000_000_000L);
+        long timeoutNanos = settings.healthCheckTimeout().toNanos();
         // Not try-with-resources: close() would wait for a hung probe to finish.
         ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
         // Bare threads start with an empty context: carry the request's propagated
@@ -127,11 +127,11 @@ public class HealthService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (TimeoutException e) {
-            latencyMs = Math.round(settings.healthCheckTimeoutSeconds() * 1000.0);
+            latencyMs = settings.healthCheckTimeout().toMillis();
             LOG.error(
-                    "health probe {} timed out after {}s",
+                    "health probe {} timed out after {}ms",
                     probe.name(),
-                    settings.healthCheckTimeoutSeconds());
+                    settings.healthCheckTimeout().toMillis());
         } catch (ExecutionException e) {
             LOG.error("health probe {} failed", probe.name(), e.getCause());
         }

@@ -3,6 +3,7 @@ package com.example.template.core;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -19,8 +20,8 @@ class RetryTest {
                         },
                         "test",
                         5,
-                        0.001,
-                        0.01);
+                        Duration.ofMillis(1),
+                        Duration.ofMillis(10));
         assertThat(result).isEqualTo("ok");
         assertThat(attempts.get()).isEqualTo(3);
     }
@@ -36,8 +37,8 @@ class RetryTest {
                                 },
                                 "test",
                                 3,
-                                0.001,
-                                0.01))
+                                Duration.ofMillis(1),
+                                Duration.ofMillis(10)))
                 .isInstanceOf(RuntimeException.class);
         assertThat(attempts.get()).isEqualTo(3);
     }

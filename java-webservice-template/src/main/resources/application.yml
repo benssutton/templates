@@ -199,5 +199,5 @@ flyway:
 redis:
   uri: ${REDIS_URL:`redis://localhost:6379/0`}
   pool-size: ${REDIS_POOL_SIZE:16}
-  connect-timeout-ms: 2000
-  socket-timeout-ms: 2000
+  connect-timeout: 2s
+  socket-timeout: 2s

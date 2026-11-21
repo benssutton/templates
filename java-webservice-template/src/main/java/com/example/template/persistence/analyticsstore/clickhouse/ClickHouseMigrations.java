@@ -58,8 +58,8 @@ public class ClickHouseMigrations {
                 },
                 "ClickHouse migrations",
                 settings.connectMaxAttempts(),
-                settings.connectBaseDelaySeconds(),
-                settings.connectMaxDelaySeconds());
+                settings.connectBaseDelay(),
+                settings.connectMaxDelay());
     }
 
     /** Applies every migration newer than the recorded version; returns the version reached. */

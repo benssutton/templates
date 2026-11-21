@@ -1,5 +1,6 @@
 package com.example.template.core;
 
+import java.time.Duration;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ThreadLocalRandom;
 import org.slf4j.Logger;
@@ -20,8 +21,8 @@ public final class Retry {
             Callable<T> connect,
             String label,
             int maxAttempts,
-            double baseDelaySeconds,
-            double maxDelaySeconds)
+            Duration baseDelay,
+            Duration maxDelay)
             throws Exception {
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
@@ -31,17 +32,22 @@ public final class Retry {
                     LOG.error("{}: all {} connection attempts failed", label, maxAttempts);
                     throw e;
                 }
-                double delay =
-                        Math.min(baseDelaySeconds * Math.pow(2, attempt - 1), maxDelaySeconds);
-                double jitter = delay * 0.25 * ThreadLocalRandom.current().nextDouble();
+                Duration delay = baseDelay.multipliedBy(1L << Math.min(attempt - 1, 30));
+                if (delay.compareTo(maxDelay) > 0) {
+                    delay = maxDelay;
+                }
+                long waitMs =
+                        (long)
+                                (delay.toMillis()
+                                        * (1 + 0.25 * ThreadLocalRandom.current().nextDouble()));
                 LOG.warn(
                         "{}: attempt {}/{} failed - retrying in {}s: {}",
                         label,
                         attempt,
                         maxAttempts,
-                        String.format("%.3f", delay + jitter),
+                        String.format("%.3f", waitMs / 1000.0),
                         e.toString());
-                Thread.sleep((long) ((delay + jitter) * 1000));
+                Thread.sleep(waitMs);
             }
         }
         throw new IllegalStateException("unreachable");
