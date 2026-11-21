@@ -66,13 +66,12 @@ impl Link {
     /// connection is always closed: a stale one would keep the exclusive
     /// queue's flow.
     async fn shutdown(self) {
-        if let Some(receiver) = self.receiver {
-            if let Ok(receiver) = Arc::try_unwrap(receiver) {
+        if let Some(receiver) = self.receiver
+            && let Ok(receiver) = Arc::try_unwrap(receiver) {
                 let _ =
                     tokio::time::timeout(amqp::TEARDOWN_TIMEOUT, receiver.into_inner().detach())
                         .await;
             }
-        }
         amqp::teardown(self.connection, self.session).await;
     }
 }

@@ -106,11 +106,10 @@ fn le_values(text: &str, name: &str) -> Vec<String> {
     let mut seen = Vec::new();
     for line in text.lines().filter(|l| l.starts_with(&prefix)) {
         let le = line.split("le=\"").nth(1).and_then(|r| r.split('"').next());
-        if let Some(le) = le {
-            if !seen.contains(&le.to_owned()) {
+        if let Some(le) = le
+            && !seen.contains(&le.to_owned()) {
                 seen.push(le.to_owned());
             }
-        }
     }
     seen
 }
