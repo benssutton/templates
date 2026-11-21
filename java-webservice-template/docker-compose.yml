@@ -64,7 +64,7 @@ services:
   # One-shot: writes a self-signed dev keystore into a volume the app mounts read-only,
   # so no key material is baked into the image. Real deployments mount their own.
   certs:
-    image: eclipse-temurin:25.0.5_8-jre@sha256:945247f9d092703e0c6be92243ef3c51640229e23ab34d353c8dcdc73e6cd4e6
+    image: eclipse-temurin:27_35-jre@sha256:0dd0465f90d398fa3226b56a3973f5d3c47ac323934dceebdab45ac8910bee6e
     volumes:
       - certs:/certs
       - ./certs/generate-keystore.sh:/generate-keystore.sh:ro
