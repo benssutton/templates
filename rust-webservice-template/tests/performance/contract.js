@@ -87,7 +87,8 @@ const MCP_TOOLS = ['get_cache', 'get_cached_data', 'get_config', 'get_data', 'ge
 function rpcBody(r) {
   if ((r.headers['Content-Type'] || '').includes('text/event-stream')) {
     const lines = (r.body || '').split('\n').filter((l) => l.startsWith('data:'));
-    return lines.length ? JSON.parse(lines[lines.length - 1].slice(5)) : undefined;
+    // Malformed data fails only the checks that read it, not the whole iteration.
+    try { return lines.length ? JSON.parse(lines[lines.length - 1].slice(5)) : undefined; } catch { return undefined; }
   }
   return body(r);
 }
@@ -257,6 +258,7 @@ export default function () {
       return r.status === 200 && Array.isArray(b.rows) &&
         same(b.rows.filter((row) => row.id < 0), expected);
     }, 5);
+    // The per-row checks pass on an empty rows; `merged` is what catches that.
     check(b, {
       'data cache: keys': () => sameKeys(b, ['rows', 'total', 'limit']),
       'data cache: limit echoed': () => b.limit === 100,
@@ -278,7 +280,10 @@ export default function () {
     const names = ((listed && listed.result && listed.result.tools) || []).map((t) => t.name).sort();
 
     const key = `contract-mcp-${run}`;
-    http.post(`${BASE_URL}/cache`, JSON.stringify({ key, value: { n: 7 } }), { headers: JSON_HEADERS });
+    // A failed seed would make get_cache pass vacuously: both sides would 404.
+    check(http.post(`${BASE_URL}/cache`, JSON.stringify({ key, value: { n: 7 } }), { headers: JSON_HEADERS }), {
+      'mcp: seed cache key 201': (res) => res.status === 201,
+    });
     const missingKey = `contract-mcp-missing-${run}`;
     const missing = call('get_cache', { key: missingKey });
 
@@ -303,8 +308,9 @@ export default function () {
     const r = http.get(`${BASE_URL}/metrics`);
     const text = r.body || '';
     const sample = (name) => new RegExp(`^${name}(\\{[^}]*\\})? `, 'm').test(text);
+    // The label must start the set or follow a comma, so hostname= can't match name=.
     const labelled = (name, label, value) =>
-      new RegExp(`^${name}\\{[^}]*${label}="${value}"[^}]*\\} `, 'm').test(text);
+      new RegExp(`^${name}\\{(?:[^}]*,)?${label}="${value}"[^}]*\\} `, 'm').test(text);
     const required = {
       'metrics: 200': () => r.status === 200,
       'metrics: Prometheus text format': () =>
