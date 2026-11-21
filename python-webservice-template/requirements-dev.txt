@@ -3,7 +3,7 @@
 
 # Lint / format / typecheck
 black>=26.10.1
-ruff>=0.15
+ruff>=0.17.5
 pyright>=1.1.400
 
 # Lock compilation (requirements.txt -> requirements.lock)
@@ -19,4 +19,4 @@ testcontainers[clickhouse]>=4.5,<5.0
 testcontainers[redis]>=4.5,<5.0
 
 # TLS: certs/generate_self_signed_cert.py mints the dev certificate on the host
-cryptography>=42,<50
+cryptography>=42,<51
