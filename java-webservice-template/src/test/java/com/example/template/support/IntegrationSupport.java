@@ -13,8 +13,7 @@ import org.testcontainers.utility.DockerImageName;
 /**
  * Shared singleton containers (Postgres + ClickHouse + Redis-Stack) for integration tests. Started
  * once per JVM and reused across test classes (Testcontainers' Ryuk stops them at JVM exit), so the
- * whole suite pays one startup per dependency. Mirrors the Python doctrine of exercising every test
- * against real dependencies.
+ * whole suite pays one startup per dependency. Every test runs against real dependencies.
  *
  * <p>Subclasses are {@code @MicronautTest} classes. Override {@link #getProperties()} and merge
  * with {@code super.getProperties()} to add test-specific properties.

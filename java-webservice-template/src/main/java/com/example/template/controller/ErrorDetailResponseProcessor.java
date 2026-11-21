@@ -13,10 +13,9 @@ import java.util.stream.Collectors;
 
 /**
  * The one error body: every error Micronaut renders (unknown route 404, 405, 415, unreadable JSON
- * 400, 413, conversion 422, unhandled 500, ...) becomes {@code application/json {"detail": "..."}},
- * the shape the Python and Rust templates return. Exception handlers only choose the status. A 5xx
- * never carries the exception message, since it can leak internals; the reason phrase is used
- * instead.
+ * 400, 413, conversion 422, unhandled 500, ...) becomes {@code application/json {"detail": "..."}}.
+ * Exception handlers only choose the status. A 5xx never carries the exception message, since it
+ * can leak internals; the reason phrase is used instead.
  */
 @Singleton
 @Replaces(ErrorResponseProcessor.class)

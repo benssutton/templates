@@ -7,10 +7,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Connect with randomised exponential backoff; mirrors Python core/retry.py. Hand-rolled rather
- * than {@code @Retryable}: the env contract's delays are float seconds ({@code 1.5}), while
- * {@code @Retryable} takes duration strings and documents {@code max-delay} as an overall cap
- * rather than the per-attempt ceiling used here.
+ * Connect with randomised exponential backoff. Hand-rolled rather than {@code @Retryable}: the env
+ * contract's delays are float seconds ({@code 1.5}), while {@code @Retryable} takes duration
+ * strings and documents {@code max-delay} as an overall cap rather than the per-attempt ceiling
+ * used here.
  */
 public final class Retry {
 

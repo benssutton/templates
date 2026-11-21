@@ -23,11 +23,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Solace Guaranteed messaging. Selected when {@code template.ingest.transport=solace}. Mirrors the
- * Python ingestion/solace/client.py: binds a durable exclusive queue (created on start, with the
- * topic subscription attached) and hands one {@link Delivery} per message to the sink;
- * StreamIngestService settles it after the store write. SDK lifecycle listeners drive {@link
- * ConnectionState}.
+ * Solace Guaranteed messaging, selected when {@code template.ingest.transport=solace}. Binds a
+ * durable exclusive queue (created on start, with the topic subscription attached) and hands one
+ * {@link Delivery} per message to the sink; StreamIngestService settles it after the store write.
+ * SDK lifecycle listeners drive {@link ConnectionState}.
  *
  * <p>Threading: {@link #consume} runs on the ingest thread and owns one session (connection +
  * receiver + inbox) per call, torn down in {@code finally}, so a retry after a failure always

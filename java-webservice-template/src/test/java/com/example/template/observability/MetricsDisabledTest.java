@@ -14,7 +14,7 @@ import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
-/** METRICS_ENABLED=false: the service starts and /metrics is absent, as in the Python template. */
+/** METRICS_ENABLED=false: the service starts and /metrics is absent. */
 @MicronautTest
 @Property(name = "micronaut.metrics.enabled", value = "false")
 class MetricsDisabledTest extends IntegrationSupport {

@@ -7,7 +7,7 @@ import io.micronaut.http.annotation.Get;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
-/** Root info page (mirrors the Python main.py get_root): title/version/docs/MCP. */
+/** Root info page: title/version/docs/MCP. */
 @Controller("/")
 @Tag(name = "root")
 public class RootController {

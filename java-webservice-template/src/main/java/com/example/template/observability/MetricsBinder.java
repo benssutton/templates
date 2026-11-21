@@ -12,10 +12,10 @@ import io.micronaut.context.annotation.Context;
 import io.micronaut.context.annotation.Requires;
 
 /**
- * Registers the template's custom meters once, at startup. Each reads its value when scraped:
- * dependency gauges read {@link HealthService#dependencies()}, which reuses one probe round for
- * {@code health-cache-ttl-seconds}, so a scrape does not ping every store once per gauge. Totals
- * are counters (exported with {@code _total}). Standard JVM/process metrics come from Micrometer's
+ * Registers the custom meters once, at startup. Each reads its value when scraped: dependency
+ * gauges read {@link HealthService#dependencies()}, which reuses one probe round for {@code
+ * health-cache-ttl-seconds}, so a scrape does not ping every store once per gauge. Totals are
+ * counters (exported with {@code _total}). Standard JVM/process metrics come from Micrometer's
  * built-in binders (application.yml).
  */
 @Requires(property = "micronaut.metrics.enabled", notEquals = "false")

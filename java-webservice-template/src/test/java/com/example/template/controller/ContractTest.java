@@ -22,10 +22,9 @@ import org.junit.jupiter.api.Test;
 import redis.clients.jedis.RedisClient;
 
 /**
- * The wire contract shared with the Python and Rust templates, asserted on raw response text (never
- * read back through this service's own DTOs), so a field renamed by a refactor or a different
- * naming strategy fails here. Bodies with variable values are parsed into plain maps to check their
- * exact key sets.
+ * The wire contract, asserted on raw response text (never read back through this service's own
+ * DTOs), so a field renamed by a refactor or a different naming strategy fails here. Bodies with
+ * variable values are parsed into plain maps to check their exact key sets.
  */
 @MicronautTest
 class ContractTest extends IntegrationSupport {
@@ -98,7 +97,7 @@ class ContractTest extends IntegrationSupport {
         assertThat(res.body())
                 .isEqualTo(
                         "{\"title\":\"Template Micronaut Service\",\"version\":\"1.0.0\","
-                                + "\"description\":\"A Java Micronaut service mirroring the Python webservice template\","
+                                + "\"description\":\"A Java Micronaut service template\","
                                 + "\"docs\":\"/swagger-ui\",\"MCP\":\"/mcp\"}");
     }
 

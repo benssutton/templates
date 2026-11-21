@@ -8,8 +8,8 @@ import io.micronaut.data.repository.GenericRepository;
 import java.util.List;
 
 /**
- * ClickHouse analytics reads (mirrors Python services/data.py). Bound to the {@code clickhouse}
- * datasource; native {@code @Query} since ClickHouse is not a derived-query dialect.
+ * ClickHouse analytics reads. Bound to the {@code clickhouse} datasource; native {@code @Query}
+ * since ClickHouse is not a derived-query dialect.
  */
 @JdbcRepository(dialect = Dialect.ANSI)
 @Repository("clickhouse")

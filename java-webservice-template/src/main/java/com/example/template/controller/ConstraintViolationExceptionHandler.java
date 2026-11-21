@@ -14,8 +14,8 @@ import jakarta.validation.ConstraintViolationException;
 import java.util.stream.Collectors;
 
 /**
- * Bean-validation failures (body fields, {@code ?limit=}) answer 422 {@code {"detail": ...}}, as
- * FastAPI and the Rust template do, instead of Micronaut's default 400.
+ * Bean-validation failures (body fields, {@code ?limit=}) answer 422 {@code {"detail": ...}}
+ * instead of Micronaut's default 400.
  */
 @Produces
 @Singleton

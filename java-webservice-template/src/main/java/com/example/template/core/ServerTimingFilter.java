@@ -10,8 +10,7 @@ import io.micronaut.http.filter.ServerFilterPhase;
 
 /**
  * Installs a request-scoped {@link BoundarySamples} holder and renders the W3C {@code
- * Server-Timing} response header from the boundaries recorded during the request. Mirrors the
- * Python ServerTimingMiddleware.
+ * Server-Timing} response header from the boundaries recorded during the request.
  */
 @ServerFilter("/**")
 public class ServerTimingFilter implements Ordered {

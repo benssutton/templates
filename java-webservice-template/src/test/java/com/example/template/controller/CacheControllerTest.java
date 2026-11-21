@@ -40,7 +40,7 @@ class CacheControllerTest extends IntegrationSupport {
         assertThat(got.value().get("a").getNumberValue()).isEqualTo(1);
     }
 
-    /** Python/Rust parity: an empty key or a TTL below 1 is 422 and stores nothing. */
+    /** An empty key or a TTL below 1 is 422 and stores nothing. */
     static Stream<Map<String, Object>> invalidEntries() {
         return Stream.of(
                 // EXPIRE 0 deletes the key

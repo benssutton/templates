@@ -17,7 +17,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 
-/** Mirrors Python routers/cache.py: POST -> 201, GET -> 404 when absent. */
+/** Cache entries: POST -> 201, GET -> 404 when absent. */
 @Controller("/cache")
 @Tag(name = "cache")
 @ExecuteOn(TaskExecutors.BLOCKING)

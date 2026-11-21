@@ -17,10 +17,7 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.DockerImageName;
 
-/**
- * One Solace broker per JVM (POST + start is ~60 s); tests isolate by unique topic/queue names.
- * Configured exactly like the Python fixture.
- */
+/** One Solace broker per JVM (POST + start is ~60 s); tests isolate by unique topic/queue names. */
 public final class SolaceSupport {
 
     public static final GenericContainer<?> SOLACE =
