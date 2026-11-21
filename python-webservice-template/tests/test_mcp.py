@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from main import mcp_transport_security
 from settings import Settings
 from tests.app_client import lifespan_test_client
-from tests.support.settings import app_settings
+from tests.support.settings import app_settings, unique
 
 
 def parse_mcp_response(response: httpx.Response) -> dict[str, Any]:
@@ -243,8 +243,9 @@ async def test_mcp_tools_mirror_rest_endpoints(test_client):
     }
     init = await test_client.post("/mcp/", headers=headers, json=_INIT)
     headers["mcp-session-id"] = init.headers["mcp-session-id"]
-    await test_client.post("/config", json={"key": "mcp_key", "value": "v"})
-    await test_client.post("/cache", json={"key": "mcp_key", "value": {"a": 1}})
+    key = unique("mcp_key")
+    await test_client.post("/config", json={"key": key, "value": "v"})
+    await test_client.post("/cache", json={"key": key, "value": {"a": 1}})
 
     status = await _call_tool(test_client, headers, "get_health_status", {})
     assert status["app"]["status"] == "testing"
@@ -256,17 +257,18 @@ async def test_mcp_tools_mirror_rest_endpoints(test_client):
 
     configs = await _call_tool(test_client, headers, "get_config", {})
     assert configs == (await test_client.get("/config")).json()
-    assert {"key": "mcp_key", "value": "v"} in configs
+    assert {"key": key, "value": "v"} in configs
 
-    entry = await _call_tool(test_client, headers, "get_cache", {"key": "mcp_key"})
+    entry = await _call_tool(test_client, headers, "get_cache", {"key": key})
     assert entry["value"] == {"a": 1}
 
     # Absent key: REST answers 404, the tool reports an error result with the same body.
-    missing = await _call_tool_raw(test_client, headers, "get_cache", {"key": "absent"})
+    absent = unique("absent")
+    missing = await _call_tool_raw(test_client, headers, "get_cache", {"key": absent})
     assert missing["isError"] is True
     assert len(missing["content"]) == 1
     assert json.loads(missing["content"][0]["text"]) == {
-        "detail": "Key 'absent' not found"
+        "detail": f"Key '{absent}' not found"
     }
 
     rest = (await test_client.get("/data", params={"limit": 2})).json()

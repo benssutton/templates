@@ -22,6 +22,12 @@ python -m pyright                              # typecheck
 pytest tests/test_cache.py::test_post_cache_without_ttl -v   # one test
 ```
 
+Tests run under pytest-xdist (`-n auto`, at most 2 workers, see `pytest.ini`): each
+worker starts its own Postgres, ClickHouse and Redis; tests that use the Solace
+broker share one worker (`xdist_group("solace")`, set in `tests/conftest.py`).
+`pytest -n 0` runs serially for debugging. Use `unique()` from
+`tests/support/settings.py` for keys.
+
 Never connect to a container a developer may have running; every pytest session
 starts its own (Testcontainers) and destroys them afterwards. Do not use
 `-o faulthandler_timeout` on the p315 interpreter: CPython 3.15's

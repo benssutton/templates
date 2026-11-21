@@ -196,8 +196,10 @@ into the LSM store; `/data/cache` serves them.
 - **Real HTTP endpoints.** Tests drive the app through an async HTTPX client
   against the real ASGI app ([tests/app_client.py](tests/app_client.py)
   `lifespan_test_client` runs the full lifespan and fails fast if startup raises).
-- **Async, sequential.** Tests are `async` (pytest-asyncio, one session loop) and
-  run one at a time; containers are session-scoped so the cycle stays short.
+- **Async, parallel across workers.** Tests are `async` (pytest-asyncio, one session
+  loop per worker) and run under pytest-xdist (`-n auto`, at most 2 workers). Each
+  worker starts its own session-scoped Postgres, ClickHouse and Redis; tests that
+  use the Solace broker share one worker. `pytest -n 0` runs serially for debugging.
 - **Multiple apps in one process.** Every fixture builds its own app with
   `create_app`, so noop, HTTP-ingest and Solace apps coexist in one session.
 - **Failure paths with real outages.** Dedicated containers are stopped or
