@@ -1,4 +1,4 @@
-//! Per-test Solace names and settings (Python tests/support/settings.py),
+//! Per-test Solace names and settings,
 //! plus the polling helpers the Solace tests share.
 
 use super::containers::{SOLACE_ADMIN, SolaceEndpoints, wait_until};
@@ -28,7 +28,7 @@ impl SolaceNames {
     }
 }
 
-/// Python `solace_overrides`: bind `base` to the broker and these names.
+/// Bind `base` to the broker and these names.
 pub fn solace_overrides(broker: &SolaceEndpoints, names: &SolaceNames, base: Settings) -> Settings {
     Settings {
         ingest_transport: IngestTransport::Solace,
@@ -47,7 +47,7 @@ pub fn solace_overrides(broker: &SolaceEndpoints, names: &SolaceNames, base: Set
     }
 }
 
-/// An app wired to the shared stores and the broker; Python's test LSM
+/// An app wired to the shared stores and the broker, with small LSM
 /// thresholds (flush 2 rows, compact at 2 runs).
 pub async fn solace_settings(broker: &SolaceEndpoints, names: &SolaceNames) -> Settings {
     let base = Settings {
@@ -119,7 +119,7 @@ pub async fn wait_for_depth(semp: &Semp, queue: &str, depth: usize) {
     .await;
 }
 
-/// Python `poll_cache`: GET /data/cache?limit=100 until `until(body)` holds.
+/// GET /data/cache?limit=100 until `until(body)` holds.
 pub async fn poll_cache(app: &TestApp, until: impl Fn(&Value) -> bool, timeout: Duration) -> Value {
     let deadline = Instant::now() + timeout;
     loop {

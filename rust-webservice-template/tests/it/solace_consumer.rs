@@ -1,6 +1,6 @@
-//! SolaceBatchConsumer against the real broker (Python
-//! tests/test_solace_consumer.py): provisioning, settlement outcomes, poison
-//! messages, bind denial and lifecycle. Broker-side facts come from SEMP.
+//! SolaceBatchConsumer against the real broker: provisioning, settlement
+//! outcomes, poison messages, bind denial and lifecycle. Broker-side facts
+//! come from SEMP.
 
 use crate::support::batches::make_batch;
 use crate::support::containers::{self, Endpoint, SolaceLease, wait_until};
@@ -245,7 +245,6 @@ async fn a_denied_bind_is_an_error_and_the_link_is_torn_down() {
     semp.delete_queue(&names.queue).await;
 }
 
-/// Python test_abandoned_deliveries_unbinds_queue_and_rebind_redelivers.
 #[tokio::test]
 async fn an_unsettled_delivery_is_redelivered_after_a_rebind() {
     let lease = containers::solace().await;
@@ -321,9 +320,8 @@ async fn a_lost_link_is_reopened_no_faster_than_the_reconnect_interval() {
     semp.delete_queue(&names.queue).await;
 }
 
-/// Python test_buffered_messages_are_not_handed_out_after_close: messages
-/// already on the flow (unsettled, in the link's credit window) are never
-/// handed out once close() has run; they stay spooled for the next bind.
+/// Messages already on the flow (unsettled, in the link's credit window) are
+/// never handed out once close() has run; they stay spooled for the next bind.
 #[tokio::test]
 async fn buffered_messages_are_not_handed_out_after_close() {
     let lease = containers::solace().await;

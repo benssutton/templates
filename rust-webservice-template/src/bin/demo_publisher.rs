@@ -1,8 +1,7 @@
-//! Continuous demo publisher for compose. Settings come from the
-//! same env vars as the app (SOLACE_HOST, SOLACE_PORT, SOLACE_USERNAME,
-//! SOLACE_PASSWORD, SOLACE_TOPIC); PUBLISH_INTERVAL is seconds between
-//! publishes (default 0.1). Thin by design: the publishing code is
-//! `AmqpPublisher`, which the tests cover.
+//! Continuous demo publisher for compose. Reads the app's SOLACE_HOST, _PORT,
+//! _USERNAME, _PASSWORD and _TOPIC env vars; PUBLISH_INTERVAL is seconds
+//! between publishes (default 0.1). Thin: the work is in `AmqpPublisher`,
+//! which the tests cover.
 
 use arrow::array::{ArrayRef, Int64Array, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};

@@ -1,4 +1,4 @@
-# cargo-deny: `python run_CICD.py rust deny` (cargo deny --all-features check).
+# cargo-deny: `run_CICD.py rust deny` (cargo deny --all-features check).
 # Every exception below carries its reason; keep it that way.
 
 [graph]

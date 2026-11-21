@@ -1,5 +1,5 @@
 //! Arrow IPC *stream* format: the wire format of every transport and of
-//! `POST /data/ingest`, shared with the sibling services.
+//! `POST /data/ingest`.
 
 use arrow::array::{ArrayData, RecordBatch};
 use arrow::error::ArrowError;
@@ -27,16 +27,13 @@ pub fn encode_stream(batches: &[RecordBatch]) -> Result<Vec<u8>, ArrowError> {
 }
 
 /// Logical decoded size compared with `max_ingest_batch_bytes`: the sum of
-/// the bytes the batch's data, offset and validity buffers actually hold,
-/// like pyarrow's `RecordBatch.nbytes`, so the limit means the same in
-/// every service. `get_array_memory_size()` is NOT
-/// used: it counts allocated capacity, and IPC-decoded columns share one
-/// body buffer, so every column reports the whole message (about 7x
-/// `nbytes` on a 4-column batch).
+/// the bytes the batch's data, offset and validity buffers actually hold.
+/// `get_array_memory_size()` is NOT used: it counts allocated capacity, and
+/// IPC-decoded columns share one body buffer, so every column reports the
+/// whole message (about 7x on a 4-column batch).
 ///
-/// Assumes unsliced batches, as `decode_stream` produces: the whole of each
-/// buffer is counted, so a sliced array (non-zero offset or a length shorter
-/// than its buffers) is overcounted.
+/// Assumes unsliced batches, as `decode_stream` produces: a sliced array
+/// (non-zero offset, or shorter than its buffers) is overcounted.
 pub fn batch_bytes(batch: &RecordBatch) -> usize {
     batch
         .columns()

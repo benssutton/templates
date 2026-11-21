@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Mint a self-signed DEV certificate for HTTPS (key.pem + cert.pem).
 # Compose runs it in the `dev-certs` one-shot service.
-# Same certificate as the sibling templates:
 # CN=localhost; SANs localhost, app (the compose service k6 targets) and
 # 127.0.0.1; RSA 4096; 365 days. Never use in production.
 # Usage: certs/generate_self_signed_cert.sh [output-dir]   (default ./certs)

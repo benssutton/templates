@@ -58,13 +58,13 @@ fn defaults() {
     // AMQP 1.0 plain text, not SMF (55555).
     assert_eq!((s.solace_host.as_str(), s.solace_port), ("localhost", 5672));
     // SASL rule: an empty username selects SASL ANONYMOUS, the only
-    // mechanism an auth-`none` VPN offers over AMQP. Python defaults to
-    // admin/admin, which SMF accepts on such a VPN but AMQP does not.
+    // mechanism an auth-`none` VPN offers over AMQP (SMF would accept admin/admin
+    // there, AMQP does not).
     assert_eq!(s.solace_username, "");
     assert_eq!(s.solace_password.expose_secret(), "");
     assert_eq!(s.solace_topic, "ingest/batches");
     assert_eq!(s.solace_queue, "rust-template/ingest");
-    // Variant (b): SEMP provisioning at startup (not in Python).
+    // Variant (b): SEMP provisioning at startup.
     assert_eq!(s.solace_semp_url, "http://localhost:8080");
     assert_eq!(s.solace_semp_username, "admin");
     assert_eq!(s.solace_semp_password.expose_secret(), "admin");

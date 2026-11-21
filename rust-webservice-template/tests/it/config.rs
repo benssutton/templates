@@ -1,4 +1,4 @@
-//! Python tests/test_config.py, plus Deviations 7 and 9.
+//! Config endpoint behaviour.
 
 use crate::support::{TestApp, app_settings};
 use serde_json::json;

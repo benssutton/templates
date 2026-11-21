@@ -50,11 +50,10 @@ impl App {
         )
     }
 
-    /// Final step of the ordered shutdown: stop the consumer -> drain
-    /// in-flight HTTP -> close the pools. The consumer's loop already stopped
-    /// when `Shutdown` fired (the ingest stop token is its child) and
-    /// `server::serve` has drained HTTP, so close the consumer and join the
-    /// ingest task, then close the stores.
+    /// Final step of the ordered shutdown (consumer, HTTP drain, pools). The
+    /// consumer loop stopped when `Shutdown` fired and `server::serve` has
+    /// drained HTTP, so close the consumer, join the ingest task, then close
+    /// the stores.
     pub async fn close(&self) {
         self.state.shutdown.trigger("app closed");
         self.state.ingest.close().await;

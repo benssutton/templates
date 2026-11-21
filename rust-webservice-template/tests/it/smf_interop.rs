@@ -1,8 +1,7 @@
-//! Spec §6 SMF interop: Python's SMF publisher -> the Rust AMQP consumer.
-//! Needs $SMF_PYTHON: a Python with solace-pubsubplus and pyarrow
-//! run_CICD.py sets it to its own interpreter; without it
-//! the test is skipped with a message on stderr,
-//! except under CI=true, where it fails.
+//! Spec §6 SMF interop: an SMF publisher script -> the Rust AMQP consumer.
+//! Needs $SMF_PYTHON: a Python with solace-pubsubplus and pyarrow;
+//! run_CICD.py sets it to its own interpreter. Without it the test is skipped
+//! with a message on stderr, except under CI=true, where it fails.
 
 use crate::support::TestApp;
 use crate::support::containers;

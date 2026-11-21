@@ -46,9 +46,9 @@ pub trait StreamStore: Send + Sync + 'static {
     /// Check a whole message before writing any of it: every batch in order,
     /// by the rules `ingest` applies, against the store's fixed schema or, if
     /// none is fixed yet, the first non-empty batch of the slice. Returns the
-    /// first `InvalidBatch`. Synchronous, no side effects; `ingest` still
-    /// checks its own batch, and may still refuse a batch if a concurrent
-    /// write fixed the schema in between.
+    /// first `InvalidBatch`. No side effects; `ingest` still checks its own
+    /// batch, so a concurrent write that fixes the schema in between can
+    /// still make it refuse one.
     fn validate(&self, batches: &[RecordBatch]) -> Result<(), StoreError>;
 
     /// Lock-free read of the latest snapshot. It is CPU-bound, so async

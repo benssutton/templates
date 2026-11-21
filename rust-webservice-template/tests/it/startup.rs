@@ -49,7 +49,7 @@ async fn closed_store_port_makes_create_app_fail() {
         .err()
         .expect("create_app must fail");
     assert!(format!("{err:#}").contains("ClickHouse"), "{err:#}");
-    // Python allows 15 s for the same bounded retry (test_startup_resilience.py).
+    // Bounded retry: startup must fail within 15 s.
     assert!(
         started.elapsed() < Duration::from_secs(15),
         "took {:?}",
@@ -57,8 +57,7 @@ async fn closed_store_port_makes_create_app_fail() {
     );
 }
 
-/// Python `test_stock_redis_without_json_module_aborts_startup`: a real
-/// stock Redis (no RedisJSON) must fail startup with an actionable message.
+/// A real stock Redis (no RedisJSON) must fail startup with an actionable message.
 #[tokio::test]
 async fn stock_redis_without_redisjson_aborts_startup() {
     let (pg, ch) = tokio::join!(containers::postgres(), containers::clickhouse());

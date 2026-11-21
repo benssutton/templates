@@ -21,7 +21,7 @@ use containers::{CH_PASSWORD, CH_USER, Endpoint};
 use secrecy::SecretString;
 use std::time::{Duration, Instant};
 
-/// Python's test fixtures: status "testing", noop transport.
+/// Test defaults: status "testing", noop transport.
 pub fn test_settings() -> Settings {
     Settings {
         status: "testing".into(),
@@ -30,9 +30,8 @@ pub fn test_settings() -> Settings {
     }
 }
 
-/// Settings for an isolated app wired to the shared containers: Python's
-/// `tests/support/settings.py::app_settings`. Noop transport; small pools,
-/// because many apps share one Postgres; short retry delays.
+/// Settings for an isolated app wired to the shared containers. Noop transport;
+/// small pools because many apps share one Postgres; short retry delays.
 pub async fn app_settings() -> Settings {
     let (pg, ch, redis) = tokio::join!(
         containers::postgres(),
@@ -61,7 +60,7 @@ pub fn settings_for(pg: &Endpoint, ch: &Endpoint, redis: &Endpoint) -> Settings 
     }
 }
 
-/// Poll `/health/ready` until it returns `expected` (Python's `poll_ready`).
+/// Poll `/health/ready` until it returns `expected`.
 pub async fn poll_ready(app: &TestApp, expected: u16, timeout: Duration) -> serde_json::Value {
     let deadline = Instant::now() + timeout;
     loop {
@@ -88,8 +87,7 @@ pub fn client() -> reqwest::Client {
 }
 
 /// An isolated app (its own state, metrics registry and shutdown handle)
-/// served over plain HTTP on an ephemeral port: the Rust counterpart of
-/// Python's `lifespan_test_client(settings)`. Dropping it triggers shutdown.
+/// served over plain HTTP on an ephemeral port. Dropping it triggers shutdown.
 pub struct TestApp {
     pub base_url: String,
     pub state: AppState,

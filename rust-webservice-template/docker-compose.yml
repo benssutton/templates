@@ -2,7 +2,7 @@ name: rust-template
 
 # The app, its three stores, and the Solace broker with a demo publisher.
 # Store and broker ports are not published (the app reaches them on the
-# compose network), so this stack can run next to the Python and Java stacks.
+# compose network), so other template stacks can run alongside it.
 # The app listens on 8443 inside the network; the host reaches it on 443.
 # HTTP-only ingest without a broker:
 #   docker compose up -d db clickhouse redis dev-certs
