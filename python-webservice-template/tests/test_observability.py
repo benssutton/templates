@@ -324,8 +324,8 @@ async def test_ingest_never_started_metric_is_nan():
             )
 
     metrics = MetricsService(Settings())
-    await metrics.refresh(_FakeHealthService())
-    text = metrics.render()[0].decode()
+    status = await _FakeHealthService().detailed_status()
+    text = metrics.render(status)[0].decode()
     secs_line = next(
         (
             ln
@@ -345,10 +345,41 @@ async def test_get_data_logs_clickhouse_timing(
     redis_container,
     cid_caplog,
 ):
-    with cid_caplog.at_level(logging.DEBUG, logger="core.correlation"):
+    with cid_caplog.at_level(logging.DEBUG, logger="core.boundary_timing"):
         async with lifespan_test_client(
             app_settings(postgres_container, clickhouse_container, redis_container)
         ) as client:
             resp = await client.get("/data?limit=5")
             assert resp.status_code == 200
     assert any("clickhouse.select" in r.getMessage() for r in cid_caplog.records)
+
+
+CUSTOM_SERIES = {
+    "dependency_up",
+    "dependency_check_latency_seconds",
+    "ingest_connection_state",
+    "ingest_seconds_since_last_batch",
+    "ingest_rows_ingested_total",
+    "ingest_outcomes_total",
+    "app_process_cpu_percent",
+    "app_process_memory_rss_bytes",
+    "app_process_num_threads",
+    "app_process_open_files",
+    "app_process_uptime_seconds",
+    "system_cpu_percent",
+    "system_memory_total_bytes",
+    "system_memory_available_bytes",
+    "system_memory_used_percent",
+    "system_boot_time_seconds",
+    "app_info",
+}
+
+
+async def test_metrics_exposes_every_custom_series(test_client):
+    text = (await test_client.get("/metrics")).text
+    names = {
+        line.split("{")[0].split(" ")[0]
+        for line in text.splitlines()
+        if line and not line.startswith("#")
+    }
+    assert names >= CUSTOM_SERIES

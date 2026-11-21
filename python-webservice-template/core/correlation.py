@@ -11,14 +11,10 @@ automatically; the streaming ingest thread sets its own per-batch ID.
 import contextvars
 import logging
 import re
-import time
 import uuid
-from contextlib import asynccontextmanager
 
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
-
-from core.boundary_timing import record_boundary
 
 correlation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
     "correlation_id", default="-"
@@ -94,22 +90,3 @@ class CorrelationIdMiddleware:
             await self.app(scope, receive, send_with_id)
         finally:
             correlation_id_var.reset(token)
-
-
-_timing_log = logging.getLogger(__name__)
-
-
-@asynccontextmanager
-async def timed(label: str):
-    """Log the wall-clock duration of an awaited boundary, tagged with the
-    current correlation ID (added by CorrelationIdFilter), and record it as a
-    Server-Timing sample for the current request (added by record_boundary).
-    Structured as a context manager so an OpenTelemetry span could wrap the same
-    boundary later without changing call sites."""
-    start = time.perf_counter()
-    try:
-        yield
-    finally:
-        elapsed_ms = (time.perf_counter() - start) * 1000
-        _timing_log.debug("%s %.2fms", label, elapsed_ms)
-        record_boundary(label, elapsed_ms)

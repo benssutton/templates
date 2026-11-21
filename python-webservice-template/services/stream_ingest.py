@@ -11,7 +11,8 @@ from enum import Enum
 
 import pyarrow as pa
 
-from core.correlation import correlation_id_var, new_id, set_correlation_id, timed
+from core.boundary_timing import timed
+from core.correlation import correlation_id_var, new_id, set_correlation_id
 from core.retry import jittered
 from ingestion.base import BatchConsumer, ConnectionState, Delivery
 from persistence.stream_store.lsm_store import InvalidBatchError, LSMStore

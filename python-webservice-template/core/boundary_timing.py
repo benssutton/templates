@@ -2,7 +2,7 @@
 W3C Server-Timing response header.
 
 ServerTimingMiddleware installs a fresh sample list on a ContextVar at the start
-of each HTTP request; core.correlation.timed() appends (label, milliseconds) to
+of each HTTP request; timed() appends (label, milliseconds) to
 that list as each instrumented boundary completes. On the response's
 `http.response.start` the middleware renders the samples — plus a synthetic
 `total` for the whole handler — into a Server-Timing header.
@@ -20,6 +20,7 @@ import contextvars
 import logging
 import re
 import time
+from contextlib import asynccontextmanager
 
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -92,3 +93,22 @@ class ServerTimingMiddleware:
             await self.app(scope, receive, send_wrapper)
         finally:
             boundary_samples_var.reset(token)
+
+
+_timing_log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def timed(label: str):
+    """Log the wall-clock duration of an awaited boundary, tagged with the
+    current correlation ID (added by CorrelationIdFilter), and record it as a
+    Server-Timing sample for the current request (added by record_boundary).
+    Structured as a context manager so an OpenTelemetry span could wrap the same
+    boundary later without changing call sites."""
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        _timing_log.debug("%s %.2fms", label, elapsed_ms)
+        record_boundary(label, elapsed_ms)

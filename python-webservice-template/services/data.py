@@ -1,6 +1,6 @@
 from clickhouse_connect.driver.asyncclient import AsyncClient
 
-from core.correlation import timed
+from core.boundary_timing import timed
 from schemas.data import DataRowResponse, DataRowsResponse
 
 

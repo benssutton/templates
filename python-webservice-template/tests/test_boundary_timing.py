@@ -2,6 +2,7 @@ from core.boundary_timing import (
     _render_header,
     boundary_samples_var,
     record_boundary,
+    timed,
 )
 
 
@@ -32,3 +33,26 @@ def test_render_header_sums_duplicates_and_sanitizes_labels():
     )
     # dotted labels -> tokens; duplicate labels summed; `total` appended last.
     assert header == "clickhouse_select;dur=12.50, lsm_query;dur=4.00, total;dur=20.00"
+
+
+async def test_timed_records_boundary_sample_when_active():
+
+    token = boundary_samples_var.set([])
+    try:
+        async with timed("clickhouse.select"):
+            pass
+        samples = boundary_samples_var.get()
+        assert samples is not None
+        assert len(samples) == 1
+        assert samples[0][0] == "clickhouse.select"
+        assert samples[0][1] >= 0.0
+    finally:
+        boundary_samples_var.reset(token)
+
+
+async def test_timed_is_silent_when_no_request_active():
+
+    assert boundary_samples_var.get() is None
+    async with timed("clickhouse.select"):  # must not raise
+        pass
+    assert boundary_samples_var.get() is None

@@ -5,7 +5,7 @@ from typing import Annotated
 import pyarrow as pa
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from core.correlation import timed
+from core.boundary_timing import timed
 from core.dependencies import DataServiceDep, StreamIngestServiceDep
 from persistence.stream_store.lsm_store import InvalidBatchError
 from schemas.data import DataRowsResponse, IngestAccepted

@@ -1,6 +1,6 @@
 import asyncpg
 
-from core.correlation import timed
+from core.boundary_timing import timed
 from schemas.config import ConfigEntry
 
 
