@@ -45,7 +45,9 @@ class SettingsValidationTest {
                         Map.of("template.ingest.transport", "kafka"),
                         Map.of("template.ingest.solace.port", "70000"),
                         Map.of("template.health-check-timeout-seconds", "0"),
-                        Map.of("template.connect-max-attempts", "0"));
+                        Map.of("template.connect-max-attempts", "0"),
+                        Map.of("template.mcp-allowed-hosts", ""),
+                        Map.of("template.mcp-allowed-hosts", "localhost, ,app"));
         for (Map<String, Object> bad : invalid) {
             assertThatThrownBy(() -> start(bad).close())
                     .as("%s", bad)

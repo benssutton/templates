@@ -28,7 +28,7 @@ public final class TestSettings {
                 0,
                 "java-template",
                 "Tools for this template application.",
-                "localhost",
+                List.of("localhost"),
                 connectMaxAttempts,
                 connectBaseDelaySeconds,
                 connectMaxDelaySeconds);

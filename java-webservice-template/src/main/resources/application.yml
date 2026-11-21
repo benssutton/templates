@@ -111,9 +111,9 @@ template:
   health-cache-ttl-seconds: ${HEALTH_CACHE_TTL_SECONDS:5}
   mcp-name: ${MCP_NAME:java-template}
   mcp-instructions: ${MCP_INSTRUCTIONS:Tools for this template application. Each tool mirrors a read-only REST endpoint.}
-  # /mcp DNS-rebinding protection (McpHostFilter): allowed Host header values, as a JSON
-  # array or comma-separated host[:port]; Origin is checked against the same hosts. An
-  # entry without a port matches any port. Must not be empty; a bad entry fails startup.
+  # /mcp DNS-rebinding protection (McpHostFilter): allowed Host header values; Origin is
+  # checked against the same hosts. An entry without a port matches any port. Comma-separated
+  # or a JSON array (see EnvContract). Must not be empty; a bad entry fails startup.
   mcp-allowed-hosts: ${MCP_ALLOWED_HOSTS:localhost}
   connect-max-attempts: ${CONNECT_MAX_ATTEMPTS:5}
   connect-base-delay-seconds: ${CONNECT_BASE_DELAY:1.0}

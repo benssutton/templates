@@ -129,4 +129,26 @@ class EnvContractTest {
         assertThat(EnvContract.translate(Map.of("AUTH_JWT_ISSUER", "", "AUTH_JWT_AUDIENCE", " ")))
                 .isEmpty();
     }
+
+    @Test
+    void jsonArrayHostsBecomeACommaList() {
+        assertThat(
+                        EnvContract.translate(
+                                Map.of("MCP_ALLOWED_HOSTS", "[\"app\", \"api.example.com:8443\"]")))
+                .containsEntry("template.mcp-allowed-hosts", "app,api.example.com:8443");
+    }
+
+    @Test
+    void commaAndIpv6HostsPassThroughUnchanged() {
+        assertThat(EnvContract.translate(Map.of("MCP_ALLOWED_HOSTS", "app,localhost"))).isEmpty();
+        assertThat(EnvContract.translate(Map.of("MCP_ALLOWED_HOSTS", "[::1]:8443"))).isEmpty();
+    }
+
+    @Test
+    void malformedJsonArrayHostsAreRejected() {
+        assertThatThrownBy(() -> EnvContract.translate(Map.of("MCP_ALLOWED_HOSTS", "[\"a\", 1]")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> EnvContract.translate(Map.of("MCP_ALLOWED_HOSTS", "[\"a\"")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }
