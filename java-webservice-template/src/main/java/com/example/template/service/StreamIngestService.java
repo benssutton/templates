@@ -2,6 +2,7 @@ package com.example.template.service;
 
 import com.example.template.config.IngestSettings;
 import com.example.template.core.CorrelationId;
+import com.example.template.core.MdcPropagationContext;
 import com.example.template.core.Timed;
 import com.example.template.dto.health.IngestHealth;
 import com.example.template.health.IngestHealthProvider;
@@ -12,6 +13,7 @@ import com.example.template.ingestion.Delivery;
 import com.example.template.ingestion.MalformedBatchException;
 import com.example.template.persistence.streamstore.LsmRow;
 import com.example.template.persistence.streamstore.LsmStore;
+import io.micronaut.core.propagation.PropagatedContext;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumMap;
@@ -27,7 +29,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
 
 /**
  * Owns the ingest thread and decides how each transport delivery is settled.
@@ -84,10 +85,10 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
     // on it, inside consume()). A successful bind, or a delivery, proves the transport
     // works, so it resets the transport backoff and the consecutive-failure count.
     private int consecutiveFailures;
-    private double delay;
+    private Duration delay;
     // Settlement backoff, separate from the transport backoff: fail() makes the broker
     // redeliver immediately, so a persistent store error would otherwise spin.
-    private double settleDelay;
+    private Duration settleDelay;
 
     public StreamIngestService(
             BatchConsumer consumer,
@@ -100,25 +101,20 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
         this.decoder = decoder;
         this.settings = settings;
         this.shutdownHook = shutdownHook;
-        this.delay = settings.retryBaseDelaySeconds();
-        this.settleDelay = settings.retryBaseDelaySeconds();
+        this.delay = settings.retryBaseDelay();
+        this.settleDelay = settings.retryBaseDelay();
         for (Outcome o : Outcome.values()) {
             outcomes.put(o, new AtomicLong());
         }
     }
 
     public void start() {
-        thread = new Thread(this::ingestLoop, "ingest-loop");
-        thread.setDaemon(true);
-        thread.start();
-        if (settings.maxDisconnectSeconds() > 0) {
+        thread = Thread.ofPlatform().name("ingest-loop").daemon().start(this::ingestLoop);
+        if (!settings.maxDisconnect().isZero()) {
             watchdog =
-                    Executors.newSingleThreadScheduledExecutor(r -> {
-                        Thread t = new Thread(r, "ingest-watchdog");
-                        t.setDaemon(true);
-                        return t;
-                    });
-            long poll = Math.max(1, Math.min(settings.maxDisconnectSeconds() / 2, 5));
+                    Executors.newSingleThreadScheduledExecutor(
+                            Thread.ofPlatform().name("ingest-watchdog").daemon().factory());
+            long poll = Math.max(1, Math.min(settings.maxDisconnect().toSeconds() / 2, 5));
             watchdog.scheduleAtFixedRate(this::checkDisconnect, poll, poll, TimeUnit.SECONDS);
         }
     }
@@ -174,11 +170,12 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
         return outcome;
     }
 
-    /** Jittered wait (delay..1.25*delay seconds). True when close() interrupted it. */
-    private boolean backoff(double delaySeconds) {
-        double jitter = delaySeconds * 0.25 * ThreadLocalRandom.current().nextDouble();
+    /** Jittered wait (delay..1.25*delay). True when close() interrupted it. */
+    private boolean backoff(Duration wait) {
+        double ms = wait.toMillis();
+        double jitter = ms * 0.25 * ThreadLocalRandom.current().nextDouble();
         try {
-            return stop.await((long) ((delaySeconds + jitter) * 1000), TimeUnit.MILLISECONDS);
+            return stop.await((long) (ms + jitter), TimeUnit.MILLISECONDS);
         } catch (InterruptedException ie) {
             // Nothing in this service interrupts the ingest thread (close() uses the
             // latch), so an interrupt is foreign: keep the flag set and stop ingesting.
@@ -198,9 +195,9 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
         }
         resetTransportBackoff();
         Outcome outcome = null;
-        String previous = MDC.get(CorrelationId.MDC_KEY);
-        MDC.put(CorrelationId.MDC_KEY, CorrelationId.adoptOrGenerate(delivery.correlationId()));
-        try {
+        String id = CorrelationId.adoptOrGenerate(delivery.correlationId());
+        try (PropagatedContext.Scope ignored =
+                PropagatedContext.getOrEmpty().plus(new MdcPropagationContext(id)).propagate()) {
             outcome = settle(delivery);
         } catch (RuntimeException e) {
             // settle() calls into the SDK; if the session just dropped, the
@@ -210,27 +207,28 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
             } else {
                 LOG.error("settlement failed; broker will redeliver", e);
             }
-        } finally {
-            if (previous == null) {
-                MDC.remove(CorrelationId.MDC_KEY);
-            } else {
-                MDC.put(CorrelationId.MDC_KEY, previous);
-            }
         }
         if (outcome == Outcome.FAILED) {
             if (backoff(settleDelay)) {
                 return; // shutting down; consume() sees the consumer closed
             }
-            settleDelay = Math.min(settleDelay * 2, settings.retryMaxDelaySeconds());
+            settleDelay = doubled(settleDelay);
         } else if (outcome != null) {
-            settleDelay = settings.retryBaseDelaySeconds();
+            settleDelay = settings.retryBaseDelay();
         }
     }
 
     /** Ingest thread only: the transport is proven healthy (bound, or delivering). */
     private void resetTransportBackoff() {
         consecutiveFailures = 0;
-        delay = settings.retryBaseDelaySeconds();
+        delay = settings.retryBaseDelay();
+    }
+
+    /** The next backoff step: double, capped at {@code retry-max-delay-seconds}. */
+    private Duration doubled(Duration d) {
+        Duration twice = d.multipliedBy(2);
+        Duration max = settings.retryMaxDelay();
+        return twice.compareTo(max) < 0 ? twice : max;
     }
 
     private void ingestLoop() {
@@ -255,7 +253,7 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
                 if (backoff(delay)) {
                     return; // shutting down
                 }
-                delay = Math.min(delay * 2, settings.retryMaxDelaySeconds());
+                delay = doubled(delay);
             }
         }
     }
@@ -272,11 +270,11 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
         if (disconnectedSince == null) {
             disconnectedSince = now;
         } else if (Duration.between(disconnectedSince, now).toMillis()
-                        >= settings.maxDisconnectSeconds() * 1000L
+                        >= settings.maxDisconnect().toMillis()
                 && watchdogFired.compareAndSet(false, true)) {
             LOG.error(
                     "ingest transport not connected for {}s; requesting shutdown",
-                    settings.maxDisconnectSeconds());
+                    settings.maxDisconnect().toSeconds());
             shutdownHook.run();
         }
     }
@@ -288,7 +286,7 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
     public void ingestBatch(List<LsmRow> batch) {
         try {
             if (!batch.isEmpty()) {
-                try (Timed t = Timed.start("ingest.lsm_write")) {
+                try (var _ = Timed.start("ingest.lsm_write")) {
                     record(batch);
                 }
             }
@@ -318,7 +316,7 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
         Instant last = lastBatchAt;
         Double secondsSince =
                 last != null ? (Instant.now().toEpochMilli() - last.toEpochMilli()) / 1000.0 : null;
-        double threshold = settings.stalenessThresholdSeconds();
+        double threshold = settings.stalenessThreshold().toMillis() / 1000.0;
         boolean stale = false;
         if (threshold > 0) {
             double elapsed =

@@ -1,12 +1,14 @@
 package com.example.template.core;
 
 import com.example.template.config.AppSettings;
+import io.micronaut.core.order.Ordered;
 import io.micronaut.core.propagation.MutablePropagatedContext;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.MutableHttpResponse;
 import io.micronaut.http.annotation.RequestFilter;
 import io.micronaut.http.annotation.ResponseFilter;
 import io.micronaut.http.annotation.ServerFilter;
+import io.micronaut.http.filter.ServerFilterPhase;
 
 /**
  * Adopts an inbound correlation id when it passes {@link CorrelationId}'s rule (otherwise generates
@@ -14,13 +16,19 @@ import io.micronaut.http.annotation.ServerFilter;
  * it on the response.
  */
 @ServerFilter("/**")
-public class CorrelationFilter {
+public class CorrelationFilter implements Ordered {
 
     static final String ATTR = "correlationId";
     private final String header;
 
     public CorrelationFilter(AppSettings settings) {
         this.header = settings.correlationIdHeader();
+    }
+
+    /** Runs ahead of security; see ServerFilterPhase (correlation, timing, last-request, host). */
+    @Override
+    public int getOrder() {
+        return ServerFilterPhase.FIRST.before();
     }
 
     @RequestFilter

@@ -33,6 +33,9 @@ import java.util.List;
 @ExecuteOn(TaskExecutors.BLOCKING)
 public class DataController {
 
+    /** The IANA media type for an Arrow IPC stream. */
+    public static final String ARROW_STREAM = "application/vnd.apache.arrow.stream";
+
     private final DataService dataService;
     private final CachedDataService cachedData;
     private final StreamIngestService ingestService;
@@ -73,7 +76,7 @@ public class DataController {
     @Operation(summary = "Ingest an Arrow IPC stream into the stream store (202)")
     public HttpResponse<IngestAccepted> ingest(@Body byte[] body) {
         List<LsmRow> rows;
-        try (Timed t = Timed.start("ingest.decode")) {
+        try (var _ = Timed.start("ingest.decode")) {
             rows = decoder.decodeAll(body);
         } catch (MalformedBatchException.TooLarge | MalformedBatchException.Invalid e) {
             // Only a decoded batch the service refuses counts; an unreadable body (400) does not.
@@ -83,7 +86,4 @@ public class DataController {
         ingestService.ingestBatch(rows);
         return HttpResponse.accepted().body(IngestAccepted.INSTANCE);
     }
-
-    /** The IANA media type for an Arrow IPC stream. */
-    public static final String ARROW_STREAM = "application/vnd.apache.arrow.stream";
 }

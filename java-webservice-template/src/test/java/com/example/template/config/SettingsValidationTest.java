@@ -3,7 +3,9 @@ package com.example.template.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.example.template.persistence.cachestore.redis.RedisSettings;
 import io.micronaut.context.ApplicationContext;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +37,31 @@ class SettingsValidationTest {
     }
 
     @Test
+    void secondsSettingsAreExposedAsDurations() {
+        try (ApplicationContext ctx =
+                start(
+                        Map.of(
+                                "template.health-check-timeout-seconds", "2.5",
+                                "template.ingest.retry-base-delay-seconds", "0.25",
+                                "template.ingest.max-disconnect-seconds", "7"))) {
+            assertThat(ctx.getBean(AppSettings.class).healthCheckTimeout())
+                    .isEqualTo(Duration.ofMillis(2500));
+            IngestSettings ingest = ctx.getBean(IngestSettings.class);
+            assertThat(ingest.retryBaseDelay()).isEqualTo(Duration.ofMillis(250));
+            assertThat(ingest.maxDisconnect()).isEqualTo(Duration.ofSeconds(7));
+        }
+    }
+
+    @Test
+    void redisTimeoutsBindAsDurations() {
+        try (ApplicationContext ctx = start(Map.of("redis.connect-timeout", "1500ms"))) {
+            RedisSettings redis = ctx.getBean(RedisSettings.class);
+            assertThat(redis.connectTimeout()).isEqualTo(Duration.ofMillis(1500));
+            assertThat(redis.socketTimeout()).isEqualTo(Duration.ofSeconds(2));
+        }
+    }
+
+    @Test
     void invalidValuesFailStartup() {
         List<Map<String, Object>> invalid =
                 List.of(
@@ -45,7 +72,9 @@ class SettingsValidationTest {
                         Map.of("template.ingest.transport", "kafka"),
                         Map.of("template.ingest.solace.port", "70000"),
                         Map.of("template.health-check-timeout-seconds", "0"),
-                        Map.of("template.connect-max-attempts", "0"));
+                        Map.of("template.connect-max-attempts", "0"),
+                        Map.of("template.mcp-allowed-hosts", ""),
+                        Map.of("template.mcp-allowed-hosts", "localhost, ,app"));
         for (Map<String, Object> bad : invalid) {
             assertThatThrownBy(() -> start(bad).close())
                     .as("%s", bad)

@@ -2,10 +2,8 @@ package com.example.template.persistence.cachestore.redis;
 
 import io.micronaut.context.annotation.Bean;
 import io.micronaut.context.annotation.Factory;
-import io.micronaut.context.annotation.Value;
 import jakarta.inject.Singleton;
 import java.net.URI;
-import java.time.Duration;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import redis.clients.jedis.Connection;
 import redis.clients.jedis.DefaultJedisClientConfig;
@@ -22,25 +20,21 @@ public class RedisFactory {
 
     @Singleton
     @Bean(preDestroy = "close")
-    public RedisClient redisClient(
-            @Value("${redis.uri}") String uri,
-            @Value("${redis.pool-size:16}") int poolSize,
-            @Value("${redis.connect-timeout-ms:2000}") int connectTimeoutMs,
-            @Value("${redis.socket-timeout-ms:2000}") int socketTimeoutMs) {
-        URI u = URI.create(uri);
+    public RedisClient redisClient(RedisSettings settings) {
+        URI u = URI.create(settings.uri());
         DefaultJedisClientConfig.Builder config =
                 DefaultJedisClientConfig.builder()
                         .user(JedisURIHelper.getUser(u))
                         .password(JedisURIHelper.getPassword(u))
                         .database(JedisURIHelper.getDBIndex(u))
                         .ssl(JedisURIHelper.isRedisSSLScheme(u))
-                        .connectionTimeoutMillis(connectTimeoutMs)
-                        .socketTimeoutMillis(socketTimeoutMs);
+                        .connectionTimeoutMillis((int) settings.connectTimeout().toMillis())
+                        .socketTimeoutMillis((int) settings.socketTimeout().toMillis());
         GenericObjectPoolConfig<Connection> pool = new GenericObjectPoolConfig<>();
-        pool.setMaxTotal(poolSize);
-        pool.setMaxIdle(poolSize);
+        pool.setMaxTotal(settings.poolSize());
+        pool.setMaxIdle(settings.poolSize());
         // Waiting for a free connection is bounded like every other wait.
-        pool.setMaxWait(Duration.ofMillis(connectTimeoutMs));
+        pool.setMaxWait(settings.connectTimeout());
         return RedisClient.builder()
                 .hostAndPort(JedisURIHelper.getHostAndPort(u))
                 .clientConfig(config.build())

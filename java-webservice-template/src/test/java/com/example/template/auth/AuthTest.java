@@ -42,16 +42,22 @@ class AuthTest extends IntegrationSupport {
         Map<String, String> props = super.getProperties();
         props.put("template.auth.enabled", "true");
         props.put("template.auth.jwt-secret", SECRET);
-        props.put("template.auth.jwt-issuer", ISSUER);
-        props.put("template.auth.jwt-audience", AUDIENCE);
+        props.put("micronaut.security.token.jwt.claims-validators.issuer", ISSUER);
+        props.put("micronaut.security.token.jwt.claims-validators.audience", AUDIENCE);
         return props;
     }
 
     static String token(String secret, String issuer, String audience, Instant expires)
             throws Exception {
+        return token(secret, "tester", issuer, audience, expires);
+    }
+
+    static String token(
+            String secret, String subject, String issuer, String audience, Instant expires)
+            throws Exception {
         JWTClaimsSet claims =
                 new JWTClaimsSet.Builder()
-                        .subject("tester")
+                        .subject(subject)
                         .issuer(issuer)
                         .audience(audience)
                         .issueTime(new Date())
@@ -117,17 +123,36 @@ class AuthTest extends IntegrationSupport {
     }
 
     @Test
-    void wrongAudienceOrIssuerIs401() throws Exception {
-        Instant later = Instant.now().plusSeconds(300);
-        assertNotAuthenticated(
-                send(
-                        HttpRequest.GET("/config")
-                                .bearerAuth(token(SECRET, ISSUER, "someone-else", later))));
-        assertNotAuthenticated(
-                send(
-                        HttpRequest.GET("/config")
-                                .bearerAuth(
-                                        token(SECRET, "https://evil.example", AUDIENCE, later))));
+    void wrongAudienceIs401() throws Exception {
+        String token = token(SECRET, ISSUER, "someone-else", Instant.now().plusSeconds(300));
+        assertNotAuthenticated(send(HttpRequest.GET("/config").bearerAuth(token)));
+    }
+
+    @Test
+    void wrongIssuerIs401() throws Exception {
+        String token =
+                token(SECRET, "https://evil.example", AUDIENCE, Instant.now().plusSeconds(300));
+        assertNotAuthenticated(send(HttpRequest.GET("/config").bearerAuth(token)));
+    }
+
+    /** Python and Rust accept a token with no sub, so Java must too. */
+    @Test
+    void tokenWithoutSubIsAccepted() throws Exception {
+        String token = token(SECRET, null, ISSUER, AUDIENCE, Instant.now().plusSeconds(300));
+        assertThat(send(HttpRequest.GET("/config").bearerAuth(token)).status()).isEqualTo(200);
+    }
+
+    /** Accepting a missing sub must not skip the other claim checks. */
+    @Test
+    void tokenWithoutSubAndWrongIssuerIs401() throws Exception {
+        String token =
+                token(
+                        SECRET,
+                        null,
+                        "https://evil.example",
+                        AUDIENCE,
+                        Instant.now().plusSeconds(300));
+        assertNotAuthenticated(send(HttpRequest.GET("/config").bearerAuth(token)));
     }
 
     @Test

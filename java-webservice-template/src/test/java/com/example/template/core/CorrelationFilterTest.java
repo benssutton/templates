@@ -13,7 +13,10 @@ import io.micronaut.scheduling.TaskExecutors;
 import io.micronaut.scheduling.annotation.ExecuteOn;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import jakarta.inject.Inject;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.MDC;
 
 @MicronautTest
@@ -54,18 +57,25 @@ class CorrelationFilterTest extends IntegrationSupport {
     }
 
     /** Only 1-128 chars of [A-Za-z0-9._-] are adopted; anything else is replaced, never echoed. */
+    static Stream<String> unsafeIds() {
+        return Stream.of("has space", "semi;colon", "a".repeat(129), "quote\"s");
+    }
+
+    @ParameterizedTest
+    @MethodSource("unsafeIds")
+    void replacesUnsafeOrOversizedInboundIds(String bad) {
+        HttpResponse<String> resp =
+                client.toBlocking()
+                        .exchange(
+                                HttpRequest.GET("/__corrtest").header("X-Request-ID", bad),
+                                String.class);
+        String echoed = resp.getHeaders().get("X-Request-ID");
+        assertThat(echoed).isNotEqualTo(bad).matches("[0-9a-f-]{36}");
+        assertThat(resp.body()).isEqualTo(echoed);
+    }
+
     @Test
-    void replacesUnsafeOrOversizedInboundIds() {
-        for (String bad : new String[] {"has space", "semi;colon", "a".repeat(129), "quote\"s"}) {
-            HttpResponse<String> resp =
-                    client.toBlocking()
-                            .exchange(
-                                    HttpRequest.GET("/__corrtest").header("X-Request-ID", bad),
-                                    String.class);
-            String echoed = resp.getHeaders().get("X-Request-ID");
-            assertThat(echoed).as(bad).isNotEqualTo(bad).matches("[0-9a-f-]{36}");
-            assertThat(resp.body()).isEqualTo(echoed);
-        }
+    void adoptsTheLongestAllowedInboundId() {
         String longest = "A-z.0_".repeat(21) + "xy";
         HttpResponse<String> ok =
                 client.toBlocking()

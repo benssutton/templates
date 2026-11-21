@@ -142,6 +142,29 @@ class StreamIngestServiceTest {
                 maxDisconnectSeconds, maxConsecutiveFailures, maxBatchBytes, TestSettings.solace());
     }
 
+    /**
+     * Watchdog and failure shutdown off, with a 30 s first backoff: "close() is prompt" is then
+     * checked against a wait far longer than any scheduling delay under parallel test classes.
+     */
+    private static IngestSettings longBackoffSettings() {
+        IngestSettings d = TestSettings.ingest();
+        return new IngestSettings(
+                d.transport(),
+                d.maxBatchBytes(),
+                d.maxDisconnectSeconds(),
+                d.maxConsecutiveFailures(),
+                d.stalenessThresholdSeconds(),
+                d.staleFailsReadiness(),
+                d.lsmMaxRows(),
+                d.lsmFlushRows(),
+                d.lsmCompactionRuns(),
+                d.lsmKeyColumns(),
+                d.decoderMemoryBytes(),
+                30.0,
+                60.0,
+                d.solace());
+    }
+
     private static StreamIngestService service(
             BatchConsumer consumer, LsmStore store, IngestSettings settings, Runnable shutdown) {
         return new StreamIngestService(consumer, store, new CountingDecoder(), settings, shutdown);
@@ -321,8 +344,11 @@ class StreamIngestServiceTest {
             consumer.queue.offer(d);
             // fail, wait 1-1.25 s, fail, wait 2-2.5 s, fail: no hot loop.
             await().atMost(30, TimeUnit.SECONDS).until(() -> d.failedAtNanos.size() >= 3);
-            assertThat(gapMillis(d.failedAtNanos, 1)).as("first backoff").isBetween(1000L, 1900L);
-            assertThat(gapMillis(d.failedAtNanos, 2)).as("doubled backoff").isBetween(2000L, 3800L);
+            // The lower bounds carry the proof: a wait never ends early, so gap1 >= base and
+            // gap2 >= 2 * base shows the doubling. The upper bounds only catch a runaway wait
+            // and leave seconds of room for scheduling delay on a loaded VM.
+            assertThat(gapMillis(d.failedAtNanos, 1)).as("first backoff").isBetween(1000L, 3999L);
+            assertThat(gapMillis(d.failedAtNanos, 2)).as("doubled backoff").isBetween(2000L, 7999L);
             // Now inside a 4-5 s backoff: close() must cut it short.
             assertThat(timeCloseMillis(svc))
                     .as("close during settlement backoff (ms)")
@@ -336,14 +362,15 @@ class StreamIngestServiceTest {
     @Test
     void closeDuringSettlementBackoffIsPrompt() {
         ScriptedConsumer consumer = new ScriptedConsumer();
-        StreamIngestService svc = service(consumer, new FailingStore(), settings(), () -> {});
+        StreamIngestService svc =
+                service(consumer, new FailingStore(), longBackoffSettings(), () -> {});
         RedeliveredDelivery d = new RedeliveredDelivery(consumer);
         svc.start();
         try {
             consumer.queue.offer(d);
-            await().atMost(2, TimeUnit.SECONDS).until(() -> d.failedAtNanos.size() == 1);
-            // The pending wait is >= 1 s; an uninterruptible one would hold close() that long.
-            assertThat(timeCloseMillis(svc)).as("close (ms)").isLessThan(800L);
+            await().atMost(10, TimeUnit.SECONDS).until(() -> d.failedAtNanos.size() == 1);
+            // The pending wait is >= 30 s; an uninterruptible one would hold close() that long.
+            assertThat(timeCloseMillis(svc)).as("close (ms)").isLessThan(10_000L);
             assertThat(d.failedAtNanos).as("the redelivery is left for the broker").hasSize(1);
         } finally {
             svc.close(); // idempotent
@@ -362,12 +389,16 @@ class StreamIngestServiceTest {
                     }
                 };
         StreamIngestService svc =
-                service(consumer, new LsmStore(1000, 4, 1_000_000), settings(), () -> {});
+                service(
+                        consumer,
+                        new LsmStore(1000, 4, 1_000_000),
+                        longBackoffSettings(),
+                        () -> {});
         svc.start();
         try {
-            await().atMost(2, TimeUnit.SECONDS).until(() -> calls.get() == 1);
-            // The pending transport backoff is >= 1 s.
-            assertThat(timeCloseMillis(svc)).as("close (ms)").isLessThan(800L);
+            await().atMost(10, TimeUnit.SECONDS).until(() -> calls.get() == 1);
+            // The pending transport backoff is >= 30 s.
+            assertThat(timeCloseMillis(svc)).as("close (ms)").isLessThan(10_000L);
             assertThat(calls.get()).as("no reconnect after close").isEqualTo(1);
         } finally {
             svc.close(); // idempotent

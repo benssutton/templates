@@ -118,4 +118,37 @@ class EnvContractTest {
     void absentNamesAddNothing() {
         assertThat(EnvContract.translate(Map.of())).isEmpty();
     }
+
+    @Test
+    void issuerAndAudienceBecomeClaimsValidatorsOnlyWhenSet() {
+        assertThat(
+                        EnvContract.translate(
+                                Map.of("AUTH_JWT_ISSUER", "https://i", "AUTH_JWT_AUDIENCE", "api")))
+                .containsEntry("micronaut.security.token.jwt.claims-validators.issuer", "https://i")
+                .containsEntry("micronaut.security.token.jwt.claims-validators.audience", "api");
+        assertThat(EnvContract.translate(Map.of("AUTH_JWT_ISSUER", "", "AUTH_JWT_AUDIENCE", " ")))
+                .isEmpty();
+    }
+
+    @Test
+    void jsonArrayHostsBecomeACommaList() {
+        assertThat(
+                        EnvContract.translate(
+                                Map.of("MCP_ALLOWED_HOSTS", "[\"app\", \"api.example.com:8443\"]")))
+                .containsEntry("template.mcp-allowed-hosts", "app,api.example.com:8443");
+    }
+
+    @Test
+    void commaAndIpv6HostsPassThroughUnchanged() {
+        assertThat(EnvContract.translate(Map.of("MCP_ALLOWED_HOSTS", "app,localhost"))).isEmpty();
+        assertThat(EnvContract.translate(Map.of("MCP_ALLOWED_HOSTS", "[::1]:8443"))).isEmpty();
+    }
+
+    @Test
+    void malformedJsonArrayHostsAreRejected() {
+        assertThatThrownBy(() -> EnvContract.translate(Map.of("MCP_ALLOWED_HOSTS", "[\"a\", 1]")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> EnvContract.translate(Map.of("MCP_ALLOWED_HOSTS", "[\"a\"")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

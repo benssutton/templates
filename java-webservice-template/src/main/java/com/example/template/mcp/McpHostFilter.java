@@ -3,6 +3,7 @@ package com.example.template.mcp;
 import com.example.template.config.AppSettings;
 import com.example.template.dto.ErrorDetail;
 import io.micronaut.core.annotation.Nullable;
+import io.micronaut.core.order.Ordered;
 import io.micronaut.http.HttpHeaders;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpResponse;
@@ -10,6 +11,7 @@ import io.micronaut.http.HttpStatus;
 import io.micronaut.http.MediaType;
 import io.micronaut.http.annotation.RequestFilter;
 import io.micronaut.http.annotation.ServerFilter;
+import io.micronaut.http.filter.ServerFilterPhase;
 import jakarta.inject.Inject;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -23,12 +25,13 @@ import java.util.Locale;
  * in {@code template.mcp-allowed-hosts}; otherwise 403 {@code {"detail"}}. An entry without a port
  * matches any port.
  *
- * <p>Entries are parsed once, here, into (host, port) and a bad entry fails startup. Requests are
- * compared on their parsed host and port, never on a raw string prefix, so {@code
- * https://localhost:1@evil.example} is {@code evil.example}, not localhost.
+ * <p>Entries (a JSON array in the env var is flattened by {@code EnvContract}) are parsed once,
+ * here, into (host, port) and a bad entry fails startup. Requests are compared on their parsed host
+ * and port, never on a raw string prefix, so {@code https://localhost:1@evil.example} is {@code
+ * evil.example}, not localhost.
  */
 @ServerFilter({"/mcp", "/mcp/**"})
-public class McpHostFilter {
+public class McpHostFilter implements Ordered {
 
     private static final int ANY_PORT = -1;
 
@@ -43,11 +46,10 @@ public class McpHostFilter {
         this(settings.mcpAllowedHosts());
     }
 
-    /** {@code allowedHosts}: a JSON array of strings or a comma-separated list. */
-    public McpHostFilter(String allowedHosts) {
+    public McpHostFilter(List<String> allowedHosts) {
         List<Allowed> parsed = new ArrayList<>();
-        for (String entry : splitEntries(allowedHosts)) {
-            Authority a = parseAuthority(entry);
+        for (String entry : allowedHosts) {
+            Authority a = parseAuthority(entry.strip());
             if (a == null) {
                 throw new IllegalArgumentException(
                         "template.mcp-allowed-hosts: not a host[:port]: '" + entry + "'");
@@ -60,38 +62,6 @@ public class McpHostFilter {
                             + "(an empty list would disable the /mcp DNS-rebinding protection)");
         }
         this.allowed = List.copyOf(parsed);
-    }
-
-    private static List<String> splitEntries(String raw) {
-        String s = raw == null ? "" : raw.strip();
-        List<String> out = new ArrayList<>();
-        // A JSON array starts with [" or is []; a bare [ starts an IPv6 literal.
-        String afterBracket = s.startsWith("[") ? s.substring(1).strip() : "";
-        if (afterBracket.startsWith("\"") || afterBracket.equals("]")) {
-            if (!s.endsWith("]")) {
-                throw new IllegalArgumentException(
-                        "template.mcp-allowed-hosts: unterminated JSON array");
-            }
-            String body = s.substring(1, s.length() - 1).strip();
-            if (body.isEmpty()) {
-                return out;
-            }
-            for (String item : body.split(",")) {
-                String t = item.strip();
-                if (t.length() < 2 || !t.startsWith("\"") || !t.endsWith("\"")) {
-                    throw new IllegalArgumentException(
-                            "template.mcp-allowed-hosts: JSON array must hold strings, got " + t);
-                }
-                out.add(t.substring(1, t.length() - 1).strip());
-            }
-            return out;
-        }
-        for (String item : s.split(",")) {
-            if (!item.isBlank()) {
-                out.add(item.strip());
-            }
-        }
-        return out;
     }
 
     /** {@code host[:port]} only: userinfo, path, query or a bad port make it null. */
@@ -116,6 +86,12 @@ public class McpHostFilter {
             return null;
         }
         return new Authority(uri.getHost().toLowerCase(Locale.ROOT), uri.getPort());
+    }
+
+    /** Runs ahead of security; see ServerFilterPhase (correlation, timing, last-request, host). */
+    @Override
+    public int getOrder() {
+        return ServerFilterPhase.SECURITY.before();
     }
 
     @RequestFilter

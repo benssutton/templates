@@ -45,6 +45,9 @@ micronaut:
     enabled: ${template.auth.enabled}
     token:
       jwt:
+        claims-validators:
+          # Python and Rust accept tokens without sub; iss/aud come from EnvContract.
+          subject-not-null: false
         signatures:
           secret:
             generator:
@@ -98,8 +101,6 @@ template:
   auth:
     enabled: ${AUTH_ENABLED:false}
     jwt-secret: ${AUTH_JWT_SECRET:}
-    jwt-issuer: ${AUTH_JWT_ISSUER:}
-    jwt-audience: ${AUTH_JWT_AUDIENCE:}
   app-title: ${APP_TITLE:Template Micronaut Service}
   app-version: ${APP_VERSION:1.0.0}
   app-description: ${APP_DESCRIPTION:A Java Micronaut service mirroring the Python webservice template}
@@ -110,9 +111,9 @@ template:
   health-cache-ttl-seconds: ${HEALTH_CACHE_TTL_SECONDS:5}
   mcp-name: ${MCP_NAME:java-template}
   mcp-instructions: ${MCP_INSTRUCTIONS:Tools for this template application. Each tool mirrors a read-only REST endpoint.}
-  # /mcp DNS-rebinding protection (McpHostFilter): allowed Host header values, as a JSON
-  # array or comma-separated host[:port]; Origin is checked against the same hosts. An
-  # entry without a port matches any port. Must not be empty; a bad entry fails startup.
+  # /mcp DNS-rebinding protection (McpHostFilter): allowed Host header values; Origin is
+  # checked against the same hosts. An entry without a port matches any port. Comma-separated
+  # or a JSON array (see EnvContract). Must not be empty; a bad entry fails startup.
   mcp-allowed-hosts: ${MCP_ALLOWED_HOSTS:localhost}
   connect-max-attempts: ${CONNECT_MAX_ATTEMPTS:5}
   connect-base-delay-seconds: ${CONNECT_BASE_DELAY:1.0}
@@ -198,5 +199,5 @@ flyway:
 redis:
   uri: ${REDIS_URL:`redis://localhost:6379/0`}
   pool-size: ${REDIS_POOL_SIZE:16}
-  connect-timeout-ms: 2000
-  socket-timeout-ms: 2000
+  connect-timeout: 2s
+  socket-timeout: 2s

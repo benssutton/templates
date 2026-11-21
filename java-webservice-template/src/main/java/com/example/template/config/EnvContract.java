@@ -7,7 +7,9 @@ import io.micronaut.context.env.PropertySource;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -33,6 +35,19 @@ public final class EnvContract implements ApplicationContextConfigurer {
         String host = value(env, "SERVER_HOST");
         if (host != null) {
             props.put("micronaut.server.host", host);
+        }
+        // Set only when non-blank: an empty issuer would make Micronaut reject every token.
+        String issuer = value(env, "AUTH_JWT_ISSUER");
+        if (issuer != null) {
+            props.put("micronaut.security.token.jwt.claims-validators.issuer", issuer);
+        }
+        String audience = value(env, "AUTH_JWT_AUDIENCE");
+        if (audience != null) {
+            props.put("micronaut.security.token.jwt.claims-validators.audience", audience);
+        }
+        String hosts = value(env, "MCP_ALLOWED_HOSTS");
+        if (hosts != null && isJsonArray(hosts)) {
+            props.put("template.mcp-allowed-hosts", String.join(",", jsonStrings(hosts)));
         }
         String pg = value(env, "POSTGRES_URL");
         if (pg != null) {
@@ -70,6 +85,35 @@ public final class EnvContract implements ApplicationContextConfigurer {
             props.put("datasources.default.connection-timeout", String.valueOf(millis(acquire)));
         }
         return props;
+    }
+
+    /** A JSON array starts with [" or is []; a bare [ starts an IPv6 literal. */
+    private static boolean isJsonArray(String s) {
+        if (!s.startsWith("[")) {
+            return false;
+        }
+        String after = s.substring(1).strip();
+        return after.startsWith("\"") || after.equals("]");
+    }
+
+    private static List<String> jsonStrings(String s) {
+        if (!s.endsWith("]")) {
+            throw new IllegalArgumentException("MCP_ALLOWED_HOSTS: unterminated JSON array");
+        }
+        String body = s.substring(1, s.length() - 1).strip();
+        List<String> out = new ArrayList<>();
+        if (body.isEmpty()) {
+            return out;
+        }
+        for (String item : body.split(",")) {
+            String t = item.strip();
+            if (t.length() < 2 || !t.startsWith("\"") || !t.endsWith("\"")) {
+                throw new IllegalArgumentException(
+                        "MCP_ALLOWED_HOSTS: JSON array must hold strings, got " + t);
+            }
+            out.add(t.substring(1, t.length() - 1).strip());
+        }
+        return out;
     }
 
     private static long millis(String seconds) {

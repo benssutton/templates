@@ -3,17 +3,20 @@ package com.example.template.mcp;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class McpHostFilterTest {
 
-    private static McpHostFilter filter(String allowedHosts) {
-        return new McpHostFilter(allowedHosts);
+    private static McpHostFilter filter(String... allowedHosts) {
+        return new McpHostFilter(List.of(allowedHosts));
     }
 
     @Test
     void entryWithoutPortMatchesAnyPort() {
-        McpHostFilter f = filter("localhost,app");
+        McpHostFilter f = filter("localhost", "app");
         assertThat(f.isAllowedHost("localhost")).isTrue();
         assertThat(f.isAllowedHost("localhost:8443")).isTrue();
         assertThat(f.isAllowedHost("APP:443")).isTrue();
@@ -48,25 +51,15 @@ class McpHostFilterTest {
         assertThat(f.isAllowedHost("[::2]:8443")).isFalse();
     }
 
-    @Test
-    void acceptsJsonArrayOrCommaSeparated() {
-        McpHostFilter json = filter("[\"localhost\", \"app:8443\"]");
-        assertThat(json.isAllowedHost("localhost:1")).isTrue();
-        assertThat(json.isAllowedHost("app:8443")).isTrue();
-        assertThat(json.isAllowedHost("app:1")).isFalse();
-        McpHostFilter csv = filter(" localhost , app:8443 ");
-        assertThat(csv.isAllowedHost("app:8443")).isTrue();
+    @ParameterizedTest
+    @ValueSource(strings = {"evil.example/path", "user@host", "host:99999", ""})
+    void badEntriesFailAtConstruction(String bad) {
+        assertThatThrownBy(() -> filter(bad)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
-    void badEntriesFailAtConstruction() {
-        for (String bad :
-                new String[] {
-                    "", " , ", "[]", "evil.example/path", "user@host", "host:99999", "[\"a\", 1]"
-                }) {
-            assertThatThrownBy(() -> filter(bad))
-                    .as(bad)
-                    .isInstanceOf(IllegalArgumentException.class);
-        }
+    void emptyListFailsAtConstruction() {
+        assertThatThrownBy(() -> new McpHostFilter(List.of()))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

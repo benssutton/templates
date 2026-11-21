@@ -77,13 +77,19 @@ public class HealthService {
      * callers share one probe round.
      */
     public synchronized List<ProbeResult> dependencies() {
-        long ttlNanos = (long) (settings.healthCacheTtlSeconds() * 1_000_000_000L);
         Snapshot s = cached;
-        if (s == null || System.nanoTime() - s.takenAtNanos() >= ttlNanos) {
-            s = new Snapshot(probeAll(), System.nanoTime());
-            cached = s;
+        if (s != null
+                && System.nanoTime() - s.takenAtNanos() < settings.healthCacheTtl().toNanos()) {
+            return s.results();
         }
-        return s.results();
+        return probeNow();
+    }
+
+    /** Probe every dependency and make the result the cached snapshot (the only cache writer). */
+    private synchronized List<ProbeResult> probeNow() {
+        List<ProbeResult> results = probeAll();
+        cached = new Snapshot(results, System.nanoTime());
+        return results;
     }
 
     /**
@@ -92,7 +98,7 @@ public class HealthService {
      * of hanging the readiness probe. Results keep probe order.
      */
     private List<ProbeResult> probeAll() {
-        long timeoutNanos = (long) (settings.healthCheckTimeoutSeconds() * 1_000_000_000L);
+        long timeoutNanos = settings.healthCheckTimeout().toNanos();
         // Not try-with-resources: close() would wait for a hung probe to finish.
         ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
         // Bare threads start with an empty context: carry the request's propagated
@@ -108,15 +114,10 @@ public class HealthService {
             for (int i = 0; i < probes.size(); i++) {
                 results.add(await(probes.get(i), futures.get(i), deadline));
             }
-            cacheLatest(results);
             return results;
         } finally {
             pool.shutdownNow(); // interrupts any probe still running past the deadline
         }
-    }
-
-    private synchronized void cacheLatest(List<ProbeResult> results) {
-        cached = new Snapshot(results, System.nanoTime());
     }
 
     private ProbeResult await(
@@ -127,11 +128,11 @@ public class HealthService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (TimeoutException e) {
-            latencyMs = Math.round(settings.healthCheckTimeoutSeconds() * 1000.0);
+            latencyMs = settings.healthCheckTimeout().toMillis();
             LOG.error(
-                    "health probe {} timed out after {}s",
+                    "health probe {} timed out after {}ms",
                     probe.name(),
-                    settings.healthCheckTimeoutSeconds());
+                    settings.healthCheckTimeout().toMillis());
         } catch (ExecutionException e) {
             LOG.error("health probe {} failed", probe.name(), e.getCause());
         }
@@ -140,40 +141,21 @@ public class HealthService {
         return ProbeResult.down(probe.name(), latencyMs, "unavailable");
     }
 
-    /** Always probes live: an orchestrator acts on readiness, so it must not be stale. */
+    /**
+     * Always probes live: an orchestrator acts on readiness, so it must not be stale. The result
+     * also refreshes the cache.
+     */
     public ReadinessResponse readiness() {
-        List<ProbeResult> deps = probeAll();
+        List<ProbeResult> deps = probeNow();
         IngestHealth ingest = ingestProvider.currentHealth();
         ProbeStatus ingestStatus =
                 ingestUp(ingest, ingestSettings.staleFailsReadiness())
                         ? ProbeStatus.UP
                         : ProbeStatus.DOWN;
 
-        List<CheckResult> checks = new ArrayList<>();
-        for (ProbeResult d : deps) {
-            checks.add(
-                    new CheckResult(
-                            d.name(),
-                            d.status(),
-                            d.latencyMs(),
-                            null,
-                            null,
-                            null,
-                            null,
-                            null,
-                            d.error()));
-        }
-        checks.add(
-                new CheckResult(
-                        "ingest",
-                        ingestStatus,
-                        null,
-                        ingest.transport(),
-                        ingest.connectionState(),
-                        ingest.threadAlive(),
-                        ingest.lastBatchAt(),
-                        ingest.secondsSinceLastBatch(),
-                        null));
+        List<CheckResult> checks =
+                new ArrayList<>(deps.stream().map(CheckResult::dependency).toList());
+        checks.add(CheckResult.ingest(ingest, ingestStatus));
 
         boolean allUp = deps.stream().allMatch(ProbeResult::isUp) && ingestStatus == ProbeStatus.UP;
         return new ReadinessResponse(
