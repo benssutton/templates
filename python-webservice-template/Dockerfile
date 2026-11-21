@@ -1,5 +1,5 @@
 # Python 3.12: the version CI tests the service against (.github/workflows/service-python.yml).
-FROM python:3.12.16-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+FROM python:3.15.2-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 WORKDIR /app
 # Exact versions: requirements.txt is the lock compiled from requirements.in; test
 # and lint tooling lives in requirements-dev.txt and never enters the image.
