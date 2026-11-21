@@ -32,6 +32,7 @@ SHARED = [
     "ingest_http.js",
     "data/rows_params.json",
     "data/ingest_batch.ipc",
+    "data/contract_batch.ipc",
 ]
 
 
