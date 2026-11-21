@@ -40,11 +40,10 @@ OnBound = Callable[[], None]
 class BatchConsumer(Protocol):
     """Synchronous transport interface, run on the dedicated ingest thread.
 
-    deliveries() blocks; close() must be thread-safe and unblock it so the ingest
-    thread can exit. deliveries()
-    calls on_bound(), if given, once bound: proof of health, so the ingest loop
-    resets its failure count even if no message arrives. connection_state() is a
-    cached read (no I/O).
+    deliveries() blocks; close() must be thread-safe and unblock it so the ingest thread
+    can exit. deliveries() calls on_bound(), if given, once bound: proof of health, so
+    the ingest loop resets its failure count even if no message arrives.
+    connection_state() is a cached read (no I/O).
     """
 
     def deliveries(self, on_bound: OnBound | None = None) -> Iterator[Delivery]: ...
