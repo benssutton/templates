@@ -45,6 +45,9 @@ micronaut:
     enabled: ${template.auth.enabled}
     token:
       jwt:
+        claims-validators:
+          # Python and Rust accept tokens without sub; iss/aud come from EnvContract.
+          subject-not-null: false
         signatures:
           secret:
             generator:
@@ -98,8 +101,6 @@ template:
   auth:
     enabled: ${AUTH_ENABLED:false}
     jwt-secret: ${AUTH_JWT_SECRET:}
-    jwt-issuer: ${AUTH_JWT_ISSUER:}
-    jwt-audience: ${AUTH_JWT_AUDIENCE:}
   app-title: ${APP_TITLE:Template Micronaut Service}
   app-version: ${APP_VERSION:1.0.0}
   app-description: ${APP_DESCRIPTION:A Java Micronaut service mirroring the Python webservice template}

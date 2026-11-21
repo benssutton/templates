@@ -34,6 +34,15 @@ public final class EnvContract implements ApplicationContextConfigurer {
         if (host != null) {
             props.put("micronaut.server.host", host);
         }
+        // Set only when non-blank: an empty issuer would make Micronaut reject every token.
+        String issuer = value(env, "AUTH_JWT_ISSUER");
+        if (issuer != null) {
+            props.put("micronaut.security.token.jwt.claims-validators.issuer", issuer);
+        }
+        String audience = value(env, "AUTH_JWT_AUDIENCE");
+        if (audience != null) {
+            props.put("micronaut.security.token.jwt.claims-validators.audience", audience);
+        }
         String pg = value(env, "POSTGRES_URL");
         if (pg != null) {
             URI uri = URI.create(pg);

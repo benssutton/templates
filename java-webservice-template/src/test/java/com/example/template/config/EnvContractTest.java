@@ -118,4 +118,15 @@ class EnvContractTest {
     void absentNamesAddNothing() {
         assertThat(EnvContract.translate(Map.of())).isEmpty();
     }
+
+    @Test
+    void issuerAndAudienceBecomeClaimsValidatorsOnlyWhenSet() {
+        assertThat(
+                        EnvContract.translate(
+                                Map.of("AUTH_JWT_ISSUER", "https://i", "AUTH_JWT_AUDIENCE", "api")))
+                .containsEntry("micronaut.security.token.jwt.claims-validators.issuer", "https://i")
+                .containsEntry("micronaut.security.token.jwt.claims-validators.audience", "api");
+        assertThat(EnvContract.translate(Map.of("AUTH_JWT_ISSUER", "", "AUTH_JWT_AUDIENCE", " ")))
+                .isEmpty();
+    }
 }
