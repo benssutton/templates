@@ -38,6 +38,11 @@ public abstract class IntegrationSupport implements TestPropertyProvider {
         REDIS.start();
     }
 
+    /** A per-call unique key so tests never collide on the shared stores, even when concurrent. */
+    protected static String unique(String prefix) {
+        return prefix + "-" + java.util.UUID.randomUUID().toString().substring(0, 12);
+    }
+
     @Override
     public Map<String, String> getProperties() {
         Map<String, String> props = new HashMap<>();

@@ -86,20 +86,25 @@ class McpEndpointTest extends IntegrationSupport {
     @Test
     void readToolsMirrorTheRestEndpoints() {
         mcp.initialize();
+        String cfgKey = unique("mcp-k");
+        String cacheKey = unique("mcp-c");
         client.toBlocking()
-                .exchange(HttpRequest.POST("/config", Map.of("key", "mcp-k", "value", "mcp-v")));
+                .exchange(HttpRequest.POST("/config", Map.of("key", cfgKey, "value", "mcp-v")));
         McpSchema.CallToolResult cfg = call("get_config", Map.of());
         assertThat(cfg.content()).hasSize(1);
-        assertThat(text(cfg)).startsWith("[").contains("{\"key\":\"mcp-k\",\"value\":\"mcp-v\"}");
+        assertThat(text(cfg))
+                .startsWith("[")
+                .contains("{\"key\":\"" + cfgKey + "\",\"value\":\"mcp-v\"}");
         assertThat(parse(text(cfg)))
                 .isEqualTo(parse(client.toBlocking().retrieve(HttpRequest.GET("/config"))));
 
         client.toBlocking()
                 .exchange(
                         HttpRequest.POST(
-                                "/cache", Map.of("key", "mcp-c", "value", Map.of("n", 7))));
-        assertThat(text(call("get_cache", Map.of("key", "mcp-c"))))
-                .isEqualTo("{\"key\":\"mcp-c\",\"value\":{\"n\":7},\"ttl_seconds\":null}");
+                                "/cache", Map.of("key", cacheKey, "value", Map.of("n", 7))));
+        assertThat(text(call("get_cache", Map.of("key", cacheKey))))
+                .isEqualTo(
+                        "{\"key\":\"" + cacheKey + "\",\"value\":{\"n\":7},\"ttl_seconds\":null}");
         McpSchema.CallToolResult missing = call("get_cache", Map.of("key", "mcp-missing"));
         assertThat(missing.isError()).isTrue();
         assertThat(((McpSchema.TextContent) missing.content().get(0)).text())

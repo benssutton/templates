@@ -104,40 +104,47 @@ class ContractTest extends IntegrationSupport {
 
     @Test
     void configShapes() {
+        String key = unique("contract-k");
         Res created =
                 send(
-                        HttpRequest.POST("/config", "{\"key\":\"contract-k\",\"value\":\"v\"}")
+                        HttpRequest.POST("/config", "{\"key\":\"" + key + "\",\"value\":\"v\"}")
                                 .contentType(MediaType.APPLICATION_JSON));
         assertThat(created.status()).isEqualTo(201);
-        assertThat(created.body()).isEqualTo("{\"key\":\"contract-k\",\"value\":\"v\"}");
+        assertThat(created.body()).isEqualTo("{\"key\":\"" + key + "\",\"value\":\"v\"}");
         assertThat(send(HttpRequest.GET("/config")).body())
-                .contains("{\"key\":\"contract-k\",\"value\":\"v\"}");
+                .contains("{\"key\":\"" + key + "\",\"value\":\"v\"}");
     }
 
     @Test
     void cacheShapesAreSnakeCaseWithExplicitNulls() {
+        String k1 = unique("contract-c1");
+        String k2 = unique("contract-c2");
         Res withTtl =
                 send(
                         HttpRequest.POST(
                                         "/cache",
-                                        "{\"key\":\"contract-c1\",\"value\":{\"a\":1},\"ttl_seconds\":60}")
+                                        "{\"key\":\""
+                                                + k1
+                                                + "\",\"value\":{\"a\":1},\"ttl_seconds\":60}")
                                 .contentType(MediaType.APPLICATION_JSON));
         assertThat(withTtl.status()).isEqualTo(201);
         assertThat(withTtl.body())
-                .isEqualTo("{\"key\":\"contract-c1\",\"value\":{\"a\":1},\"ttl_seconds\":60}");
+                .isEqualTo("{\"key\":\"" + k1 + "\",\"value\":{\"a\":1},\"ttl_seconds\":60}");
 
         Res noTtl =
                 send(
-                        HttpRequest.POST("/cache", "{\"key\":\"contract-c2\",\"value\":\"s\"}")
+                        HttpRequest.POST("/cache", "{\"key\":\"" + k2 + "\",\"value\":\"s\"}")
                                 .contentType(MediaType.APPLICATION_JSON));
         assertThat(noTtl.body())
-                .isEqualTo("{\"key\":\"contract-c2\",\"value\":\"s\",\"ttl_seconds\":null}");
+                .isEqualTo("{\"key\":\"" + k2 + "\",\"value\":\"s\",\"ttl_seconds\":null}");
 
-        assertThat(send(HttpRequest.GET("/cache/contract-c2")).body())
-                .isEqualTo("{\"key\":\"contract-c2\",\"value\":\"s\",\"ttl_seconds\":null}");
-        assertThat(send(HttpRequest.GET("/cache/contract-c1")).body())
+        assertThat(send(HttpRequest.GET("/cache/" + k2)).body())
+                .isEqualTo("{\"key\":\"" + k2 + "\",\"value\":\"s\",\"ttl_seconds\":null}");
+        assertThat(send(HttpRequest.GET("/cache/" + k1)).body())
                 .matches(
-                        "\\{\"key\":\"contract-c1\",\"value\":\\{\"a\":1},\"ttl_seconds\":([1-5]?[0-9]|60)}");
+                        "\\{\"key\":\""
+                                + k1
+                                + "\",\"value\":\\{\"a\":1},\"ttl_seconds\":([1-5]?[0-9]|60)}");
     }
 
     @Test
@@ -296,12 +303,11 @@ class ContractTest extends IntegrationSupport {
     /** An unexpected store error is a 500 that never leaks the exception text. */
     @Test
     void unexpectedErrorIs500WithoutInternals() {
-        jedis.set("contract-plain", "x");
+        String key = unique("contract-plain");
+        jedis.set(key, "x");
         Res res =
                 send(
-                        HttpRequest.POST(
-                                        "/cache",
-                                        "{\"key\":\"contract-plain\",\"value\":{\"a\":1}}")
+                        HttpRequest.POST("/cache", "{\"key\":\"" + key + "\",\"value\":{\"a\":1}}")
                                 .contentType(MediaType.APPLICATION_JSON));
         assertError(res, 500);
         assertThat(res.body()).isEqualTo("{\"detail\":\"Internal Server Error\"}");
