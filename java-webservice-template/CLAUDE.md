@@ -49,3 +49,7 @@ src/test/.../publisher/  ExampleSolacePublisher (compose demo; Dockerfile target
 - A thrown exception from an MCP `@Tool` becomes a JSON-RPC error; return `CallToolResult.isError` instead.
 - `HttpStatus` implements `CharSequence`: `assertThat(status)` is ambiguous; cast to `Object`.
 - Tests never reuse a developer's running containers; each JVM starts its own.
+- Surefire runs test classes four at a time (`test.parallelism` in `pom.xml`); methods within a class
+  stay on one thread. `@Isolated` marks classes that touch JVM-global state (none today). Failsafe
+  `*IT` classes run sequentially (one shared Solace broker). Integration tests must store only
+  `unique(prefix)` keys. `-Dtest.parallelism=1` runs serially for debugging.
