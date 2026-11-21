@@ -20,7 +20,7 @@
 
 use crate::core::boundary_timing::timed;
 use crate::core::request_id::new_id;
-use crate::core::retry::{seconds, Backoff};
+use crate::core::retry::{Backoff, seconds};
 use crate::core::shutdown::Shutdown;
 use crate::error::AppError;
 use crate::ingestion::ipc::batch_bytes;

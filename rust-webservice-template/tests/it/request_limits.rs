@@ -1,9 +1,9 @@
 //! `max_request_body_bytes`: 413 with the contract's JSON body, whether the
 //! size is announced (Content-Length) or only discovered while streaming.
 
-use crate::support::{app_settings, TestApp};
+use crate::support::{TestApp, app_settings};
 use rust_template::settings::Settings;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 async fn app(limit: usize) -> TestApp {

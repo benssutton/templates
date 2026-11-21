@@ -2,8 +2,8 @@
 //! Shutdown order, owned by `server::serve` and `App::close`:
 //! stop the consumer -> drain in-flight HTTP -> close the consumer and pools.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, Default)]

@@ -3,7 +3,7 @@
 
 use crate::support::batches::{batch_without_id, make_batch, serialize_batch};
 use crate::support::logs;
-use crate::support::{app_settings, TestApp};
+use crate::support::{TestApp, app_settings};
 use arrow::array::{ArrayRef, Int64Array, RecordBatch, StringArray};
 use rust_template::ingestion::ipc::{batch_bytes, encode_stream};
 use rust_template::settings::Settings;

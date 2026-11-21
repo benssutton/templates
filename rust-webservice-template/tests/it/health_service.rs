@@ -1,5 +1,5 @@
 use crate::probes::NoopIngestHealth;
-use crate::probes::{probe, PanicProbe};
+use crate::probes::{PanicProbe, probe};
 use rust_template::core::last_request::LastRequest;
 use rust_template::health::ingest::IngestHealthProvider;
 use rust_template::health::probe::{HealthProbe, ProbeError};
@@ -9,8 +9,8 @@ use rust_template::schemas::health::{IngestHealth, Liveness, ProbeFailure, Readi
 use rust_template::services::health::HealthService;
 use rust_template::settings::IngestTransport;
 use rust_template::settings::Settings;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A real IngestHealthProvider with fixed state (StreamIngestService
 /// implements the same trait). Drives the readiness rules without a broker.
@@ -139,12 +139,13 @@ async fn stale_ingest_fails_readiness_only_when_configured() {
 async fn detailed_status_reports_app_uptime_ingest_requests_and_system() {
     let probes = ProbeRegistry::new(vec![probe("postgres", Ok(()), 0)]);
     let (svc, last) = service(testing(), probes, Arc::new(NoopIngestHealth));
-    assert!(svc
-        .detailed_status()
-        .await
-        .requests
-        .last_request_at
-        .is_none());
+    assert!(
+        svc.detailed_status()
+            .await
+            .requests
+            .last_request_at
+            .is_none()
+    );
 
     last.touch();
     let status = svc.detailed_status().await;

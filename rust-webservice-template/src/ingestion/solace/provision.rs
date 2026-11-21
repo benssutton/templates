@@ -8,7 +8,7 @@
 //! subscription, which a later SEMP POST would mask with `ALREADY_EXISTS`.
 
 use super::semp::SempProvisioner;
-use crate::core::retry::{connect_with_backoff, Backoff};
+use crate::core::retry::{Backoff, connect_with_backoff};
 use crate::settings::Settings;
 use fe2o3_amqp::types::messaging::Source;
 

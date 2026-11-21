@@ -30,8 +30,8 @@ use arc_swap::ArcSwap;
 use arrow::array::{Array, ArrayRef, BooleanArray, RecordBatch, StringArray, UInt64Array};
 use arrow::compute::kernels::cmp::neq;
 use arrow::compute::{
-    cast, concat_batches, filter_record_batch, lexsort_to_indices, sort_to_indices,
-    take_record_batch, SortColumn, SortOptions,
+    SortColumn, SortOptions, cast, concat_batches, filter_record_batch, lexsort_to_indices,
+    sort_to_indices, take_record_batch,
 };
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow::row::{RowConverter, SortField};
@@ -687,10 +687,12 @@ mod tests {
         s.ingest(batch(&[(1, "a", "v", "upsert")])).await.unwrap();
         let first = s.query(0).unwrap().rows.unwrap();
         let second = s.query(0).unwrap().rows.unwrap();
-        assert!(first
-            .column(0)
-            .to_data()
-            .ptr_eq(&second.column(0).to_data()));
+        assert!(
+            first
+                .column(0)
+                .to_data()
+                .ptr_eq(&second.column(0).to_data())
+        );
         s.ingest(batch(&[(2, "b", "v", "upsert")])).await.unwrap();
         assert_eq!(
             s.query(0).unwrap().total,

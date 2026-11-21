@@ -1,9 +1,9 @@
 //! Per-test Solace names and settings (Python tests/support/settings.py),
 //! plus the polling helpers the Solace tests share.
 
-use super::containers::{wait_until, SolaceEndpoints, SOLACE_ADMIN};
+use super::containers::{SOLACE_ADMIN, SolaceEndpoints, wait_until};
 use super::semp::Semp;
-use super::{app_settings, test_settings, TestApp};
+use super::{TestApp, app_settings, test_settings};
 use rust_template::ingestion::solace::publisher::AmqpPublisher;
 use rust_template::settings::{IngestTransport, Settings};
 use secrecy::SecretString;

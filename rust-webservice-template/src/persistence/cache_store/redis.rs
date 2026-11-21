@@ -1,7 +1,7 @@
 //! Cache store: Redis with the RedisJSON module. `::redis` is the crate;
 //! this module shares its name.
 
-use crate::core::retry::{connect_with_backoff, seconds, Backoff};
+use crate::core::retry::{Backoff, connect_with_backoff, seconds};
 use crate::health::probe::{HealthProbe, ProbeError};
 use crate::settings::Settings;
 use ::redis::aio::{ConnectionManager, ConnectionManagerConfig};

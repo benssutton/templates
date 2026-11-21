@@ -3,9 +3,9 @@
 //! rather than trusting the client's own account. Transport errors are
 //! returned, so polling helpers can treat them as "not yet" (a paused broker).
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use reqwest::Method;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 
 /// The queue monitor field that counts redelivered messages.

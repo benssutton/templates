@@ -21,22 +21,22 @@ pub mod semp;
 use self::amqp::AmqpTarget;
 use super::ipc::decode_stream;
 use super::{BatchConsumer, ConnectionState, Delivery, Settle, Settlement};
-use crate::core::retry::{connect_with_backoff, Backoff};
+use crate::core::retry::{Backoff, connect_with_backoff};
 use crate::settings::Settings;
 use anyhow::Context;
 use arrow::array::RecordBatch;
+use fe2o3_amqp::Receiver;
 use fe2o3_amqp::connection::ConnectionHandle;
 use fe2o3_amqp::link::delivery::DeliveryInfo;
 use fe2o3_amqp::session::SessionHandle;
 use fe2o3_amqp::types::definitions;
 use fe2o3_amqp::types::messaging::{Body, Modified};
 use fe2o3_amqp::types::primitives::Value;
-use fe2o3_amqp::Receiver;
 use std::future::Future;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use tokio::sync::{watch, Mutex, MutexGuard};
+use tokio::sync::{Mutex, MutexGuard, watch};
 use tokio_util::sync::CancellationToken;
 
 /// Pace of reconnect attempts while RECONNECTING.
@@ -67,11 +67,11 @@ impl Link {
     /// queue's flow.
     async fn shutdown(self) {
         if let Some(receiver) = self.receiver
-            && let Ok(receiver) = Arc::try_unwrap(receiver) {
-                let _ =
-                    tokio::time::timeout(amqp::TEARDOWN_TIMEOUT, receiver.into_inner().detach())
-                        .await;
-            }
+            && let Ok(receiver) = Arc::try_unwrap(receiver)
+        {
+            let _ =
+                tokio::time::timeout(amqp::TEARDOWN_TIMEOUT, receiver.into_inner().detach()).await;
+        }
         amqp::teardown(self.connection, self.session).await;
     }
 }

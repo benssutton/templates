@@ -10,7 +10,7 @@
 //! init scripts. Every migration must be idempotent (`IF NOT EXISTS`):
 //! ClickHouse has no lock to stop two replicas applying one together.
 
-use crate::core::retry::{connect_with_backoff, seconds, Backoff};
+use crate::core::retry::{Backoff, connect_with_backoff, seconds};
 use crate::health::probe::{HealthProbe, ProbeError};
 use crate::settings::Settings;
 use anyhow::anyhow;

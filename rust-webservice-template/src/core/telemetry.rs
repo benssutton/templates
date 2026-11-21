@@ -11,9 +11,9 @@ use axum::http::HeaderMap;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use opentelemetry_sdk::Resource;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -27,9 +27,10 @@ pub struct Telemetry {
 impl Drop for Telemetry {
     fn drop(&mut self) {
         if let Some(provider) = self.provider.take()
-            && let Err(err) = provider.shutdown() {
-                eprintln!("trace exporter shutdown failed: {err}");
-            }
+            && let Err(err) = provider.shutdown()
+        {
+            eprintln!("trace exporter shutdown failed: {err}");
+        }
     }
 }
 

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use rmcp::transport::streamable_http_server::{
-    session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
+    StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
 };
 
 use crate::state::AppState;

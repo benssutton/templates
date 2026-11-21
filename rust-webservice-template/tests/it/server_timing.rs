@@ -1,4 +1,4 @@
-use crate::support::{app_settings, TestApp};
+use crate::support::{TestApp, app_settings};
 
 /// /health/live has no instrumented boundaries, so only `total` appears.
 /// (Store boundaries such as clickhouse_select are covered by the store tests.)

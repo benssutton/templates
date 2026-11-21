@@ -1,6 +1,6 @@
 use crate::probes::probe;
-use crate::support::{app_settings, TestApp};
-use rust_template::app::{router, App};
+use crate::support::{TestApp, app_settings};
+use rust_template::app::{App, router};
 use rust_template::ingestion::noop::NoopBatchConsumer;
 use rust_template::persistence::Stores;
 use rust_template::state::AppState;

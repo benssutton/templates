@@ -7,11 +7,11 @@
 use crate::error::AppError;
 use crate::ingestion::ipc::decode_stream;
 use arrow::array::RecordBatch;
+use axum::Json;
 use axum::body::Bytes;
 use axum::extract::rejection::{BytesRejection, JsonRejection, QueryRejection};
 use axum::extract::{FromRequest, FromRequestParts, Query, Request};
 use axum::http::request::Parts;
-use axum::Json;
 use garde::Validate;
 use serde::de::DeserializeOwned;
 

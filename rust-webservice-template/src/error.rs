@@ -5,9 +5,9 @@
 //! outage (503) from a bug (500).
 
 use axum::{
-    http::{header, HeaderValue, StatusCode},
-    response::{IntoResponse, Response},
     Json,
+    http::{HeaderValue, StatusCode, header},
+    response::{IntoResponse, Response},
 };
 use serde_json::json;
 

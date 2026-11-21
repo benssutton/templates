@@ -11,13 +11,13 @@ pub mod semp;
 #[cfg(feature = "solace")]
 pub mod solace;
 
-use rust_template::app::{create_app, App};
+use rust_template::app::{App, create_app};
 use rust_template::server::{self, Tls};
 use rust_template::settings::{IngestTransport, Settings};
 use rust_template::state::AppState;
 use tokio::task::JoinHandle;
 
-use containers::{Endpoint, CH_PASSWORD, CH_USER};
+use containers::{CH_PASSWORD, CH_USER, Endpoint};
 use secrecy::SecretString;
 use std::time::{Duration, Instant};
 

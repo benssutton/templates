@@ -3,9 +3,9 @@ use crate::extract::ValidJson;
 use crate::schemas::config::{ConfigEntry, ConfigSetRequest};
 use crate::schemas::error::ErrorResponse;
 use crate::state::AppState;
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::Json;
 
 #[utoipa::path(
     post,

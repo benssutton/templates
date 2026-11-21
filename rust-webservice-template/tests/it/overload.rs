@@ -3,7 +3,7 @@
 //! request with no response after `request_timeout_seconds` is a 503. A
 //! slow upload (headers plus part of a body) holds a request open.
 
-use crate::support::{app_settings, TestApp};
+use crate::support::{TestApp, app_settings};
 use rust_template::settings::Settings;
 use serde_json::Value;
 use std::time::{Duration, Instant};

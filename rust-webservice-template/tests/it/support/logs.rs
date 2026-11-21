@@ -76,7 +76,7 @@ pub struct Logs(LogBuffer);
 
 impl Logs {
     pub fn text(&self) -> String {
-        String::from_utf8_lossy(&self.0 .0.lock().unwrap_or_else(|e| e.into_inner())).into_owned()
+        String::from_utf8_lossy(&self.0.0.lock().unwrap_or_else(|e| e.into_inner())).into_owned()
     }
 
     #[cfg(feature = "solace")]

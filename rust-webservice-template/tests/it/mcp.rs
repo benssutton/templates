@@ -3,9 +3,9 @@
 //! the happy-path requests connect there and send `Host: localhost:<port>`
 //! explicitly: the same check a browser's DNS-rebinding request meets, without
 //! resolving `localhost` (on Windows the ::1 attempt costs seconds).
-use crate::support::{app_settings, TestApp};
+use crate::support::{TestApp, app_settings};
 use rust_template::settings::Settings;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const ACCEPT: &str = "application/json, text/event-stream";
 

@@ -2,12 +2,12 @@
 //! is required everywhere except the orchestrator probes, and every failure
 //! is 401 `{"detail": "Not authenticated"}` with `WWW-Authenticate: Bearer`.
 
-use crate::support::{app_settings, test_settings, TestApp};
-use jsonwebtoken::{encode, EncodingKey, Header};
+use crate::support::{TestApp, app_settings, test_settings};
+use jsonwebtoken::{EncodingKey, Header, encode};
 use rust_template::app::create_app;
 use rust_template::settings::Settings;
 use secrecy::SecretString;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const SECRET: &str = "it-jwt-secret-5f2c"; // gitleaks:allow (test-only signing key)

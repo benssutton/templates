@@ -1,6 +1,6 @@
 use crate::support::{app_settings, client};
 use rust_template::app::create_app;
-use rust_template::server::{serve, Tls};
+use rust_template::server::{Tls, serve};
 use rust_template::settings::Settings;
 use std::path::PathBuf;
 

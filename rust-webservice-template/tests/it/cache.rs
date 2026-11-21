@@ -1,7 +1,7 @@
 //! `/cache`: round trips, the 404 body, the stored-null rule, the slash
 //! forms and the 422 cases.
 
-use crate::support::{app_settings, TestApp};
+use crate::support::{TestApp, app_settings};
 use serde_json::json;
 
 fn unique(name: &str) -> String {

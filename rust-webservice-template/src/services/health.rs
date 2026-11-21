@@ -69,9 +69,10 @@ impl HealthService {
     pub async fn dependencies(&self) -> Vec<ProbeResult> {
         let mut cached = self.cached.lock().await;
         if let Some((at, results)) = cached.as_ref()
-            && at.elapsed() < self.cache_ttl() {
-                return results.clone();
-            }
+            && at.elapsed() < self.cache_ttl()
+        {
+            return results.clone();
+        }
         let timeout = seconds(self.settings.health_check_timeout_seconds);
         let results = self.probes.run_all(timeout).await;
         *cached = Some((Instant::now(), results.clone()));

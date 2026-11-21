@@ -3,9 +3,9 @@ use crate::extract::{ArrowStream, ValidQuery};
 use crate::schemas::data::{DataRowsResponse, IngestAccepted, LimitQuery};
 use crate::schemas::error::ErrorResponse;
 use crate::state::AppState;
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::Json;
 
 #[utoipa::path(
     get,

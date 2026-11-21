@@ -4,8 +4,8 @@
 
 use arrow::array::{ArrayRef, Int64Array, RecordBatch, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
-use rust_template::persistence::stream_store::lsm::{compact, merge, ORDER_COLUMN};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use rust_template::persistence::stream_store::lsm::{ORDER_COLUMN, compact, merge};
 use std::hint::black_box;
 use std::sync::Arc;
 

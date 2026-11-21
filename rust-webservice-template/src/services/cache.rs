@@ -91,9 +91,11 @@ mod tests {
 
     #[test]
     fn a_key_that_expired_with_the_read_is_absent_not_eternal() {
-        assert!(to_entry("k", Some("1".into()), TTL_KEY_MISSING)
-            .unwrap()
-            .is_none());
+        assert!(
+            to_entry("k", Some("1".into()), TTL_KEY_MISSING)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

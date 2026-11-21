@@ -3,15 +3,15 @@
 //! messages, bind denial and lifecycle. Broker-side facts come from SEMP.
 
 use crate::support::batches::make_batch;
-use crate::support::containers::{self, wait_until, Endpoint, SolaceLease};
+use crate::support::containers::{self, Endpoint, SolaceLease, wait_until};
 use crate::support::logs;
 use crate::support::semp::Semp;
 use crate::support::solace::{
-    consumer_settings, publisher, wait_for_bound, wait_for_depth, wait_for_unbound, SolaceNames,
+    SolaceNames, consumer_settings, publisher, wait_for_bound, wait_for_depth, wait_for_unbound,
 };
 use arrow::array::AsArray;
 use arrow::datatypes::Int64Type;
-use rust_template::ingestion::solace::{SolaceBatchConsumer, RECONNECT_INTERVAL};
+use rust_template::ingestion::solace::{RECONNECT_INTERVAL, SolaceBatchConsumer};
 use rust_template::ingestion::{BatchConsumer, ConnectionState, Delivery};
 use rust_template::settings::Settings;
 use std::sync::Arc;

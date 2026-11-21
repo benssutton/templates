@@ -1,15 +1,15 @@
 //! Transaction store: Postgres (pgvector image), with versioned sqlx
 //! migrations from `migrations/postgres/`, embedded at compile time.
 
-use crate::core::retry::{connect_with_backoff, seconds, Backoff};
+use crate::core::retry::{Backoff, connect_with_backoff, seconds};
 use crate::health::probe::{HealthProbe, ProbeError};
 use crate::settings::Settings;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use secrecy::ExposeSecret;
+use sqlx::Connection;
 use sqlx::migrate::Migrator;
 use sqlx::postgres::{PgConnectOptions, PgConnection, PgPool, PgPoolOptions};
-use sqlx::Connection;
 use std::str::FromStr;
 
 /// Applied in order at startup; each version runs once (`_sqlx_migrations`).
