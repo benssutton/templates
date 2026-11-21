@@ -1,6 +1,7 @@
 package com.example.template.service;
 
 import com.example.template.config.AppSettings;
+import com.example.template.config.IngestSettings;
 import com.example.template.core.LastRequestTracker;
 import com.example.template.core.SystemMetrics;
 import com.example.template.dto.health.AppInfo;
@@ -39,6 +40,7 @@ public class HealthService {
     private record Snapshot(List<ProbeResult> results, long takenAtNanos) {}
 
     private final AppSettings settings;
+    private final IngestSettings ingestSettings;
     private final List<DependencyHealthProbe> probes;
     private final IngestHealthProvider ingestProvider;
     private final SystemMetrics systemMetrics;
@@ -47,11 +49,13 @@ public class HealthService {
 
     public HealthService(
             AppSettings settings,
+            IngestSettings ingestSettings,
             List<DependencyHealthProbe> probes,
             IngestHealthProvider ingestProvider,
             SystemMetrics systemMetrics,
             LastRequestTracker lastRequest) {
         this.settings = settings;
+        this.ingestSettings = ingestSettings;
         this.probes = probes;
         this.ingestProvider = ingestProvider;
         this.systemMetrics = systemMetrics;
@@ -140,7 +144,10 @@ public class HealthService {
     public ReadinessResponse readiness() {
         List<ProbeResult> deps = probeAll();
         IngestHealth ingest = ingestProvider.currentHealth();
-        ProbeStatus ingestStatus = ingestUp(ingest) ? ProbeStatus.UP : ProbeStatus.DOWN;
+        ProbeStatus ingestStatus =
+                ingestUp(ingest, ingestSettings.staleFailsReadiness())
+                        ? ProbeStatus.UP
+                        : ProbeStatus.DOWN;
 
         List<CheckResult> checks = new ArrayList<>();
         for (ProbeResult d : deps) {
@@ -177,7 +184,10 @@ public class HealthService {
      * With the noop transport there is nothing to be connected to, so ingest never blocks
      * readiness.
      */
-    private static boolean ingestUp(IngestHealth ingest) {
+    private static boolean ingestUp(IngestHealth ingest, boolean staleFailsReadiness) {
+        if (staleFailsReadiness && ingest.stale()) {
+            return false;
+        }
         return "noop".equals(ingest.transport())
                 || ingest.connectionState() == ConnectionState.CONNECTED;
     }

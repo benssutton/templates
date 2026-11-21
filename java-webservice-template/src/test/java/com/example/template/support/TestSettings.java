@@ -61,6 +61,7 @@ public final class TestSettings {
                 maxDisconnectSeconds,
                 maxConsecutiveFailures,
                 0,
+                false,
                 1_000_000,
                 1000,
                 4,

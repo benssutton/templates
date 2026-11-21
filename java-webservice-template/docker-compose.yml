@@ -90,7 +90,13 @@ services:
       # /mcp Host allow-list: the published port (localhost, 127.0.0.1) and the
       # compose service name (app), as other containers address it.
       MCP_ALLOWED_HOSTS: localhost,127.0.0.1,app
+      POSTGRES_URL: postgresql://appuser:password@postgres:5432/appdb
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_USER: default
       CLICKHOUSE_PASSWORD: clickhouse
+      REDIS_URL: redis://redis:6379/0
+      SOLACE_HOST: solace
     # Healthcheck comes from the image (HEALTHCHECK in the Dockerfile).
 
 volumes:

@@ -130,6 +130,7 @@ public final class SolaceSupport {
                 maxDisconnectSeconds,
                 maxConsecutiveFailures,
                 d.stalenessThresholdSeconds(),
+                d.staleFailsReadiness(),
                 d.lsmMaxRows(),
                 d.lsmFlushRows(),
                 d.lsmCompactionRuns(),

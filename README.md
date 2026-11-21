@@ -41,7 +41,7 @@ Security
 
 Contract
 1. The three templates are each idiomatic for their framework; they agree on the HTTP contract, not on code shape: paths, snake_case JSON, `{"detail": ...}` for every error (400 malformed, 401, 403, 404, 405, 413, 415, 422, 500, 503), store outages as 503, `X-Request-ID` adopted only when it is 1-128 chars of `[A-Za-z0-9._-]`, and the same environment variable names.
-2. The contract is pinned by `tests/performance/contract.js`, identical in all three services (`tests/cicd/test_perf_scripts.py`) and run by each service's `k6-smoke` step against its compose stack. Each service's own suite pins what needs a configured or broken stack (401, 500, 503).
+2. The contract is pinned by `tests/performance/contract.js`, identical in all three services (`tests/cicd/test_perf_scripts.py`) and run by each service's `k6-smoke` step against its compose stack. It covers the HTTP surface above, the merged `/data/cache` view, the MCP tool names and their REST-identical results, and the shared metric names. Env var names are pinned by `tests/cicd/test_env_contract.py` against each service's `.env.example`. Each service's own suite pins what needs a configured or broken stack (401, 500, 503).
 3. Stream ingest defaults to `INGEST_TRANSPORT=noop` (HTTP ingest only); Solace is opt-in, and the compose stacks opt in for the demo publisher.
 
 
