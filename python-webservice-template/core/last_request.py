@@ -1,8 +1,7 @@
 """Records when the app last received an HTTP request (shown by /health/status).
 
-Pure ASGI for the same reason as CorrelationIdMiddleware: BaseHTTPMiddleware
-(`@app.middleware("http")`) wraps receive() in a task group, which turns the
-413 raised mid-read by MaxBodySizeMiddleware into an ExceptionGroup.
+Pure ASGI: BaseHTTPMiddleware would turn MaxBodySizeMiddleware's mid-read 413
+into an ExceptionGroup.
 """
 
 from datetime import UTC, datetime

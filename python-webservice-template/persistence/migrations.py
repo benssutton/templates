@@ -1,16 +1,10 @@
-"""Versioned SQL migrations for Postgres and ClickHouse, applied at startup.
+"""Versioned SQL migrations (migrations/<store>/NNN_name.sql), applied at startup.
 
-Files live in migrations/<store>/NNN_description.sql and are applied in version
-order; each store records what it has applied in a `schema_migrations` table.
-Never edit an applied file: add the next number instead.
-
-Postgres: every pending file runs in ONE transaction under a transaction-scoped
-advisory lock, so replicas starting together apply each version exactly once and
-a failed migration leaves nothing behind.
-
-ClickHouse has neither transactions nor advisory locks, so its files must be
-idempotent (`IF NOT EXISTS`) and hold a single statement each: two replicas may
-both apply a version, and the second run must be a no-op.
+Each store records applied versions in `schema_migrations`. Never edit an applied
+file: add the next number. Postgres runs all pending files in ONE transaction
+under an advisory lock, so concurrent replicas apply each version once and a
+failure leaves nothing behind. ClickHouse has neither, so each file must be one
+idempotent statement (`IF NOT EXISTS`): two replicas may both apply it.
 """
 
 import re

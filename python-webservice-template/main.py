@@ -130,13 +130,9 @@ def mcp_transport_security(settings: Settings) -> TransportSecuritySettings:
 
 
 def create_app(settings: Settings) -> FastAPI:
-    """Build a fully isolated application instance.
-
-    Everything stateful (services, the FastMCP server whose session manager can
-    only run once per instance, the lifespan) is created fresh per call, so
-    multiple apps can coexist in one process (e.g. test apps with different
-    transports in the same pytest session).
-    """
+    """Build a fully isolated app: services, the FastMCP server (its session manager
+    runs only once per instance) and the lifespan are created per call, so several
+    apps can coexist in one process (e.g. tests with different transports)."""
     configure_logging(settings.log_level)
     last_request = LastRequest()
     metrics_service = MetricsService(settings) if settings.metrics_enabled else None
@@ -163,13 +159,11 @@ def create_app(settings: Settings) -> FastAPI:
     tools.register(mcp, lambda: app.state.services)
     register_exception_handlers(app)
 
-    # Every middleware here is pure ASGI (no BaseHTTPMiddleware), so the 413 that
-    # MaxBodySizeMiddleware raises mid-read reaches the handler as a plain
-    # HTTPException rather than an ExceptionGroup. Starlette applies them LIFO:
-    # the last one added is the outermost. Outside-in order: CanonicalPath (so every
-    # layer, auth included, sees the routed path), MaxBodySize, CorrelationId, CORS,
-    # BearerAuth (if enabled), ServerTiming, LastRequest, then routing and the /mcp
-    # mount (whose Host allow-list is FastMCP's own transport security).
+    # All pure ASGI, so MaxBodySizeMiddleware's mid-read 413 arrives as a plain
+    # HTTPException, not an ExceptionGroup. Last added is outermost. Outside-in:
+    # CanonicalPath (every layer, auth included, sees the routed path), MaxBodySize,
+    # CorrelationId, CORS, BearerAuth (if enabled), ServerTiming, LastRequest, then
+    # routing and the /mcp mount (whose Host allow-list is FastMCP's own).
     app.add_middleware(LastRequestMiddleware, last_request=last_request)
     # Just outside LastRequestMiddleware, so `total` covers handler + downstream I/O.
     app.add_middleware(ServerTimingMiddleware)
@@ -215,9 +209,8 @@ def create_app(settings: Settings) -> FastAPI:
     return app
 
 
-# Module-level app for `uvicorn main:app`.
-# All Settings fields have defaults so this is safe to execute at import time.
-# A field without a default would need `uvicorn main:create_app --factory`.
+# For `uvicorn main:app`. Safe at import time only because every Settings field
+# has a default; otherwise use `uvicorn main:create_app --factory`.
 app = create_app(get_settings())
 
 

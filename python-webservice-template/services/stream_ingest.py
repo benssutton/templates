@@ -256,9 +256,7 @@ class StreamIngestService:
         now = datetime.now(UTC)
         seconds_since = (now - last).total_seconds() if last is not None else None
         threshold = self._settings.ingest_staleness_threshold_seconds
-        # Stale when explicitly configured and either:
-        # - a batch was received but too long ago, or
-        # - no batch has ever been received (use time-since-start as proxy).
+        # Before the first batch, time since start stands in for time since it.
         if threshold is not None:
             elapsed = (
                 seconds_since

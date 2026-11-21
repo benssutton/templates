@@ -27,12 +27,9 @@ class IngestHealth(BaseModel):
 
 
 class CheckResult(BaseModel):
-    """A single entry in the flat /health/ready checks array.
+    """One /health/ready check; only the ingest check sets the transport fields.
 
-    Dependency checks populate name/status/latency_ms; the ingest check
-    additionally populates transport/connection_state/etc. Serialised with
-    response_model_exclude_none so each check shows only its relevant fields.
-    """
+    Serialised with response_model_exclude_none, so each shows only its own."""
 
     name: str
     status: DependencyStatus

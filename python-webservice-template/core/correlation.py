@@ -1,11 +1,8 @@
-"""Request/ingest correlation identity, propagated via a ContextVar.
+"""Correlation ID for an HTTP request or an ingested batch, held in a ContextVar.
 
-A single ID is carried for the lifetime of an HTTP request (set by
-CorrelationIdMiddleware) or a single ingested batch (set by the ingest loop).
-The logging filter stamps every record with the current value so one grep of
-the ID surfaces the full causal trail. asyncio.to_thread copies the context, so
-the HTTP /data/ingest path carries the request ID into the store-write thread
-automatically; the streaming ingest thread sets its own per-batch ID.
+The logging filter stamps it on every record. asyncio.to_thread copies the
+context, so /data/ingest's store-write thread keeps the request ID; the streaming
+ingest thread sets its own per-batch ID.
 """
 
 import contextvars
@@ -26,14 +23,9 @@ def get_correlation_id() -> str:
 
 
 def set_correlation_id(value: str) -> contextvars.Token:
-    """Set the correlation ID and return the reset token.
+    """Set the correlation ID and return the token that restores the previous one.
 
-    Callers that need to restore the previous value should pair this with
-    `correlation_id_var.reset(token)` when done — e.g. the streaming ingest
-    loop resets after each batch so backoff/error logs are not mis-attributed
-    to the last successful batch's ID. Fire-and-forget callers that never need
-    to restore the prior value may discard the returned token.
-    """
+    The ingest loop resets after each batch so its backoff logs don't get that ID."""
     return correlation_id_var.set(value)
 
 
@@ -61,13 +53,10 @@ class CorrelationIdFilter(logging.Filter):
 
 
 class CorrelationIdMiddleware:
-    """Adopts the inbound correlation header (or mints an ID), exposes it to the
-    endpoint and its loggers via the ContextVar, and echoes it on the response.
+    """Adopts the inbound correlation header (or mints an ID) and echoes it back.
 
-    Pure ASGI, not BaseHTTPMiddleware: BaseHTTPMiddleware runs receive() inside a
-    task group, which wraps errors raised mid-read (e.g. the 413 from
-    MaxBodySizeMiddleware) in an ExceptionGroup, and it buffers streaming responses.
-    """
+    Pure ASGI: BaseHTTPMiddleware wraps errors raised mid-read (the 413 from
+    MaxBodySizeMiddleware) in an ExceptionGroup and buffers streaming responses."""
 
     def __init__(self, app: ASGIApp, header_name: str = "X-Request-ID") -> None:
         self.app = app

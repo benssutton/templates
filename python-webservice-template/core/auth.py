@@ -1,8 +1,7 @@
-"""Bearer-token (JWT, HS256) authentication seam, off by default.
+"""Bearer-token (JWT, HS256) authentication, off by default.
 
-Pure ASGI rather than a FastAPI dependency so it also covers the mounted /mcp
-app, which FastAPI's dependency system never sees. Sits inside CORSMiddleware so
-browser preflights are answered without a token.
+Pure ASGI, not a FastAPI dependency, so it also covers the mounted /mcp app. Sits
+inside CORSMiddleware so browser preflights need no token.
 """
 
 import json

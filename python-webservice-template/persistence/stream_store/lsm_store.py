@@ -1,17 +1,13 @@
 """In-memory LSM (Log-Structured Merge) store for Arrow record batches.
 
-SINGLE LOGICAL WRITER — `ingest()` holds an internal lock for the whole
-write (seqno assignment, flush, compaction, publish), so the HTTP ingest
-thread pool and the transport ingest thread can both call it safely. Readers
-(`query()`) take no lock: `_publish()` swaps the snapshot reference
-atomically at the end of every write, so readers always see a consistent,
-immutable snapshot.
+SINGLE LOGICAL WRITER: `ingest()` holds a lock for the whole write (seqno, flush,
+compaction, publish), so the HTTP ingest pool and the transport thread can both
+call it. Readers (`query()`) take no lock: `_publish()` atomically swaps in an
+immutable snapshot at the end of every write.
 
-Lifecycle: memtable → run (flush) → compacted run.  When the number of runs
-reaches `compaction_runs`, all runs are merged into one. Compaction is the
-only point at which delete tombstones are reclaimed; a tombstone in the
-memtable or an un-compacted run continues to shadow older versions of the
-same key across all in-memory frames until a full merge has occurred.
+memtable → run (flush) → one compacted run once there are `compaction_runs` runs.
+Only compaction reclaims delete tombstones; until then they shadow older versions
+of their key.
 """
 
 import threading
@@ -35,9 +31,8 @@ def _merge_frame(
     if not frames:
         return None
     combined = pl.concat(frames, how="vertical")
-    # Window function: rank rows within each key partition by recency
-    # (newest seqno first). key_columns is the single extension point:
-    # ["id"] today, ["id", "version"] later, with no other change.
+    # Rank rows per key by recency (newest seqno first). key_columns is the only
+    # extension point: ["id"] today, ["id", "version"] later.
     winners = (
         combined.with_columns(
             pl.col(ORDER_COLUMN)

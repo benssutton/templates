@@ -12,9 +12,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 OTHERS = {
-    "python": r"java|rust|micronaut|axum|tokio|cargo|maven|sibling",
+    "python": r"java|rust|micronaut|axum|tokio|cargo|maven|jvm|spring|sibling",
     "java": r"python|rust|fastapi|pydantic|axum|tokio|cargo|sibling|container\.py|_track_last_request",
-    "rust": r"python|java|fastapi|pydantic|micronaut|maven|sibling",
+    "rust": r"python|java|fastapi|pydantic|micronaut|maven|jvm|spring|sibling",
 }
 SUFFIXES = {".py", ".java", ".rs", ".yml", ".yaml", ".toml", ".xml", ".properties", ".sh"}
 NAMES = {"Dockerfile"}

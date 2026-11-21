@@ -33,10 +33,9 @@ from settings import Settings
 
 log = logging.getLogger(__name__)
 
-# SDK reconnects forever at this interval. If it still reports a terminal
-# interruption (e.g. the broker refuses the login), deliveries() raises and the
-# next call reconnects; the ingest watchdog (ingest_max_disconnect_seconds) and
-# the consecutive-failure limit are the places that give up.
+# The SDK retries a dropped connection forever at this interval. On a terminal
+# interruption (e.g. login refused) deliveries() raises and the next call reconnects;
+# only the watchdog (ingest_max_disconnect_seconds) and the failure limit give up.
 _RECONNECT_INTERVAL_MS = 1000
 
 
@@ -149,31 +148,25 @@ def _disconnect(session: _Session | None) -> None:
 
 class SolaceBatchConsumer:
     """Solace Guaranteed messaging: binds a durable exclusive queue (created on
-    start, with the topic subscription attached) and yields one Delivery per
-    message, settled by StreamIngestService after the LSM write.
+    start, with the topic subscription) and yields one Delivery per message.
 
-    Threading: __aenter__ connects a MessagingService (with backoff; startup
-    fails if the broker is unreachable). Each deliveries() call (ingest thread)
-    owns one receiver + one inbox queue and tears the receiver down in
-    `finally`, so a retry after a failure can re-bind the exclusive queue and
-    never sees stale deliveries. close() (any thread) sets `_closed`, wakes the
-    blocked deliveries() via the inbox sentinel and terminates whatever receiver
-    and service are currently published. Both sides tear down best-effort, so a
-    race at most terminates the same resource twice.
+    Threading: each deliveries() call (ingest thread) owns one receiver and inbox
+    and terminates the receiver in `finally`, so a retry can re-bind the exclusive
+    queue and never sees stale deliveries. close() (any thread) sets `_closed`,
+    wakes deliveries() with an inbox sentinel and terminates the current receiver
+    and service. Both sides tear down best-effort, so a race at most terminates a
+    resource twice.
 
-    Recovery: network blips are handled by the SDK (forever retry; the
-    persistent flow re-binds). A terminal service interruption (the SDK gave up,
-    e.g. the broker refused the re-login) wakes deliveries() with a sentinel and
-    it raises SolaceServiceInterrupted; the ingest loop counts a failure and
-    backs off, and the next deliveries() call disconnects the dead service and
-    connects a fresh one (same backoff policy as startup). A receiver-level flow
-    termination on a live service is not signalled: deliveries() stays blocked,
-    and the disconnect watchdog does not see it either (the service is CONNECTED).
+    Recovery: the SDK rides out network blips (forever retry; the flow re-binds).
+    On a terminal interruption deliveries() raises SolaceServiceInterrupted; the
+    ingest loop backs off and the next call connects a fresh service. A flow
+    terminated on a live service is not signalled: deliveries() stays blocked and
+    the disconnect watchdog sees CONNECTED.
     """
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        # Deterministic per-replica client name (one queue per replica -> one name).
+        # One queue per replica, so the queue name is a stable, unique client name.
         self.client_name = settings.solace_queue.replace("/", "_")
         self._closed = threading.Event()
         # Guards everything shared with close() and SDK threads: the current
@@ -186,9 +179,8 @@ class SolaceBatchConsumer:
 
     def _set_state(self, state: ConnectionState, session: _Session) -> None:
         with self._lock:
-            # Late event from a replaced service, or after close(): close() clears
-            # _session and _publish_session() refuses once closed, so the identity
-            # check covers both.
+            # Late event from a replaced or closed session: close() clears _session
+            # and _publish_session() refuses once closed, so this check covers both.
             if session is not self._session:
                 return
             self._state = state
@@ -223,10 +215,9 @@ class SolaceBatchConsumer:
             return self._state
 
     async def __aenter__(self) -> "SolaceBatchConsumer":
-        # The broker's SMF listener accepts TCP (and its health-check endpoint
-        # can report active) before the message VPN is serving clients; connect()
-        # then fails with 'Not ready' / SERVICE_UNAVAILABLE. Retry with the same
-        # bounded exponential backoff as the other startup dependencies.
+        # The broker accepts TCP (and may report healthy) before the message VPN
+        # serves clients, so connect() can fail with 'Not ready' at first; retry
+        # with the same bounded backoff as the other startup dependencies.
         async def _attempt() -> _Session:
             return await asyncio.to_thread(self._connect)
 
@@ -311,10 +302,9 @@ class SolaceBatchConsumer:
                 if reconnected is None:
                     return  # closed while reconnecting
                 session = reconnected
-            # Built inside the try: if close() races construction (the service is
-            # disconnected under us), the except below turns it into a clean stop.
-            # Not chained: the SDK annotates with_subscriptions() as returning the
-            # base MessageReceiverBuilder (no build()); every call mutates it.
+            # Inside the try, so a close() racing construction becomes a clean stop.
+            # Not chained: the SDK types with_subscriptions() as returning the base
+            # MessageReceiverBuilder (no build()); each call mutates the builder.
             builder = session.service.create_persistent_message_receiver_builder()
             builder.with_missing_resources_creation_strategy(
                 MissingResourcesCreationStrategy.CREATE_ON_START
