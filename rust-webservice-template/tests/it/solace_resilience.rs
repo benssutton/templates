@@ -14,7 +14,6 @@ use crate::support::solace::{
     poll_cache, publisher, solace_settings, values, wait_for_bound, SolaceNames,
 };
 use crate::support::TestApp;
-use rust_template::services::stream_ingest::INGEST_MAX_FAILURES;
 use rust_template::settings::Settings;
 use serde_json::Value;
 use std::time::{Duration, Instant};
@@ -85,6 +84,7 @@ async fn a_paused_broker_reconnects_and_ingest_resumes() {
     // No automatic shutdown during the partition.
     let settings = Settings {
         ingest_max_disconnect_seconds: None,
+        ingest_max_consecutive_failures: 0,
         ..solace_settings(&broker.endpoints, &names).await
     };
     let app = TestApp::spawn(settings).await;
@@ -207,7 +207,8 @@ async fn a_denied_bind_requests_shutdown_after_five_consecutive_failures() {
     tokio::time::timeout(Duration::from_secs(45), app.state.shutdown.triggered())
         .await
         .expect("consecutive failures requested shutdown");
-    let last_failure = format!("failure {INGEST_MAX_FAILURES}/{INGEST_MAX_FAILURES}");
+    let max = app.state.settings.ingest_max_consecutive_failures;
+    let last_failure = format!("failure {max}/{max}");
     assert!(logs.contains(&last_failure), "{}", logs.text());
     assert!(logs.contains("bind to queue"), "{}", logs.text());
     assert_eq!(

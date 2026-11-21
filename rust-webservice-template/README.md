@@ -124,10 +124,20 @@ re-check them against a live broker after a broker upgrade):
 | fe2o3-amqp behaviour | PLAIN is refused client-side when the VPN offers only ANONYMOUS; `OpenError`'s Display hides the reason (log `{e:?}`); always close the old connection, or it keeps the exclusive queue | `amqp.rs`, `solace/mod.rs` |
 | SASL | empty `SOLACE_USERNAME` = ANONYMOUS, otherwise PLAIN | `amqp::sasl_profile` |
 
-Consumer errors: five consecutive `next_delivery` failures, or the transport
-out of CONNECTED for `INGEST_MAX_DISCONNECT_SECONDS`, trigger a graceful
-shutdown (the orchestrator restarts the process). Leaving that setting empty
-disables both triggers, and the consumer then reconnects forever.
+Consumer errors: `INGEST_MAX_CONSECUTIVE_FAILURES` (default 5) consecutive
+`next_delivery` failures, or the transport out of CONNECTED for
+`INGEST_MAX_DISCONNECT_SECONDS`, trigger a graceful shutdown (the orchestrator
+restarts the process). The two triggers are independent: empty
+`INGEST_MAX_DISCONNECT_SECONDS` disables the watchdog, `0` disables the
+failure count. Transport retries wait `INGEST_RETRY_BASE_DELAY` seconds
+(default 1), doubling up to `INGEST_RETRY_MAX_DELAY` (default 60, not below the
+base).
+
+Ingest metrics: `ingest_outcomes_total{outcome="accepted"|"failed"|"rejected"}`
+counts transport deliveries and `POST /data/ingest` requests (all three series
+exist at 0 from startup); `ingest_rows_ingested_total` counts rows written.
+Process gauges are named `app_process_*` (`cpu_percent`, `memory_rss_bytes`,
+`num_threads`, `open_files`, `uptime_seconds`).
 
 ## Build & test
 Prerequisites:
@@ -190,7 +200,7 @@ it). It is for development only: CN `localhost`, SANs `localhost`, `app` and
   `Unavailable`. Schema changes are new files in `migrations/`.
 - **An MCP tool.** Add a `#[tool]` method in `src/mcp/tools.rs` that calls
   the same service as the REST endpoint it mirrors, and return
-  `structured(...)`; extend `the_tools_mirror_the_rest_read_endpoints`.
+  `rest_body(&...)` (one text item holding the REST body); extend `the_tools_mirror_the_rest_read_endpoints`.
 
 ## Performance profiling
 See [PERF_PROFILING_RUNBOOK.md](PERF_PROFILING_RUNBOOK.md): Layer 1 (k6 +

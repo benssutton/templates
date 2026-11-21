@@ -125,6 +125,14 @@ async fn call_tool(app: &TestApp, session: &str, name: &str, arguments: Value) -
     call
 }
 
+/// The single text content item of a tool result, parsed as JSON.
+fn text_json(call: &Value) -> Value {
+    let content = call["result"]["content"].as_array().expect("content array");
+    assert_eq!(content.len(), 1, "{call}");
+    assert_eq!(content[0]["type"], "text", "{call}");
+    serde_json::from_str(content[0]["text"].as_str().expect("text")).expect("JSON text")
+}
+
 #[tokio::test]
 async fn the_tools_mirror_the_rest_read_endpoints() {
     let app = TestApp::spawn(app_settings().await).await;
@@ -161,7 +169,8 @@ async fn get_health_status_returns_the_detailed_status() {
     let session = initialize(&app).await;
     let call = call_tool(&app, &session, "get_health_status", json!({})).await;
     assert!(call.get("error").is_none(), "{call}");
-    let status = &call["result"]["structuredContent"];
+    let status = &text_json(&call);
+    assert!(call["result"].get("structuredContent").is_none(), "{call}");
     assert_eq!(status["app"]["status"], "testing", "{call}");
     let deps: Vec<&str> = status["dependencies"]
         .as_array()
@@ -184,7 +193,7 @@ async fn the_data_config_and_cache_tools_call_the_same_services() {
     let session = initialize(&app).await;
 
     let data = call_tool(&app, &session, "get_data", json!({"limit": 2})).await;
-    let page = &data["result"]["structuredContent"];
+    let page = &text_json(&data);
     assert_eq!(page["total"], 3, "{data}");
     assert_eq!(page["limit"], 2, "{data}");
     let ids: Vec<u64> = page["rows"]
@@ -198,23 +207,15 @@ async fn the_data_config_and_cache_tools_call_the_same_services() {
     assert_eq!(ids, sorted, "ordered by id: {data}");
 
     let cached = call_tool(&app, &session, "get_cached_data", json!({})).await;
-    assert_eq!(
-        cached["result"]["structuredContent"]["limit"], 10,
-        "{cached}"
-    );
+    assert_eq!(text_json(&cached)["limit"], 10, "{cached}");
 
     let config = call_tool(&app, &session, "get_config", json!({})).await;
-    assert!(
-        config["result"]["structuredContent"]["entries"].is_array(),
-        "{config}"
-    );
+    let (_, rest_config) = app.get_json("/config").await;
+    assert!(rest_config.is_array(), "{rest_config}");
+    assert_eq!(text_json(&config), rest_config, "bare array: {config}");
 
     let entry = call_tool(&app, &session, "get_cache", json!({"key": key})).await;
-    assert_eq!(
-        entry["result"]["structuredContent"]["value"],
-        json!({"n": 1}),
-        "{entry}"
-    );
+    assert_eq!(text_json(&entry)["value"], json!({"n": 1}), "{entry}");
 
     let missing = call_tool(
         &app,
@@ -223,7 +224,13 @@ async fn the_data_config_and_cache_tools_call_the_same_services() {
         json!({"key": "no-such-key-mcp"}),
     )
     .await;
-    assert!(missing.get("error").is_some(), "{missing}");
+    assert!(missing.get("error").is_none(), "{missing}");
+    assert_eq!(missing["result"]["isError"], true, "{missing}");
+    assert_eq!(
+        text_json(&missing),
+        json!({"detail": "Key 'no-such-key-mcp' not found"}),
+        "{missing}"
+    );
     let bad_limit = call_tool(&app, &session, "get_data", json!({"limit": 0})).await;
     assert!(bad_limit.get("error").is_some(), "{bad_limit}");
 }

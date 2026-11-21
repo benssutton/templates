@@ -50,6 +50,19 @@ async fn settings() -> Settings {
 }
 
 #[tokio::test]
+async fn an_accepted_ingest_is_counted_in_the_outcome_metric() {
+    let app = TestApp::spawn(settings().await).await;
+    let body = serialize_batch(&make_batch(&[(101, "http", "v1", "upsert")]));
+    assert_eq!(post_ipc(&app, body, None).await.status(), 202);
+    let text = app.get("/metrics").await.text().await.unwrap();
+    assert!(
+        text.contains(r#"ingest_outcomes_total{outcome="accepted"} 1"#),
+        "{text}"
+    );
+    assert!(text.contains("ingest_rows_ingested_total 1"), "{text}");
+}
+
+#[tokio::test]
 async fn ingest_accepts_both_arrow_media_types() {
     let app = TestApp::spawn(settings().await).await;
     for content_type in [ARROW_STREAM, "application/octet-stream"] {
