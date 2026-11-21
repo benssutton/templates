@@ -299,6 +299,32 @@ export default function () {
     });
   });
 
+  group('metrics', () => {
+    const r = http.get(`${BASE_URL}/metrics`);
+    const text = r.body || '';
+    const sample = (name) => new RegExp(`^${name}(\\{[^}]*\\})? `, 'm').test(text);
+    const labelled = (name, label, value) =>
+      new RegExp(`^${name}\\{[^}]*${label}="${value}"[^}]*\\} `, 'm').test(text);
+    const required = {
+      'metrics: 200': () => r.status === 200,
+      'metrics: Prometheus text format': () =>
+        (r.headers['Content-Type'] || '').startsWith('text/plain'),
+      'metrics: ingest_rows_ingested_total': () => sample('ingest_rows_ingested_total'),
+      'metrics: ingest_seconds_since_last_batch': () => sample('ingest_seconds_since_last_batch'),
+      'metrics: ingest_connection_state': () => sample('ingest_connection_state'),
+    };
+    for (const dep of ['postgres', 'clickhouse', 'redis']) {
+      required[`metrics: dependency_up{name="${dep}"}`] = () => labelled('dependency_up', 'name', dep);
+      required[`metrics: dependency_check_latency_seconds{name="${dep}"}`] =
+        () => labelled('dependency_check_latency_seconds', 'name', dep);
+    }
+    for (const outcome of ['accepted', 'failed', 'rejected']) {
+      required[`metrics: ingest_outcomes_total{outcome="${outcome}"}`] =
+        () => labelled('ingest_outcomes_total', 'outcome', outcome);
+    }
+    check(null, required);
+  });
+
   group('errors', () => {
     checkError('unknown route', http.get(`${BASE_URL}/no-such-route`), 404);
     const missing = http.get(`${BASE_URL}/cache/contract-missing-${run}`);
