@@ -31,8 +31,8 @@ import java.util.function.BooleanSupplier;
  * Decoded bytes are counted against max-request-size here, inside the decoder: Netty expands
  * everything one network chunk yields before Micronaut's own limit could act, so a small chunk
  * could otherwise grow to hundreds of MB. Past the limit decoding stops (DecodeBudget), the rest is
- * released, not forwarded, and the request fails with 413; memory stays within the limit plus one
- * 64 KiB decoder output chunk.
+ * released, not forwarded, and the request fails with 413; memory stays within the limit plus about
+ * one decoder output chunk (64 KiB for zstd).
  *
  * <p>A corrupt or truncated body fails with 400 (Micronaut's content-decoder-failure path, which
  * also closes the connection); the rest of that body is then dropped. Bodies in any other coding,
@@ -199,10 +199,14 @@ final class ContentCodingHandler extends HttpContentDecoder {
     /** The decoder channel for a zstd or gzip body, or null for any other coding. */
     @Nullable
     static Decoding open(String contentEncoding, long maxBytes, Channel parent) {
+        String coding = contentEncoding.strip().toLowerCase(Locale.ROOT);
+        if (!coding.equals("zstd") && !coding.equals("gzip")) {
+            return null;
+        }
         DecodeBudget budget = new DecodeBudget(maxBytes, parent.config().getAllocator());
         ChannelHandler[] handlers;
         BooleanSupplier complete;
-        switch (contentEncoding.strip().toLowerCase(Locale.ROOT)) {
+        switch (coding) {
             case "zstd" -> {
                 ZstdFrameTracker frames = new ZstdFrameTracker();
                 handlers =
@@ -211,13 +215,10 @@ final class ContentCodingHandler extends HttpContentDecoder {
                         };
                 complete = frames::atFrameBoundary;
             }
-            case "gzip" -> {
+            default -> {
                 SingleMemberGzipDecoder gzip = new SingleMemberGzipDecoder();
                 handlers = new ChannelHandler[] {gzip, budget};
                 complete = gzip::isClosed;
-            }
-            default -> {
-                return null;
             }
         }
         // Its own config rather than the parent's, so the budget can be its allocator.
@@ -235,7 +236,7 @@ final class ContentCodingHandler extends HttpContentDecoder {
      */
     private static final class SingleMemberGzipDecoder extends JdkZlibDecoder {
         SingleMemberGzipDecoder() {
-            super(ZlibWrapper.GZIP, false, 0); // 0: no output cap, forwarded in 64 KiB chunks
+            super(ZlibWrapper.GZIP, false, 0); // 0: no output cap; Netty forwards output as it goes
         }
 
         @Override

@@ -40,7 +40,7 @@ which rejects levels above 9. `core/compression/ContentCodingPipeline` installs 
 Netty handlers after the HTTP codec: `ContentCodingHandler` (decodes zstd/gzip
 request bodies and counts the decoded bytes against max-request-size inside the
 decoder and stops decoding once past it (`DecodeBudget`), so a bomb gets 413 with
-memory bounded by the limit plus one 64 KiB chunk; zstd windows above 8 MiB are refused;
+memory bounded by the limit plus about one decoder output chunk (64 KiB for zstd); zstd windows above 8 MiB are refused;
 truncated bodies, gzip data after the first member and corrupt bodies get 400 and the
 rest of the body is dropped; normalises Accept-Encoding to the single winning coding,
 because Netty's compressor takes zstd whenever it is listed, ignoring q-values) and

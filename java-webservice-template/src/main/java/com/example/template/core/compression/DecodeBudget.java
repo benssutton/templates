@@ -13,7 +13,8 @@ import io.netty.handler.codec.TooLongFrameException;
  * rest. As that channel's allocator it refuses new buffers once past the limit: Netty's decoders
  * expand all the input they are handed in one call (removing them only takes effect afterwards),
  * and a 64 KiB read of RLE-heavy zstd can mean gigabytes of work, so failing their next output
- * buffer is what stops them mid-input.
+ * buffer is what stops them mid-input. The refusal covers allocations made through the decoder
+ * channel's allocator (ctx.alloc()), which is where both decoders get their output buffers.
  */
 final class DecodeBudget extends ChannelInboundHandlerAdapter {
 

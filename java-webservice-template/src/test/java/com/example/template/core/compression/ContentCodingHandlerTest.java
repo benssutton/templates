@@ -13,6 +13,7 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.TooLongFrameException;
+import io.netty.handler.codec.compression.DecompressionException;
 import io.netty.handler.codec.http.DefaultHttpContent;
 import io.netty.handler.codec.http.DefaultHttpRequest;
 import io.netty.handler.codec.http.DefaultLastHttpContent;
@@ -129,6 +130,8 @@ class ContentCodingHandlerTest {
             CompressionFixtures.zstdZeros(50 * MIB), CompressionFixtures.gzipZeros(50 * MIB)
         };
         String[] codings = {"zstd", "gzip"};
+        // zstd emits fixed 64 KiB chunks; gzip's chunk size follows Netty's inflate buffer sizing
+        long[] overshoot = {64 * 1024, 256 * 1024};
         for (int i = 0; i < bombs.length; i++) {
             ContentCodingHandler.Decoding d =
                     ContentCodingHandler.open(codings[i], MIB, new EmbeddedChannel());
@@ -136,10 +139,10 @@ class ContentCodingHandlerTest {
             assertThatThrownBy(() -> d.channel().writeInbound(Unpooled.wrappedBuffer(bomb)))
                     .as(codings[i])
                     .isInstanceOf(DecoderException.class);
-            // one output chunk past the limit at most, not the rest of the 50 MiB
+            // about one output chunk past the limit, not the rest of the 50 MiB
             assertThat(d.budget().decodedBytes())
                     .as(codings[i])
-                    .isLessThanOrEqualTo(MIB + 64 * 1024);
+                    .isLessThanOrEqualTo(MIB + overshoot[i]);
             // closing may report the refused allocation again
             catchThrowable(() -> d.channel().finishAndReleaseAll());
         }
@@ -169,7 +172,10 @@ class ContentCodingHandlerTest {
             z.write(text(1000));
         }
         Conn c = Conn.open(MIB).send(post("zstd"), out.toByteArray(), 8192);
-        assertThat(c.sink.onlyFailure()).isInstanceOf(DecoderException.class);
+        // a malformed-body failure (400), not the size limit (413)
+        assertThat(c.sink.onlyFailure())
+                .isInstanceOf(DecompressionException.class)
+                .isNotInstanceOf(TooLongFrameException.class);
     }
 
     @Test
