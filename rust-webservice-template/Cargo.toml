@@ -81,7 +81,7 @@ thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["full"] }
 tokio-util = "0.7.20"
 tower = { version = "0.5.3", default-features = false, features = ["limit", "load-shed", "util"] }
-tower-http = { version = "0.6.11", features = ["compression-gzip", "cors", "limit", "normalize-path", "request-id", "timeout", "trace", "util"] }
+tower-http = { version = "0.6.11", features = ["compression-gzip", "compression-zstd", "cors", "decompression-gzip", "decompression-zstd", "limit", "map-request-body", "normalize-path", "request-id", "timeout", "trace", "util"] }
 tracing = "0.1.44"
 tracing-opentelemetry = { version = "0.34.0", default-features = false }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
