@@ -84,10 +84,18 @@ class ContentCodingTest {
     @Test
     void exemptPaths() {
         for (String path :
-                List.of("/health/live", "/health/ready", "/metrics", "/mcp", "/mcp/", "/mcp/x")) {
+                List.of(
+                        "/health/live",
+                        "/health/live/",
+                        "/health/ready/",
+                        "/metrics/",
+                        "/mcp",
+                        "/mcp/",
+                        "/mcp/x")) {
             assertThat(ContentCoding.isExempt(path)).as(path).isTrue();
         }
-        for (String path : List.of("/", "/health/status", "/mcpx", "/data", "/metrics/x")) {
+        for (String path :
+                List.of("/", "/health/status", "/mcpx", "/data", "/metrics/x", "/metrics//")) {
             assertThat(ContentCoding.isExempt(path)).as(path).isFalse();
         }
     }

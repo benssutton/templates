@@ -51,6 +51,14 @@ class CompressionStrictTest extends IntegrationSupport {
     }
 
     @Test
+    void strictRefusalComesBeforeAnUnsupportedContentEncoding() throws Exception {
+        HttpResponse<String> r =
+                send("POST", "/", "Accept-Encoding", "gzip", "Content-Encoding", "br");
+        assertThat(r.statusCode()).isEqualTo(406);
+        assertThat(r.body()).isEqualTo("{\"detail\":\"Accept-Encoding must allow zstd\"}");
+    }
+
+    @Test
     void probesMetricsMcpAndPreflightAreExempt() throws Exception {
         for (String path : List.of("/health/live", "/health/ready", "/metrics")) {
             assertThat(send("GET", path, "Accept-Encoding", "identity").statusCode())

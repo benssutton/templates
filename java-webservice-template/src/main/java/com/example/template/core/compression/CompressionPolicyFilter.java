@@ -14,9 +14,9 @@ import io.micronaut.http.annotation.ServerFilter;
 import io.micronaut.http.filter.ServerFilterPhase;
 
 /**
- * 415 for a request body in a coding other than zstd or gzip (ContentCodingHandler has already
- * decoded those and removed their Content-Encoding), and strict mode's 406. Runs ahead of security,
- * so a client without zstd gets 406 rather than 401.
+ * Strict mode's 406, then 415 for a request body in a coding other than zstd or gzip
+ * (ContentCodingHandler has already decoded those and removed their Content-Encoding). Runs ahead
+ * of security, so a client without zstd gets 406 rather than 401.
  */
 @ServerFilter("/**")
 public class CompressionPolicyFilter implements Ordered {
@@ -35,15 +35,7 @@ public class CompressionPolicyFilter implements Ordered {
     @RequestFilter
     @Nullable
     public HttpResponse<?> refuse(HttpRequest<?> request) {
-        String encoding = request.getHeaders().get(HttpHeaders.CONTENT_ENCODING);
-        if (encoding != null
-                && !encoding.isBlank()
-                && !encoding.strip().equalsIgnoreCase("identity")) {
-            return HttpResponse.<ErrorDetail>status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
-                    .header(HttpHeaders.ACCEPT_ENCODING, "zstd, gzip")
-                    .contentType(MediaType.APPLICATION_JSON_TYPE)
-                    .body(new ErrorDetail("Unsupported Content-Encoding"));
-        }
+        // 406 first: a client that cannot read zstd could not read any other answer either.
         if (ContentCoding.strictRefuses(
                 settings.requireZstd(),
                 request.getMethodName(),
@@ -52,6 +44,15 @@ public class CompressionPolicyFilter implements Ordered {
             return HttpResponse.<ErrorDetail>status(HttpStatus.NOT_ACCEPTABLE)
                     .contentType(MediaType.APPLICATION_JSON_TYPE)
                     .body(new ErrorDetail("Accept-Encoding must allow zstd"));
+        }
+        String encoding = request.getHeaders().get(HttpHeaders.CONTENT_ENCODING);
+        if (encoding != null
+                && !encoding.isBlank()
+                && !encoding.strip().equalsIgnoreCase("identity")) {
+            return HttpResponse.<ErrorDetail>status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                    .header(HttpHeaders.ACCEPT_ENCODING, "zstd, gzip")
+                    .contentType(MediaType.APPLICATION_JSON_TYPE)
+                    .body(new ErrorDetail("Unsupported Content-Encoding"));
         }
         return null; // continue the chain
     }

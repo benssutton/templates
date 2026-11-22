@@ -103,8 +103,14 @@ public final class ContentCoding {
         return 1.0;
     }
 
-    /** Routes strict mode leaves alone: orchestrator probes, the scrape, and MCP clients. */
+    /**
+     * Routes strict mode leaves alone: orchestrator probes, the scrape, and MCP clients. One
+     * trailing slash is ignored, so {@code /health/live/} is exempt too.
+     */
     public static boolean isExempt(String path) {
+        if (path.length() > 1 && path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
         return EXEMPT.contains(path) || path.startsWith("/mcp/");
     }
 
