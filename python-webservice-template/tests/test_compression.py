@@ -453,6 +453,7 @@ async def test_unsupported_or_stacked_coding_is_415() -> None:
         )
         assert r.status_code == 415, encoding
         assert r.headers["accept-encoding"] == "zstd, gzip"
+        assert vary(r) == ["accept-encoding"]
         assert raw == b'{"detail": "Unsupported Content-Encoding"}'
 
 
@@ -474,6 +475,7 @@ async def test_undecodable_bodies_are_400() -> None:
         )
         assert r.status_code == 400, data[:12]
         assert raw == b'{"detail": "Malformed compressed request body"}'
+        assert vary(r) == ["accept-encoding"]
 
 
 async def test_decompression_bomb_is_413_without_full_expansion() -> None:
@@ -499,3 +501,21 @@ async def test_compressed_body_over_the_limit_is_413() -> None:
         content=incompressible,
     )
     assert r.status_code == 413
+    assert vary(r) == ["accept-encoding"]
+
+
+async def test_disabled_errors_do_not_vary() -> None:
+    for headers, content, code in (
+        ({"content-encoding": "br"}, BODY, 415),
+        ({"content-encoding": "zstd"}, b"not zstd", 400),
+        ({"content-encoding": "zstd"}, os.urandom(LIMIT * 2), 413),
+    ):
+        r, _ = await send(
+            make_app(enabled=False),
+            "/echo",
+            method="POST",
+            headers=headers,
+            content=content,
+        )
+        assert r.status_code == code
+        assert "vary" not in r.headers

@@ -212,22 +212,25 @@ class CompressionMiddleware:
             return
         encoding = request_headers.get("content-encoding", "").strip().lower()
         if encoding not in ("", "identity"):
+            # These errors are JSON, so a cache must key them on Accept-Encoding
+            # like any other compressible response.
+            vary = [(b"vary", b"Accept-Encoding")] if self.enabled else []
             if encoding not in ("zstd", "gzip"):
                 await _send_error(
                     send,
                     415,
                     "Unsupported Content-Encoding",
-                    [(b"accept-encoding", b"zstd, gzip")],
+                    [(b"accept-encoding", b"zstd, gzip"), *vary],
                 )
                 return
             compressed = await _read(receive, self.max_body_bytes)
             if compressed is None:
-                await _send_error(send, 413, _PAYLOAD_TOO_LARGE)
+                await _send_error(send, 413, _PAYLOAD_TOO_LARGE, vary)
                 return
             try:
                 body = _decompress(encoding, compressed, self.max_body_bytes)
             except _MalformedBody:
-                await _send_error(send, 400, "Malformed compressed request body")
+                await _send_error(send, 400, "Malformed compressed request body", vary)
                 return
             # An over-limit result keeps one extra byte; MaxBodySizeMiddleware,
             # inside this one, answers its 413 from the Content-Length.
