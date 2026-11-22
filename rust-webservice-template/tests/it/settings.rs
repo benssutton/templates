@@ -373,3 +373,53 @@ fn loader_edge_cases() {
     assert!(!s.metrics_enabled);
     assert_eq!(s.mcp_allowed_hosts, ["app", "api:8443"]);
 }
+
+#[test]
+fn compression_defaults() {
+    let s = Settings::default();
+    assert!(s.compression_enabled);
+    assert_eq!(s.compression_min_bytes, 1024);
+    assert_eq!(s.compression_zstd_level, 3);
+    assert!(!s.compression_require_zstd);
+}
+
+#[test]
+fn compression_env_vars_override_defaults() {
+    let s = Settings::from_vars(vars(&[
+        ("COMPRESSION_ENABLED", "true"),
+        ("COMPRESSION_MIN_BYTES", "0"),
+        ("COMPRESSION_ZSTD_LEVEL", "19"),
+        ("COMPRESSION_REQUIRE_ZSTD", "true"),
+    ]))
+    .expect("valid settings");
+    assert_eq!(
+        (
+            s.compression_min_bytes,
+            s.compression_zstd_level,
+            s.compression_require_zstd
+        ),
+        (0, 19, true)
+    );
+}
+
+#[test]
+fn zstd_level_outside_1_to_19_is_refused() {
+    for level in ["0", "20"] {
+        let err = Settings::from_vars(vars(&[("COMPRESSION_ZSTD_LEVEL", level)]))
+            .expect_err("level must be refused");
+        assert!(err.to_string().contains("compression_zstd_level"), "{err}");
+    }
+}
+
+#[test]
+fn strict_mode_needs_compression_enabled() {
+    let err = Settings::from_vars(vars(&[
+        ("COMPRESSION_ENABLED", "false"),
+        ("COMPRESSION_REQUIRE_ZSTD", "true"),
+    ]))
+    .expect_err("contradictory settings must be refused");
+    assert!(
+        err.to_string().contains("compression_require_zstd"),
+        "{err}"
+    );
+}
