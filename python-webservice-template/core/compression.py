@@ -6,13 +6,20 @@ compresses every such response and answers 406 to a client that does not
 accept zstd, except on the probe, metrics and MCP routes, which orchestrators,
 scrapers and MCP SDKs call without zstd support.
 
+A streamed text response is buffered until it reaches min_bytes or ends
+(event streams are exempt). Compression and decompression run inline on the
+event loop, bounded by min_bytes and the request body limit.
+
 Must sit outside MaxBodySizeMiddleware: request bodies are decompressed here,
-so the body limit counts decompressed bytes.
+so the body limit counts decompressed bytes. The 406/415/400/413 answered here
+sit outside the correlation-id, CORS and Server-Timing layers (as the body
+limit's own 413 does), so they carry none of those headers.
 """
 
 import json
 import zlib
 from collections.abc import Iterable
+from typing import Protocol
 
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -26,6 +33,11 @@ _TEXT_TYPES = frozenset({"application/json", "application/xml"})
 
 def _exempt(path: str) -> bool:
     return path in _EXEMPT or path.startswith("/mcp/")
+
+
+def _varies_on_accept_encoding(headers: MutableHeaders) -> bool:
+    values = {v.strip().lower() for v in ",".join(headers.getlist("vary")).split(",")}
+    return "accept-encoding" in values or "*" in values
 
 
 def _compressible(content_type: str) -> bool:
@@ -126,32 +138,38 @@ def _decoded_scope(scope: Scope, length: int) -> Scope:
     return {**scope, "headers": headers}
 
 
-class _Encoder:
+class _Encoder(Protocol):
     """Streaming compressor; chunk() flushes so a streamed response is never held back."""
 
-    def __init__(self, coding: Coding, zstd_level: int) -> None:
-        if coding == "zstd":
-            self._zstd = zstd.ZstdCompressor(level=zstd_level)
-            self._gzip = None
-        else:
-            self._zstd = None
-            self._gzip = zlib.compressobj(wbits=31)  # 31: gzip framing
+    def chunk(self, data: bytes) -> bytes: ...
+
+    def last(self, data: bytes) -> bytes: ...
+
+
+class _ZstdEncoder:
+    def __init__(self, level: int) -> None:
+        self._c = zstd.ZstdCompressor(level=level)
 
     def chunk(self, data: bytes) -> bytes:
-        if self._zstd is not None:
-            return self._zstd.compress(data) + self._zstd.flush(
-                zstd.ZstdCompressor.FLUSH_BLOCK
-            )
-        assert self._gzip is not None
-        return self._gzip.compress(data) + self._gzip.flush(zlib.Z_SYNC_FLUSH)
+        return self._c.compress(data) + self._c.flush(zstd.ZstdCompressor.FLUSH_BLOCK)
 
     def last(self, data: bytes) -> bytes:
-        if self._zstd is not None:
-            return self._zstd.compress(data) + self._zstd.flush(
-                zstd.ZstdCompressor.FLUSH_FRAME
-            )
-        assert self._gzip is not None
-        return self._gzip.compress(data) + self._gzip.flush()
+        return self._c.compress(data) + self._c.flush(zstd.ZstdCompressor.FLUSH_FRAME)
+
+
+class _GzipEncoder:
+    def __init__(self) -> None:
+        self._c = zlib.compressobj(wbits=31)  # 31: gzip framing
+
+    def chunk(self, data: bytes) -> bytes:
+        return self._c.compress(data) + self._c.flush(zlib.Z_SYNC_FLUSH)
+
+    def last(self, data: bytes) -> bytes:
+        return self._c.compress(data) + self._c.flush()
+
+
+def _encoder(coding: Coding, zstd_level: int) -> _Encoder:
+    return _ZstdEncoder(zstd_level) if coding == "zstd" else _GzipEncoder()
 
 
 class CompressionMiddleware:
@@ -168,6 +186,7 @@ class CompressionMiddleware:
         self.app = app
         self.max_body_bytes = max_body_bytes
         self.enabled = enabled
+        # Strict mode compresses at any size; empty bodies are still left alone.
         self.min_bytes = 0 if require_zstd else min_bytes
         self.zstd_level = zstd_level
         self.require_zstd = require_zstd
@@ -176,16 +195,22 @@ class CompressionMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        accept = Headers(scope=scope).get("accept-encoding")
+        request_headers = Headers(scope=scope)
+        accept = request_headers.get("accept-encoding")
         if (
             self.require_zstd
             and scope["method"] != "OPTIONS"
             and not _exempt(scope["path"])
             and not accepts_zstd(accept)
         ):
-            await _send_error(send, 406, "Accept-Encoding must allow zstd")
+            await _send_error(
+                send,
+                406,
+                "Accept-Encoding must allow zstd",
+                [(b"vary", b"Accept-Encoding")],
+            )
             return
-        encoding = Headers(scope=scope).get("content-encoding", "").strip().lower()
+        encoding = request_headers.get("content-encoding", "").strip().lower()
         if encoding not in ("", "identity"):
             if encoding not in ("zstd", "gzip"):
                 await _send_error(
@@ -227,25 +252,43 @@ class CompressionMiddleware:
         async def wrapped(message: Message) -> None:
             nonlocal start, passthrough, encoder, size
             if message["type"] == "http.response.start":
-                headers = MutableHeaders(raw=list(message["headers"]))
+                headers = MutableHeaders(raw=list(message.get("headers", [])))
                 if not _compressible(headers.get("content-type", "")):
                     passthrough = True
                     await send(message)
                     return
-                headers.add_vary_header("Accept-Encoding")
+                if not _varies_on_accept_encoding(headers):
+                    headers.add_vary_header("Accept-Encoding")
                 message = {**message, "headers": headers.raw}
                 if (
                     coding is None
                     or scope["method"] == "HEAD"
-                    or message["status"] in (204, 304)
+                    or message["status"] in (204, 206, 304)
                     or "content-encoding" in headers
+                    or "content-range" in headers
                 ):
                     passthrough = True
                     await send(message)
                     return
                 start = message
                 return
-            if passthrough or start is None or message["type"] != "http.response.body":
+            if passthrough or start is None:
+                await send(message)
+                return
+            if message["type"] != "http.response.body":
+                if encoder is None:
+                    # pathsend, trailers, ...: the held start (and any body held
+                    # with it) must go out first, uncompressed.
+                    passthrough = True
+                    await send(start)
+                    if size:
+                        await send(
+                            {
+                                "type": "http.response.body",
+                                "body": b"".join(buffered),
+                                "more_body": True,
+                            }
+                        )
                 await send(message)
                 return
             body: bytes = message.get("body", b"")
@@ -256,13 +299,14 @@ class CompressionMiddleware:
                 # Nothing to compress yet; an empty body stays empty even in strict mode.
                 if size < self.min_bytes or size == 0:
                     if not more:
+                        passthrough = True
                         await send(start)
                         await send(
                             {"type": "http.response.body", "body": b"".join(buffered)}
                         )
                     return
                 assert coding is not None
-                encoder = _Encoder(coding, self.zstd_level)
+                encoder = _encoder(coding, self.zstd_level)
                 headers = MutableHeaders(raw=start["headers"])
                 headers["content-encoding"] = coding
                 del headers["content-length"]

@@ -11,6 +11,7 @@ from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
+from starlette.types import Message, Receive, Scope, Send
 
 from core.compression import CompressionMiddleware
 from core.request_limits import MaxBodySizeMiddleware
@@ -50,6 +51,23 @@ async def binary(_: Request) -> Response:
 async def with_vary(_: Request) -> Response:
     return Response(
         payload(2000), media_type="application/json", headers={"Vary": "Origin"}
+    )
+
+
+async def already_varies(_: Request) -> Response:
+    return Response(
+        payload(2000),
+        media_type="application/json",
+        headers={"Vary": "Origin, accept-encoding"},
+    )
+
+
+async def partial(_: Request) -> Response:
+    return Response(
+        payload(2000),
+        status_code=206,
+        media_type="text/plain",
+        headers={"Content-Range": "bytes 0-1999/4000"},
     )
 
 
@@ -95,6 +113,8 @@ def make_app(**options: Any) -> Starlette:
             Route("/sse", sse),
             Route("/binary", binary),
             Route("/vary", with_vary),
+            Route("/already-varies", already_varies),
+            Route("/partial", partial),
             Route("/status/{code:int}", status),
             Route("/pre-encoded", pre_encoded),
             Route("/empty", empty),
@@ -214,6 +234,79 @@ async def test_vary_is_merged_with_an_existing_value() -> None:
     assert vary(r) == ["origin", "accept-encoding"]
 
 
+async def test_vary_already_naming_accept_encoding_is_not_repeated() -> None:
+    r, _ = await send(make_app(), "/already-varies", accept="zstd")
+    assert vary(r) == ["origin", "accept-encoding"]
+
+
+async def test_partial_content_is_never_compressed() -> None:
+    r, raw = await send(make_app(), "/partial", accept="zstd")
+    assert r.status_code == 206
+    assert "content-encoding" not in r.headers
+    assert raw == payload(2000)
+
+
+async def call_raw(messages: list[Message]) -> list[Message]:
+    """Drive the middleware directly with an app that sends `messages`; returns
+    what reaches the server's send."""
+
+    async def app(_: Scope, __: Receive, send: Send) -> None:
+        for message in messages:
+            await send(message)
+
+    async def receive() -> Message:
+        return {"type": "http.disconnect"}
+
+    sent: list[Message] = []
+
+    async def record(message: Message) -> None:
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/file",
+        "headers": [(b"accept-encoding", b"zstd")],
+    }
+    await CompressionMiddleware(app, max_body_bytes=LIMIT)(scope, receive, record)
+    return sent
+
+
+TEXT_START: Message = {
+    "type": "http.response.start",
+    "status": 200,
+    "headers": [(b"content-type", b"text/plain")],
+}
+
+
+async def test_held_start_goes_out_before_a_non_body_message() -> None:
+    sent = await call_raw(
+        [TEXT_START, {"type": "http.response.pathsend", "path": "/srv/big.txt"}]
+    )
+    assert [m["type"] for m in sent] == [
+        "http.response.start",
+        "http.response.pathsend",
+    ]
+    headers = dict(sent[0]["headers"])
+    assert b"content-encoding" not in headers
+    assert headers[b"vary"] == b"Accept-Encoding"
+
+
+async def test_trailers_after_a_small_body_do_not_repeat_the_start() -> None:
+    sent = await call_raw(
+        [
+            TEXT_START,
+            {"type": "http.response.body", "body": b"short"},
+            {"type": "http.response.trailers", "headers": [], "more_trailers": False},
+        ]
+    )
+    assert [m["type"] for m in sent] == [
+        "http.response.start",
+        "http.response.body",
+        "http.response.trailers",
+    ]
+
+
 async def test_disabled_sends_identity() -> None:
     r, raw = await send(make_app(enabled=False), "/sized/2000", accept="zstd")
     assert "content-encoding" not in r.headers and raw == payload(2000)
@@ -232,6 +325,7 @@ async def test_strict_mode_refuses_clients_without_zstd() -> None:
         assert r.status_code == 406, accept
         assert r.headers["content-type"] == "application/json"
         assert "content-encoding" not in r.headers
+        assert vary(r) == ["accept-encoding"]
         assert raw == b'{"detail": "Accept-Encoding must allow zstd"}'
 
 
