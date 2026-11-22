@@ -1,7 +1,6 @@
 package com.example.template.core.compression;
 
 import io.micronaut.core.annotation.Nullable;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -25,17 +24,17 @@ public final class ContentCoding {
             return zstd > 0;
         }
 
-        /** An explicit list for the compressor, or null when neither coding is acceptable. */
+        /**
+         * The one coding to answer with, as an explicit Accept-Encoding value, or null when neither
+         * is acceptable. Only the winner is listed because Netty's compressor takes zstd whenever
+         * it is listed, ignoring q-values; zstd wins ties.
+         */
         @Nullable
         public String header() {
-            List<String> parts = new ArrayList<>(2);
-            if (zstd > 0) {
-                parts.add(String.format(Locale.ROOT, "zstd;q=%.3f", zstd));
+            if (zstd > 0 && zstd >= gzip) {
+                return String.format(Locale.ROOT, "zstd;q=%.3f", zstd);
             }
-            if (gzip > 0) {
-                parts.add(String.format(Locale.ROOT, "gzip;q=%.3f", gzip));
-            }
-            return parts.isEmpty() ? null : String.join(", ", parts);
+            return gzip > 0 ? String.format(Locale.ROOT, "gzip;q=%.3f", gzip) : null;
         }
     }
 

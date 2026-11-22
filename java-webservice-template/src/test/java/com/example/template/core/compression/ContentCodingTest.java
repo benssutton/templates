@@ -49,9 +49,10 @@ class ContentCodingTest {
     }
 
     @Test
-    void canonicalHeaderListsOnlyAcceptableCodings() {
-        assertThat(new ContentCoding.Weights(1.0, 0.5).header())
-                .isEqualTo("zstd;q=1.000, gzip;q=0.500");
+    void canonicalHeaderNamesOnlyTheWinningCoding() {
+        assertThat(new ContentCoding.Weights(1.0, 0.5).header()).isEqualTo("zstd;q=1.000");
+        assertThat(new ContentCoding.Weights(1.0, 1.0).header()).isEqualTo("zstd;q=1.000");
+        assertThat(new ContentCoding.Weights(0.5, 1.0).header()).isEqualTo("gzip;q=1.000");
         assertThat(new ContentCoding.Weights(0.0, 1.0).header()).isEqualTo("gzip;q=1.000");
         assertThat(new ContentCoding.Weights(0.0, 0.0).header()).isNull();
     }
