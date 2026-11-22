@@ -6,11 +6,11 @@
 // paths, status codes, snake_case field names, the {"detail"} error body, ingest
 // media types, the merged /data/cache view, the MCP tools and their REST-identical
 // results, the shared metric names, the X-Request-ID rule and content coding (zstd
-// preferred, gzip fallback, 415 for other request codings). k6's transport adds
-// Accept-Encoding: gzip when a request sets none, so the missing-header case and
-// strict mode (COMPRESSION_REQUIRE_ZSTD) are pinned by each service's own suite. Env var names are
-// pinned by tests/cicd/test_env_contract.py. Service-specific extras (for example
-// stream-store statistics under /health/status ingest) are allowed.
+// preferred, gzip fallback, 415 for other request codings). k6 adds its own
+// Accept-Encoding when a request sets none, so the missing-header case and strict
+// mode (COMPRESSION_REQUIRE_ZSTD) are pinned by each service's own suite. Env var
+// names are pinned by tests/cicd/test_env_contract.py. Service-specific extras (for
+// example stream-store statistics under /health/status ingest) are allowed.
 //
 // 401 (auth is off by default), 500 and 503 need a configured or broken stack,
 // so each service pins those in its own test suite.
@@ -379,27 +379,29 @@ export default function () {
   group('compression', () => {
     const key = `contract-compression-${run}`;
     const big = 'x'.repeat(4096);
-    http.post(`${BASE_URL}/cache`, JSON.stringify({ key, value: big }), { headers: JSON_HEADERS });
-    const fetch = (accept) =>
+    const seeded = http.post(`${BASE_URL}/cache`, JSON.stringify({ key, value: big }),
+      { headers: JSON_HEADERS });
+    check(seeded, { 'compression: seed cache entry': (r) => r.status === 201 });
+    const getWith = (accept) =>
       http.get(`${BASE_URL}/cache/${key}`, { headers: { 'Accept-Encoding': accept } });
     const coding = (r) => r.headers['Content-Encoding'] || '';
     const varies = (r) => [].concat(r.headers['Vary'] || []).join(',').toLowerCase()
       .split(',').map((v) => v.trim()).includes('accept-encoding');
     const intact = (r) => r.status === 200 && (body(r) || {}).value === big;
 
-    check(fetch('gzip, zstd'), {
+    check(getWith('gzip, zstd'), {
       'compression: zstd preferred': (r) => coding(r) === 'zstd',
       'compression: zstd body decodes': intact,
       'compression: Vary: Accept-Encoding': varies,
     });
-    check(fetch('gzip'), {
+    check(getWith('gzip'), {
       'compression: gzip fallback': (r) => coding(r) === 'gzip',
       'compression: gzip body decodes': intact,
     });
-    check(fetch('zstd;q=0.5, gzip'), {
+    check(getWith('zstd;q=0.5, gzip'), {
       'compression: q-values honoured': (r) => coding(r) === 'gzip',
     });
-    check(fetch('identity'), {
+    check(getWith('identity'), {
       'compression: identity is uncompressed': (r) => coding(r) === '' && intact(r),
       'compression: identity still varies': varies,
     });
