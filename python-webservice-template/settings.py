@@ -109,6 +109,18 @@ class Settings(BaseSettings):
     # Over-limit stream batch -> dropped+logged.
     max_ingest_batch_bytes: int = 16 * 1024 * 1024
 
+    # Response compression: zstd preferred, gzip fallback, chosen from the
+    # request's Accept-Encoding. zstd and gzip request bodies are always accepted.
+    compression_enabled: bool = True
+    # Smaller responses go uncompressed: under one TCP segment, compressing saves
+    # bytes but no round trips. Ignored in strict mode.
+    compression_min_bytes: int = Field(default=1024, ge=0)
+    # Server-side only: high levels cost far more CPU for little gain.
+    compression_zstd_level: int = Field(default=3, ge=1, le=19)
+    # True: 406 for clients whose Accept-Encoding does not allow zstd, except on
+    # /health/live, /health/ready, /metrics and /mcp.
+    compression_require_zstd: bool = False
+
     # Correlation ID header name (inbound adoption + response echo).
     correlation_id_header: str = "X-Request-ID"
 
@@ -139,6 +151,14 @@ class Settings(BaseSettings):
             self.auth_jwt_secret and self.auth_jwt_secret.get_secret_value()
         ):
             raise ValueError("auth_enabled=True requires auth_jwt_secret")
+        return self
+
+    @model_validator(mode="after")
+    def _strict_needs_compression(self) -> "Settings":
+        if self.compression_require_zstd and not self.compression_enabled:
+            raise ValueError(
+                "compression_require_zstd=True requires compression_enabled=True"
+            )
         return self
 
     @model_validator(mode="after")
