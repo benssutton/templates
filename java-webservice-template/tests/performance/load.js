@@ -5,6 +5,8 @@ import { checkStatus200, checkDataRows } from './lib/checks.js';
 import { NORMAL_SLO, STRICT_SLO } from './lib/thresholds.js';
 
 const BASE_URL = __ENV.BASE_URL || 'https://localhost';
+// Real clients accept zstd, so load figures include compression cost.
+const PARAMS = { headers: { 'Accept-Encoding': 'zstd, gzip' } };
 
 const rowParams = new SharedArray('rowParams', function () {
   return JSON.parse(open('./data/rows_params.json'));
@@ -41,14 +43,14 @@ export const options = {
 export function browseData() {
   const p = rowParams[Math.floor(Math.random() * rowParams.length)];
   group('data', () => {
-    checkDataRows(http.get(`${BASE_URL}/data?limit=${p.limit}`));
+    checkDataRows(http.get(`${BASE_URL}/data?limit=${p.limit}`, PARAMS));
   });
   sleep(1);
 }
 
 export function healthPoll() {
   group('health', () => {
-    checkStatus200(http.get(`${BASE_URL}/health/status`));
+    checkStatus200(http.get(`${BASE_URL}/health/status`, PARAMS));
   });
   sleep(1);
 }
