@@ -5,7 +5,6 @@ import com.example.template.dto.ErrorDetail;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.order.Ordered;
 import io.micronaut.http.HttpHeaders;
-import io.micronaut.http.HttpMethod;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpResponse;
 import io.micronaut.http.HttpStatus;
@@ -45,11 +44,11 @@ public class CompressionPolicyFilter implements Ordered {
                     .contentType(MediaType.APPLICATION_JSON_TYPE)
                     .body(new ErrorDetail("Unsupported Content-Encoding"));
         }
-        if (settings.requireZstd()
-                && request.getMethod() != HttpMethod.OPTIONS
-                && !ContentCoding.isExempt(request.getPath())
-                && !ContentCoding.acceptsZstd(
-                        request.getHeaders().getAll(HttpHeaders.ACCEPT_ENCODING))) {
+        if (ContentCoding.strictRefuses(
+                settings.requireZstd(),
+                request.getMethodName(),
+                ContentCoding.path(request.getUri().toString()),
+                ContentCoding.parse(request.getHeaders().getAll(HttpHeaders.ACCEPT_ENCODING)))) {
             return HttpResponse.<ErrorDetail>status(HttpStatus.NOT_ACCEPTABLE)
                     .contentType(MediaType.APPLICATION_JSON_TYPE)
                     .body(new ErrorDetail("Accept-Encoding must allow zstd"));

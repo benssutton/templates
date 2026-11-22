@@ -15,7 +15,6 @@ class ContentCodingTest {
     @Test
     void missingHeaderIsNull() {
         assertThat(ContentCoding.parse(List.of())).isNull();
-        assertThat(ContentCoding.acceptsZstd(List.of())).isFalse();
     }
 
     @Test
@@ -50,18 +49,36 @@ class ContentCodingTest {
 
     @Test
     void canonicalHeaderNamesOnlyTheWinningCoding() {
-        assertThat(new ContentCoding.Weights(1.0, 0.5).header()).isEqualTo("zstd");
-        assertThat(new ContentCoding.Weights(1.0, 1.0).header()).isEqualTo("zstd");
-        assertThat(new ContentCoding.Weights(0.5, 1.0).header()).isEqualTo("gzip");
-        assertThat(new ContentCoding.Weights(0.0, 1.0).header()).isEqualTo("gzip");
-        assertThat(new ContentCoding.Weights(0.0, 0.0).header()).isNull();
+        assertThat(new ContentCoding.Weights(1.0, 0.5).winningCoding()).isEqualTo("zstd");
+        assertThat(new ContentCoding.Weights(1.0, 1.0).winningCoding()).isEqualTo("zstd");
+        assertThat(new ContentCoding.Weights(0.5, 1.0).winningCoding()).isEqualTo("gzip");
+        assertThat(new ContentCoding.Weights(0.0, 1.0).winningCoding()).isEqualTo("gzip");
+        assertThat(new ContentCoding.Weights(0.0, 0.0).winningCoding()).isNull();
     }
 
     @Test
     void anyPositiveQValueIsAcceptableInTheHeader() {
-        assertThat(parse("zstd;q=0.0001").header()).isEqualTo("zstd");
-        assertThat(parse("gzip;q=0.0001").header()).isEqualTo("gzip");
-        assertThat(parse("zstd;q=0.0001, gzip;q=0.0002").header()).isEqualTo("gzip");
+        assertThat(parse("zstd;q=0.0001").winningCoding()).isEqualTo("zstd");
+        assertThat(parse("gzip;q=0.0001").winningCoding()).isEqualTo("gzip");
+        assertThat(parse("zstd;q=0.0001, gzip;q=0.0002").winningCoding()).isEqualTo("gzip");
+    }
+
+    @Test
+    void strictModeRefusesOnlyNonExemptRequestsWithoutZstd() {
+        ContentCoding.Weights gzip = new ContentCoding.Weights(0.0, 1.0);
+        ContentCoding.Weights zstd = new ContentCoding.Weights(1.0, 0.0);
+        assertThat(ContentCoding.strictRefuses(true, "GET", "/", gzip)).isTrue();
+        assertThat(ContentCoding.strictRefuses(true, "GET", "/", null)).isTrue();
+        assertThat(ContentCoding.strictRefuses(true, "GET", "/", zstd)).isFalse();
+        assertThat(ContentCoding.strictRefuses(false, "GET", "/", gzip)).isFalse();
+        assertThat(ContentCoding.strictRefuses(true, "OPTIONS", "/", gzip)).isFalse();
+        assertThat(ContentCoding.strictRefuses(true, "GET", "/metrics", gzip)).isFalse();
+    }
+
+    @Test
+    void pathDropsTheQueryAndDecodes() {
+        assertThat(ContentCoding.path("/metrics?x=1")).isEqualTo("/metrics");
+        assertThat(ContentCoding.path("/mc%70")).isEqualTo("/mcp");
     }
 
     @Test

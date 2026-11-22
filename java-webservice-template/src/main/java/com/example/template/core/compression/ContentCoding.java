@@ -1,6 +1,7 @@
 package com.example.template.core.compression;
 
 import io.micronaut.core.annotation.Nullable;
+import io.netty.handler.codec.http.QueryStringDecoder;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -31,7 +32,7 @@ public final class ContentCoding {
          * acceptable, and a rounded one could print as q=0.
          */
         @Nullable
-        public String header() {
+        public String winningCoding() {
             if (zstd > 0 && zstd >= gzip) {
                 return "zstd";
             }
@@ -70,9 +71,21 @@ public final class ContentCoding {
         return new Weights(zstd == null ? fallback : zstd, gzip == null ? fallback : gzip);
     }
 
-    public static boolean acceptsZstd(List<String> acceptEncoding) {
-        Weights w = parse(acceptEncoding);
-        return w != null && w.acceptsZstd();
+    /**
+     * Strict mode's refusal, shared by the Netty handler and the filter so both decide alike:
+     * anything but a preflight or an exempt route needs an Accept-Encoding that allows zstd.
+     */
+    public static boolean strictRefuses(
+            boolean requireZstd, String method, String path, @Nullable Weights weights) {
+        return requireZstd
+                && !method.equals("OPTIONS")
+                && !isExempt(path)
+                && (weights == null || !weights.acceptsZstd());
+    }
+
+    /** The decoded path of a request target, computed one way for every caller. */
+    public static String path(String requestTarget) {
+        return new QueryStringDecoder(requestTarget).path();
     }
 
     private static double q(String params) {

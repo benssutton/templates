@@ -25,7 +25,6 @@ class CompressionDisabledTest extends IntegrationSupport {
 
     @Test
     void largeResponsesAreIdentityEvenWhenZstdIsAccepted() throws Exception {
-        // CompressionTest's test controller is a bean in every test context
         HttpResponse<String> r =
                 http.send(
                         HttpRequest.newBuilder(server.getURI().resolve("/__compression/sized/4096"))
@@ -34,7 +33,7 @@ class CompressionDisabledTest extends IntegrationSupport {
                         HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         assertThat(r.statusCode()).isEqualTo(200);
         assertThat(r.headers().firstValue("Content-Encoding")).isEmpty();
-        assertThat(r.body()).isEqualTo(CompressionTest.payload(4096));
+        assertThat(r.body()).isEqualTo(CompressionFixtures.payload(4096));
     }
 
     @Test

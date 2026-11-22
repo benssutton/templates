@@ -38,12 +38,15 @@ src/test/.../publisher/  ExampleSolacePublisher (compose demo; Dockerfile target
 `request-decompression-enabled: false`): its single level would also be fed to gzip,
 which rejects levels above 9. `core/compression/ContentCodingPipeline` installs two
 Netty handlers after the HTTP codec: `ContentCodingHandler` (decodes zstd/gzip
-request bodies, so max-request-size counts decompressed bytes; normalises
-Accept-Encoding to the single winning coding, because Netty's compressor takes zstd
-whenever it is listed, ignoring q-values) and `ZstdContentCompressor` (zstd/gzip
-responses, Vary). `CompressionPolicyFilter` answers 415 and strict mode's 406.
-`ContentCoding` holds the parsing rules; change them there only. The handlers assume
-HTTP/1.1.
+request bodies and counts the decoded bytes against max-request-size inside the
+decoder, so a bomb gets 413 with memory bounded by the limit plus one 64 KiB chunk;
+truncated bodies, gzip data after the first member and corrupt bodies get 400 and the
+rest of the body is dropped; normalises Accept-Encoding to the single winning coding,
+because Netty's compressor takes zstd whenever it is listed, ignoring q-values) and
+`ZstdContentCompressor` (zstd/gzip responses, Vary). `CompressionPolicyFilter`
+answers 415 and strict mode's 406. `ContentCoding` holds the parsing rules and the
+strict-mode decision; change them there only. Startup fails if zstd-jni cannot load.
+The handlers assume HTTP/1.1.
 
 ## Gotchas
 - Always `./mvnw clean ...` after editing sources: incremental compile breaks on Windows

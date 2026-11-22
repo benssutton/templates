@@ -1,6 +1,5 @@
 package com.example.template.core.compression;
 
-import com.example.template.config.CompressionSettings;
 import io.netty.handler.codec.compression.StandardCompressionOptions;
 import io.netty.handler.codec.compression.ZstdOptions;
 import io.netty.handler.codec.http.HttpContent;
@@ -10,6 +9,7 @@ import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpUtil;
+import java.util.Arrays;
 
 /**
  * Outbound: zstd at the configured level, gzip at Netty's default, chosen from the (normalised)
@@ -20,20 +20,13 @@ final class ZstdContentCompressor extends HttpContentCompressor {
 
     private final long minBytes;
 
-    ZstdContentCompressor(CompressionSettings settings) {
-        super(
-                (int) Math.min(settings.effectiveMinBytes(), Integer.MAX_VALUE),
-                zstd(settings.zstdLevel()),
-                StandardCompressionOptions.gzip());
-        this.minBytes = settings.effectiveMinBytes();
+    ZstdContentCompressor(long minBytes, ZstdOptions zstd) {
+        super((int) Math.min(minBytes, Integer.MAX_VALUE), zstd, StandardCompressionOptions.gzip());
+        this.minBytes = minBytes;
     }
 
-    private static ZstdOptions zstd(int level) {
-        ZstdOptions defaults = StandardCompressionOptions.zstd();
-        return StandardCompressionOptions.zstd(
-                level, defaults.blockSize(), defaults.maxEncodeSize());
-    }
-
+    // Netty passes HEAD, 204, 304 and already-encoded responses through before calling this, so
+    // those get no Vary.
     @Override
     protected Result beginEncode(HttpResponse response, String acceptEncoding) throws Exception {
         HttpHeaders headers = response.headers();
@@ -58,7 +51,7 @@ final class ZstdContentCompressor extends HttpContentCompressor {
 
     private static boolean varies(HttpHeaders headers) {
         return headers.getAll(HttpHeaderNames.VARY).stream()
-                .flatMap(v -> java.util.Arrays.stream(v.split(",")))
+                .flatMap(v -> Arrays.stream(v.split(",")))
                 .anyMatch(v -> v.strip().equalsIgnoreCase("accept-encoding"));
     }
 }

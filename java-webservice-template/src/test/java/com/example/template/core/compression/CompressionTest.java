@@ -9,28 +9,19 @@ import com.github.luben.zstd.Zstd;
 import com.github.luben.zstd.ZstdInputStream;
 import io.micronaut.context.annotation.Property;
 import io.micronaut.core.annotation.Nullable;
-import io.micronaut.core.async.publisher.Publishers;
-import io.micronaut.http.MediaType;
-import io.micronaut.http.annotation.Body;
-import io.micronaut.http.annotation.Controller;
-import io.micronaut.http.annotation.Get;
-import io.micronaut.http.annotation.Post;
-import io.micronaut.http.sse.Event;
 import io.micronaut.runtime.server.EmbeddedServer;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import jakarta.inject.Inject;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.zip.GZIPInputStream;
-import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.Test;
-import org.reactivestreams.Publisher;
 
 /**
  * Content coding through the real server. java.net.http sends no Accept-Encoding of its own and
@@ -39,36 +30,6 @@ import org.reactivestreams.Publisher;
 @MicronautTest
 @Property(name = "micronaut.server.max-request-size", value = "1024")
 class CompressionTest extends IntegrationSupport {
-
-    static String payload(int n) {
-        return "{\"x\":\"" + "a".repeat(n - 8) + "\"}";
-    }
-
-    @Controller("/__compression")
-    static class Payloads {
-        @Get(value = "/sized/{n}", produces = MediaType.APPLICATION_JSON)
-        String sized(int n) {
-            return payload(n);
-        }
-
-        @Get(value = "/events", produces = MediaType.TEXT_EVENT_STREAM)
-        Publisher<Event<String>> events() {
-            return Publishers.just(Event.of("a".repeat(2000)));
-        }
-
-        @Get(value = "/binary", produces = MediaType.APPLICATION_OCTET_STREAM)
-        byte[] binary() {
-            return new byte[4096];
-        }
-
-        @Post(
-                value = "/echo",
-                consumes = MediaType.TEXT_PLAIN,
-                produces = MediaType.APPLICATION_OCTET_STREAM)
-        byte[] echo(@Body String body) {
-            return body.getBytes(StandardCharsets.UTF_8);
-        }
-    }
 
     @Inject EmbeddedServer server;
 
@@ -108,7 +69,7 @@ class CompressionTest extends IntegrationSupport {
 
     static boolean varies(HttpResponse<?> r) {
         return r.headers().allValues("Vary").stream()
-                .flatMap(v -> List.of(v.split(",")).stream())
+                .flatMap(v -> Arrays.stream(v.split(",")))
                 .anyMatch(v -> v.strip().equalsIgnoreCase("accept-encoding"));
     }
 
@@ -124,14 +85,6 @@ class CompressionTest extends IntegrationSupport {
         }
     }
 
-    static byte[] gzip(byte[] data) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        try (GZIPOutputStream gz = new GZIPOutputStream(out)) {
-            gz.write(data);
-        }
-        return out.toByteArray();
-    }
-
     static String utf8(byte[] b) {
         return new String(b, StandardCharsets.UTF_8);
     }
@@ -141,11 +94,11 @@ class CompressionTest extends IntegrationSupport {
         HttpResponse<byte[]> z = get("/__compression/sized/2000", "gzip, zstd");
         assertThat(encoding(z)).isEqualTo("zstd");
         assertThat(varies(z)).isTrue();
-        assertThat(utf8(unzstd(z.body()))).isEqualTo(payload(2000));
+        assertThat(utf8(unzstd(z.body()))).isEqualTo(CompressionFixtures.payload(2000));
 
         HttpResponse<byte[]> g = get("/__compression/sized/2000", "gzip");
         assertThat(encoding(g)).isEqualTo("gzip");
-        assertThat(utf8(gunzip(g.body()))).isEqualTo(payload(2000));
+        assertThat(utf8(gunzip(g.body()))).isEqualTo(CompressionFixtures.payload(2000));
     }
 
     @Test
@@ -186,7 +139,7 @@ class CompressionTest extends IntegrationSupport {
         byte[] body = "hello world".repeat(20).getBytes(StandardCharsets.UTF_8);
         Object[][] cases = {
             {"zstd", Zstd.compress(body, 3)},
-            {"gzip", gzip(body)},
+            {"gzip", CompressionFixtures.gzip(body)},
             {"ZSTD", Zstd.compress(body, 3)},
             {"identity", body},
         };
@@ -216,6 +169,62 @@ class CompressionTest extends IntegrationSupport {
         assertThat(bomb.length).isLessThan(1024);
         HttpResponse<byte[]> r = post("/__compression/echo", "text/plain", "zstd", bomb);
         assertThat(r.statusCode()).isEqualTo(413);
+    }
+
+    @Test
+    void aHighRatioBombIs413() throws Exception {
+        byte[] bomb = CompressionFixtures.zstdZeros(200L << 20);
+        HttpResponse<byte[]> r = post("/__compression/echo", "text/plain", "zstd", bomb);
+        assertThat(r.statusCode()).isEqualTo(413);
+    }
+
+    @Test
+    void truncatedBodiesAre400() throws Exception {
+        byte[] body = "hello world".repeat(50).getBytes(StandardCharsets.UTF_8);
+        Object[][] cases = {
+            {"zstd", Zstd.compress(body, 3)}, {"gzip", CompressionFixtures.gzip(body)},
+        };
+        for (Object[] c : cases) {
+            byte[] whole = (byte[]) c[1];
+            for (int cut : new int[] {1, 5, whole.length / 2}) {
+                byte[] truncated = Arrays.copyOf(whole, whole.length - cut);
+                HttpResponse<byte[]> r =
+                        post("/__compression/echo", "text/plain", (String) c[0], truncated);
+                assertThat(r.statusCode()).as(c[0] + " minus " + cut).isEqualTo(400);
+            }
+        }
+    }
+
+    @Test
+    void aStreamedCorruptBodyGetsOne400() throws Exception {
+        byte[] garbage = "not gzip ".repeat(8000).getBytes(StandardCharsets.UTF_8);
+        HttpRequest request =
+                HttpRequest.newBuilder(server.getURI().resolve("/__compression/echo"))
+                        .header("Content-Type", "text/plain")
+                        .header("Content-Encoding", "gzip")
+                        .POST(
+                                HttpRequest.BodyPublishers.ofInputStream(
+                                        () -> new ByteArrayInputStream(garbage)))
+                        .build();
+        HttpResponse<byte[]> r = http.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        assertThat(r.statusCode()).isEqualTo(400);
+        assertThat(utf8(r.body())).matches("\\{\"detail\":\".+\"}");
+    }
+
+    @Test
+    void contentEncodingLinesAreCombined() throws Exception {
+        HttpRequest request =
+                HttpRequest.newBuilder(server.getURI().resolve("/__compression/echo"))
+                        .header("Content-Type", "text/plain")
+                        .header("Content-Encoding", "gzip")
+                        .header("Content-Encoding", "zstd")
+                        .POST(
+                                HttpRequest.BodyPublishers.ofByteArray(
+                                        CompressionFixtures.gzip(
+                                                "hello".getBytes(StandardCharsets.UTF_8))))
+                        .build();
+        HttpResponse<byte[]> r = http.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        assertThat(r.statusCode()).isEqualTo(415);
     }
 
     @Test
