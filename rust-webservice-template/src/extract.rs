@@ -80,17 +80,21 @@ fn bytes_rejection(rejection: BytesRejection, compressed: bool) -> AppError {
     }
 }
 
-/// The decoders raise an `io::Error`: `Other` for corrupt zstd or deflate
-/// data, `InvalidData` for a bad gzip header or trailer, `UnexpectedEof` for
-/// a truncated stream. Errors from the connection reach here as their own
-/// type, so an io cause found under them carries a connection kind instead.
-/// `UnexpectedEof` also counts because a client that really disconnected
-/// cannot receive this response anyway.
+/// The decoders raise a bare `io::Error`, which ends up directly under an
+/// `axum::Error`: `Other` for corrupt zstd or deflate data, `InvalidData` for
+/// a bad gzip header or trailer, `UnexpectedEof` for a truncated stream.
+/// Errors from the inner body keep their own type (hyper's wrap an
+/// `io::Error` of the same kinds for a bad chunked body), so an `io::Error`
+/// under any other error is not the decoder's. `UnexpectedEof` counts
+/// because a client that really disconnected cannot receive this response.
 fn is_decode_error(error: &(dyn std::error::Error + 'static)) -> bool {
     use std::io::ErrorKind;
     let mut next = Some(error);
     while let Some(err) = next {
-        if let Some(io) = err.downcast_ref::<std::io::Error>() {
+        next = err.source();
+        if err.is::<axum::Error>()
+            && let Some(io) = next.and_then(|e| e.downcast_ref::<std::io::Error>())
+        {
             return matches!(
                 io.kind(),
                 ErrorKind::Other
@@ -99,7 +103,6 @@ fn is_decode_error(error: &(dyn std::error::Error + 'static)) -> bool {
                     | ErrorKind::UnexpectedEof
             );
         }
-        next = err.source();
     }
     false
 }
@@ -180,5 +183,25 @@ mod tests {
             assert!(!is_decode_error(&wrapped(kind)), "{kind:?}");
         }
         assert!(!is_decode_error(&axum::Error::new("connection closed")));
+        // An io::Error under another error type comes from the inner body.
+        for kind in [ErrorKind::UnexpectedEof, ErrorKind::InvalidData] {
+            let nested = axum::Error::new(Wrapper(Error::new(kind, "x")));
+            assert!(!is_decode_error(&nested), "{kind:?}");
+        }
+    }
+
+    #[derive(Debug)]
+    struct Wrapper(Error);
+
+    impl std::fmt::Display for Wrapper {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("body error")
+        }
+    }
+
+    impl std::error::Error for Wrapper {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
     }
 }

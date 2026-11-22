@@ -429,7 +429,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gzip_clamps_a_zstd_only_level() {
+    async fn gzip_still_works_with_a_zstd_only_level() {
         use std::io::Read;
         let settings = Settings {
             compression_zstd_level: 19,

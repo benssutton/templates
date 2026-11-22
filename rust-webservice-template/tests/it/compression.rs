@@ -137,6 +137,9 @@ async fn small_head_and_disabled_responses_are_not_encoded() {
     let (_, headers, _) = get(&off, reqwest::Method::GET, DOC, Some("zstd")).await;
     assert_eq!(encoding(&headers), None);
     assert!(!varies(&headers));
+    let (status, headers, _) = post(&off, "/config", "application/json", "br", config_body()).await;
+    assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert!(!varies(&headers));
 }
 
 #[tokio::test]
