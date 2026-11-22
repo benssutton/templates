@@ -7,8 +7,9 @@
 //! gzip with 415; and rewrites `Accept-Encoding` to the winning coding
 //! alone so the compression layer follows this module's rules (a `*` entry
 //! counts; HEAD responses are never encoded; a missing header means
-//! identity). It adds `Vary: Accept-Encoding` to every text-based response,
-//! compressed or not, so caches keep the variants apart.
+//! identity). While compression is enabled it adds `Vary: Accept-Encoding`
+//! to every text-based response, compressed or not, so caches keep the
+//! variants apart.
 
 use crate::settings::Settings;
 use axum::Json;
@@ -28,13 +29,13 @@ pub struct CompressedRequest;
 
 /// q-values for the two codings this service offers.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Weights {
-    pub zstd: f32,
-    pub gzip: f32,
+struct Weights {
+    zstd: f32,
+    gzip: f32,
 }
 
 impl Weights {
-    pub fn accepts_zstd(self) -> bool {
+    fn accepts_zstd(self) -> bool {
         self.zstd > 0.0
     }
 
@@ -70,7 +71,7 @@ fn q(params: &str) -> f32 {
 
 /// `None` when the request has no `Accept-Encoding`. An explicit entry
 /// beats `*`; a later duplicate overrides an earlier one.
-pub fn weights(headers: &HeaderMap) -> Option<Weights> {
+fn weights(headers: &HeaderMap) -> Option<Weights> {
     let mut values = headers.get_all(header::ACCEPT_ENCODING).iter().peekable();
     values.peek()?;
     let (mut zstd, mut gzip, mut star) = (None, None, None);
@@ -94,7 +95,7 @@ pub fn weights(headers: &HeaderMap) -> Option<Weights> {
     })
 }
 
-pub fn is_text_based(content_type: &str) -> bool {
+fn is_text_based(content_type: &str) -> bool {
     let media = content_type
         .split(';')
         .next()
@@ -169,13 +170,24 @@ fn with_vary(mut response: Response) -> Response {
 /// State for `negotiate`.
 #[derive(Clone, Copy, Debug)]
 pub struct Negotiation {
+    enabled: bool,
     require_zstd: bool,
 }
 
 impl Negotiation {
     pub fn new(settings: &Settings) -> Self {
         Self {
+            enabled: settings.compression_enabled,
             require_zstd: settings.compression_require_zstd,
+        }
+    }
+
+    /// Responses only vary by `Accept-Encoding` when they can be encoded.
+    fn vary(self, response: Response) -> Response {
+        if self.enabled {
+            with_vary(response)
+        } else {
+            response
         }
     }
 }
@@ -191,7 +203,7 @@ pub async fn negotiate(
         && !exempt(req.uri().path())
         && !weights.is_some_and(Weights::accepts_zstd)
     {
-        return with_vary(detail(
+        return policy.vary(detail(
             StatusCode::NOT_ACCEPTABLE,
             "Accept-Encoding must allow zstd",
         ));
@@ -206,7 +218,7 @@ pub async fn negotiate(
                 header::ACCEPT_ENCODING,
                 HeaderValue::from_static("zstd, gzip"),
             );
-            return with_vary(response);
+            return policy.vary(response);
         }
         RequestCoding::Encoded(coding) => {
             // Normalised, because the decompression layer matches exact bytes.
@@ -223,18 +235,22 @@ pub async fn negotiate(
     } else {
         weights.and_then(Weights::winning_coding)
     };
+    // Only zstd and gzip are compiled in, so any other coding the client
+    // listed is dropped along with the losing one.
     req.headers_mut().remove(header::ACCEPT_ENCODING);
     if let Some(value) = accepted {
         req.headers_mut().insert(header::ACCEPT_ENCODING, value);
     }
-    with_vary(next.run(req).await)
+    policy.vary(next.run(req).await)
 }
 
-/// Which responses the compression layer may encode: text-based, not 204 or
-/// 304, and at least `min_bytes` when the size is known up front (a streamed
-/// body of unknown size is compressed).
+/// Which responses the compression layer may encode: none while compression
+/// is disabled (so the layer adds no `Vary` either), otherwise text-based,
+/// not 204 or 304, and at least `min_bytes` when the size is known up front
+/// (a streamed body of unknown size is compressed).
 #[derive(Clone, Copy, Debug)]
 pub struct Compressible {
+    enabled: bool,
     min_bytes: u64,
 }
 
@@ -244,7 +260,8 @@ impl Predicate for Compressible {
         B: HttpBody,
     {
         let status = response.status();
-        status != StatusCode::NO_CONTENT
+        self.enabled
+            && status != StatusCode::NO_CONTENT
             && status != StatusCode::NOT_MODIFIED
             && is_text(response.headers())
             && response
@@ -268,7 +285,10 @@ pub fn response_layer(settings: &Settings) -> CompressionLayer<Compressible> {
         .gzip(settings.compression_enabled)
         .zstd(settings.compression_enabled)
         .quality(CompressionLevel::Precise(settings.compression_zstd_level))
-        .compress_when(Compressible { min_bytes })
+        .compress_when(Compressible {
+            enabled: settings.compression_enabled,
+            min_bytes,
+        })
 }
 
 #[cfg(test)]
@@ -361,11 +381,7 @@ mod tests {
         }
     }
 
-    async fn encoding_for(min_bytes: u64, n: usize) -> Option<String> {
-        let settings = Settings {
-            compression_min_bytes: min_bytes,
-            ..Settings::default()
-        };
+    async fn response_for(settings: &Settings, accept: &str, n: usize) -> Response {
         let app = Router::new()
             .route(
                 "/n/{n}",
@@ -373,13 +389,21 @@ mod tests {
                     ([(header::CONTENT_TYPE, "application/json")], "a".repeat(n))
                 }),
             )
-            .layer(response_layer(&settings));
+            .layer(response_layer(settings));
         let request = axum::http::Request::get(format!("/n/{n}"))
-            .header(header::ACCEPT_ENCODING, "zstd")
+            .header(header::ACCEPT_ENCODING, accept)
             .body(Body::empty())
             .unwrap();
-        let response = app.oneshot(request).await.unwrap();
-        response
+        app.oneshot(request).await.unwrap().map(Body::new)
+    }
+
+    async fn encoding_for(min_bytes: u64, n: usize) -> Option<String> {
+        let settings = Settings {
+            compression_min_bytes: min_bytes,
+            ..Settings::default()
+        };
+        response_for(&settings, "zstd", n)
+            .await
             .headers()
             .get(header::CONTENT_ENCODING)
             .map(|v| v.to_str().unwrap().to_owned())
@@ -390,5 +414,36 @@ mod tests {
         assert_eq!(encoding_for(1024, 1023).await, None);
         assert_eq!(encoding_for(1024, 1024).await.as_deref(), Some("zstd"));
         assert_eq!(encoding_for(0, 1).await.as_deref(), Some("zstd"));
+    }
+
+    #[tokio::test]
+    async fn disabled_layer_neither_encodes_nor_varies() {
+        let settings = Settings {
+            compression_enabled: false,
+            compression_min_bytes: 0,
+            ..Settings::default()
+        };
+        let response = response_for(&settings, "zstd", 2048).await;
+        assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
+        assert!(response.headers().get(header::VARY).is_none());
+    }
+
+    #[tokio::test]
+    async fn gzip_clamps_a_zstd_only_level() {
+        use std::io::Read;
+        let settings = Settings {
+            compression_zstd_level: 19,
+            ..Settings::default()
+        };
+        let response = response_for(&settings, "gzip", 2048).await;
+        assert_eq!(response.headers()[header::CONTENT_ENCODING], "gzip");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let mut out = String::new();
+        flate2::read::GzDecoder::new(body.as_ref())
+            .read_to_string(&mut out)
+            .unwrap();
+        assert_eq!(out, "a".repeat(2048));
     }
 }

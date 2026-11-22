@@ -68,15 +68,40 @@ where
     }
 }
 
-/// A read error on a body that arrived zstd/gzip-encoded is a bad encoding.
+/// A decoder error on a body that arrived zstd/gzip-encoded is a bad
+/// encoding; any other read error keeps axum's own text.
 fn bytes_rejection(rejection: BytesRejection, compressed: bool) -> AppError {
     if rejection.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE {
         AppError::PayloadTooLarge("request body exceeds max_request_body_bytes".into())
-    } else if compressed {
+    } else if compressed && is_decode_error(&rejection) {
         AppError::BadRequest("Malformed compressed request body".into())
     } else {
         AppError::BadRequest(rejection.body_text())
     }
+}
+
+/// The decoders raise an `io::Error`: `Other` for corrupt zstd or deflate
+/// data, `InvalidData` for a bad gzip header or trailer, `UnexpectedEof` for
+/// a truncated stream. Errors from the connection reach here as their own
+/// type, so an io cause found under them carries a connection kind instead.
+/// `UnexpectedEof` also counts because a client that really disconnected
+/// cannot receive this response anyway.
+fn is_decode_error(error: &(dyn std::error::Error + 'static)) -> bool {
+    use std::io::ErrorKind;
+    let mut next = Some(error);
+    while let Some(err) = next {
+        if let Some(io) = err.downcast_ref::<std::io::Error>() {
+            return matches!(
+                io.kind(),
+                ErrorKind::Other
+                    | ErrorKind::InvalidData
+                    | ErrorKind::InvalidInput
+                    | ErrorKind::UnexpectedEof
+            );
+        }
+        next = err.source();
+    }
+    false
 }
 
 fn is_compressed(req: &Request) -> bool {
@@ -129,5 +154,31 @@ impl<S: Send + Sync> FromRequest<S> for ArrowStream {
         decoded
             .map(Self)
             .map_err(|e| AppError::BadRequest(format!("body is not an Arrow IPC stream: {e}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_decode_error;
+    use std::io::{Error, ErrorKind};
+
+    fn wrapped(kind: ErrorKind) -> axum::Error {
+        axum::Error::new(Error::new(kind, "x"))
+    }
+
+    #[test]
+    fn decoder_errors_are_told_apart_from_connection_errors() {
+        for kind in [
+            ErrorKind::Other,
+            ErrorKind::InvalidData,
+            ErrorKind::InvalidInput,
+            ErrorKind::UnexpectedEof,
+        ] {
+            assert!(is_decode_error(&wrapped(kind)), "{kind:?}");
+        }
+        for kind in [ErrorKind::ConnectionReset, ErrorKind::BrokenPipe] {
+            assert!(!is_decode_error(&wrapped(kind)), "{kind:?}");
+        }
+        assert!(!is_decode_error(&axum::Error::new("connection closed")));
     }
 }

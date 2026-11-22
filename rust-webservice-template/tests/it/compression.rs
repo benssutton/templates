@@ -136,6 +136,7 @@ async fn small_head_and_disabled_responses_are_not_encoded() {
     let off = app_with(|s| s.compression_enabled = false).await;
     let (_, headers, _) = get(&off, reqwest::Method::GET, DOC, Some("zstd")).await;
     assert_eq!(encoding(&headers), None);
+    assert!(!varies(&headers));
 }
 
 #[tokio::test]
@@ -163,6 +164,7 @@ async fn strict_mode_refuses_without_zstd_and_exempts_probes_metrics_mcp_preflig
         .await
         .unwrap();
     assert_ne!(mcp.status(), StatusCode::NOT_ACCEPTABLE);
+    assert!(!mcp.status().is_server_error(), "{}", mcp.status());
     let preflight = app
         .client()
         .request(reqwest::Method::OPTIONS, app.url("/config"))
@@ -266,6 +268,11 @@ async fn unsupported_and_undecodable_bodies_are_refused() {
         b"not zstd at all".to_vec(),
     )
     .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body, json!({"detail": "Malformed compressed request body"}));
+    let mut truncated = zstd::encode_all(config_body().as_slice(), 3).unwrap();
+    truncated.truncate(truncated.len() - 4);
+    let (status, _, body) = post(&app, "/config", "application/json", "zstd", truncated).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body, json!({"detail": "Malformed compressed request body"}));
 }

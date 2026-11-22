@@ -46,9 +46,10 @@ tests/it/          THE integration-test binary (main.rs + one module per feature
 - **Compression.** `src/core/compression.rs`: `negotiate` (outside the
   compression layer) answers strict mode's 406 and unsupported-coding 415,
   rewrites Accept-Encoding to the winning coding alone (tower-http ignores
-  `*`) and adds Vary; `Compressible` decides what tower-http compresses.
+  `*`) and adds Vary (none when disabled); `Compressible` decides what
+  tower-http compresses.
   `RequestDecompressionLayer` must stay outside `RequestBodyLimitLayer` (limit
-  on decompressed bytes) and inside `ensure_json`. `extract.rs` reports read
+  on decompressed bytes) and inside `ensure_json`. `extract.rs` reports decoder
   errors on a `CompressedRequest` as 400 "Malformed compressed request body".
 - **Settle after write; CPU off the async workers.** Arrow decoding, LSM
   merge/compaction and sysinfo run on the blocking pool; each LSM write is a

@@ -209,7 +209,7 @@ pub struct Settings {
     /// saves bytes but no round trips. Ignored in strict mode.
     pub compression_min_bytes: u64,
     /// Server-side only: high levels cost far more CPU for little gain. The
-    /// compression layer applies the same level to gzip (clamped to 1-9).
+    /// compression layer applies the same level to gzip, which caps it at 9.
     #[garde(range(min = 1, max = 19))]
     pub compression_zstd_level: i32,
     /// 406 for clients whose `Accept-Encoding` does not allow zstd, except on
