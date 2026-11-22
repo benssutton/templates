@@ -19,7 +19,7 @@ src/main.rs        settings -> telemetry -> bind -> create_app -> signals -> ser
 src/app.rs         create_app; router(): routes (utoipa-axum) + the layer stack, outermost last
 src/extract.rs     ValidJson / ValidQuery (garde) / ArrowStream: rejections are AppError
 src/error.rs       AppError -> {"detail"}; From<store errors> splits outage (503) from bug (500)
-src/core/          request_id, json_errors, auth, telemetry, boundary_timing, cors, retry, shutdown, ...
+src/core/          request_id, json_errors, compression, auth, telemetry, boundary_timing, cors, retry, shutdown, ...
 src/services/      config, data, cache, health (cached probes), metrics, stream_ingest
 src/persistence/   stores (connect + smoke test + probe + migrate); stream_store/lsm/ (mod, kernels, tests)
 src/ingestion/     BatchConsumer / Settle seam, noop, ipc; solace/ behind the `solace` feature
@@ -43,6 +43,13 @@ tests/it/          THE integration-test binary (main.rs + one module per feature
   `connect_with_backoff` plus a smoke test; `create_app` closes what already
   connected on failure. Shutdown: stop the consumer -> drain HTTP (MCP event
   streams end with it) -> close consumer and stores (`App::close`).
+- **Compression.** `src/core/compression.rs`: `negotiate` (outside the
+  compression layer) answers strict mode's 406 and unsupported-coding 415,
+  rewrites Accept-Encoding to an explicit zstd/gzip list (tower-http ignores
+  `*`) and adds Vary; `Compressible` decides what tower-http compresses.
+  `RequestDecompressionLayer` must stay outside `RequestBodyLimitLayer` (limit
+  on decompressed bytes) and inside `ensure_json`. `extract.rs` reports read
+  errors on a `CompressedRequest` as 400 "Malformed compressed request body".
 - **Settle after write; CPU off the async workers.** Arrow decoding, LSM
   merge/compaction and sysinfo run on the blocking pool; each LSM write is a
   detached task, so a dropped request still records its rows.

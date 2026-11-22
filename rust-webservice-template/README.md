@@ -80,14 +80,26 @@ Pinned by the integration tests here and the shared k6 contract (`tests/performa
 Outermost first (`src/app.rs`): drop an unacceptable inbound request id →
 set/propagate `X-Request-ID` → `TraceLayer` (request span with the id and
 any W3C `traceparent` parent; one access-log line per request with status
-and latency) → gzip compression → JSON error bodies for responses made
-outside a handler → load shedding over `MAX_CONCURRENT_REQUESTS` (503) →
+and latency) → content-coding negotiation (strict-mode 406, 415 for an
+unsupported request `Content-Encoding`, `Vary: Accept-Encoding`) → zstd/gzip
+response compression → JSON error bodies for responses made outside a handler →
+zstd/gzip request decompression → load shedding over `MAX_CONCURRENT_REQUESTS` (503) →
 `REQUEST_TIMEOUT_SECONDS` (503) → CORS → body limit (413) → Server-Timing →
 last-request tracking → auth (when on) → Prometheus metrics (per matched
 route) → handler. `POST /data/ingest` has its own in-flight bound
 (`INGEST_MAX_IN_FLIGHT`, 503), so decoded bodies cannot pile up behind the
 single LSM writer. Trailing slashes are normalised before routing
 (`/config/` is `/config`).
+
+Responses with a text-based content type are compressed with zstd when the
+client's `Accept-Encoding` allows it (gzip otherwise; `identity` or no header
+means uncompressed), from `COMPRESSION_MIN_BYTES` (1024) at
+`COMPRESSION_ZSTD_LEVEL` (3, also used for gzip). zstd/gzip request bodies are
+decoded before the body limit, so `MAX_REQUEST_BODY_BYTES` counts decompressed
+bytes and a decompression bomb gets 413. `COMPRESSION_REQUIRE_ZSTD=true`
+answers 406 to clients that cannot accept zstd, except on `/health/live`,
+`/health/ready`, `/metrics`, `/mcp` and preflight requests.
+`cargo bench --bench compression` compares zstd levels 1, 3 and 9.
 
 ## Ingest and the LSM store
 Both ingest paths go through `StreamIngestService::ingest`: every batch of a
