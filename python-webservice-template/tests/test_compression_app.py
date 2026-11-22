@@ -10,6 +10,7 @@ from core.zstd_compat import zstd
 from main import create_app
 from settings import Settings
 from tests.app_client import lifespan_test_client
+from tests.publishers.batches import make_batch, serialize_batch
 from tests.support.settings import app_settings
 
 
@@ -75,3 +76,17 @@ async def test_strict_mode_exempts_the_real_probe_metrics_and_mcp_routes(
         )
         assert ping.status_code != 406
         assert (await client.get("/data", headers=plain)).status_code == 406
+
+
+async def test_zstd_arrow_body_is_accepted_by_ingest(test_client) -> None:
+    body = serialize_batch(make_batch([(7001, "zstd", "v1", "upsert")]))
+    r = await test_client.post(
+        "/data/ingest",
+        content=zstd.compress(body),
+        headers={
+            "Content-Type": "application/vnd.apache.arrow.stream",
+            "Content-Encoding": "zstd",
+        },
+    )
+    assert r.status_code == 202
+    assert r.json() == {"accepted": True}

@@ -253,7 +253,8 @@ class CompressionMiddleware:
             if encoder is None:
                 buffered.append(body)
                 size += len(body)
-                if size < self.min_bytes:
+                # Nothing to compress yet; an empty body stays empty even in strict mode.
+                if size < self.min_bytes or size == 0:
                     if not more:
                         await send(start)
                         await send(

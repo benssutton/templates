@@ -57,6 +57,24 @@ async def small(_: Request) -> Response:
     return JSONResponse({"ok": True})
 
 
+async def status(request: Request) -> Response:
+    return Response(
+        status_code=request.path_params["code"], media_type="application/json"
+    )
+
+
+async def pre_encoded(_: Request) -> Response:
+    return Response(
+        gzip.compress(payload(2000)),
+        media_type="application/json",
+        headers={"Content-Encoding": "gzip"},
+    )
+
+
+async def empty(_: Request) -> Response:
+    return Response(b"", media_type="application/json")
+
+
 async def echo(request: Request) -> Response:
     body = await request.body()
     return Response(
@@ -74,6 +92,9 @@ def make_app(**options: Any) -> Starlette:
             Route("/sse", sse),
             Route("/binary", binary),
             Route("/vary", with_vary),
+            Route("/status/{code:int}", status),
+            Route("/pre-encoded", pre_encoded),
+            Route("/empty", empty),
             Route("/echo", echo, methods=["POST"]),
             Route("/data", small),
             Route("/health/live", small),
@@ -160,6 +181,28 @@ async def test_head_sse_and_binary_are_never_compressed() -> None:
     assert "content-encoding" not in head.headers
     assert "content-encoding" not in stream.headers and stream_raw.startswith(b"data: ")
     assert "content-encoding" not in blob.headers and blob_raw == b"\0" * 4096
+
+
+async def test_204_and_304_are_never_compressed() -> None:
+    for app in (make_app(), make_app(require_zstd=True)):
+        for code in (204, 304):
+            r, raw = await send(app, f"/status/{code}", accept="zstd")
+            assert r.status_code == code
+            assert "content-encoding" not in r.headers and raw == b""
+
+
+async def test_already_encoded_response_is_not_compressed_again() -> None:
+    for app in (make_app(), make_app(require_zstd=True)):
+        r, raw = await send(app, "/pre-encoded", accept="zstd")
+        assert r.headers["content-encoding"] == "gzip"
+        assert gzip.decompress(raw) == payload(2000)
+
+
+async def test_strict_mode_sends_an_empty_body_unchanged() -> None:
+    r, raw = await send(make_app(require_zstd=True), "/empty", accept="zstd")
+    assert r.status_code == 200
+    assert "content-encoding" not in r.headers and raw == b""
+    assert "accept-encoding" in vary(r)
 
 
 async def test_vary_is_merged_with_an_existing_value() -> None:
