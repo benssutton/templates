@@ -247,7 +247,8 @@ pub async fn negotiate(
 /// Which responses the compression layer may encode: none while compression
 /// is disabled (so the layer adds no `Vary` either), otherwise text-based,
 /// not 204 or 304, and at least `min_bytes` when the size is known up front
-/// (a streamed body of unknown size is compressed).
+/// (a streamed body of unknown size is compressed). A known-empty body is
+/// never compressed, even in strict mode: encoding it would only add a frame.
 #[derive(Clone, Copy, Debug)]
 pub struct Compressible {
     enabled: bool,
@@ -268,7 +269,7 @@ impl Predicate for Compressible {
                 .body()
                 .size_hint()
                 .exact()
-                .is_none_or(|n| n >= self.min_bytes)
+                .is_none_or(|n| n > 0 && n >= self.min_bytes)
     }
 }
 
@@ -414,6 +415,20 @@ mod tests {
         assert_eq!(encoding_for(1024, 1023).await, None);
         assert_eq!(encoding_for(1024, 1024).await.as_deref(), Some("zstd"));
         assert_eq!(encoding_for(0, 1).await.as_deref(), Some("zstd"));
+    }
+
+    #[tokio::test]
+    async fn strict_mode_leaves_an_empty_body_uncompressed() {
+        let settings = Settings {
+            compression_require_zstd: true,
+            ..Settings::default()
+        };
+        let response = response_for(&settings, "zstd", 0).await;
+        assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(body.is_empty());
     }
 
     #[tokio::test]
