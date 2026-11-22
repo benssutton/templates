@@ -15,6 +15,13 @@ tests; inside, it is idiomatic Micronaut.
 - Micronaut Serialization (global snake_case), Jakarta Validation, Micrometer/Prometheus,
   OpenAPI/Swagger UI, micronaut-mcp (official MCP Java SDK), micronaut-security-jwt
   (off by default), OpenTelemetry tracing (export off by default), JSON logs
+- **Compression**: zstd (preferred) or gzip responses negotiated from `Accept-Encoding`,
+  from 1 KiB (`COMPRESSION_MIN_BYTES`) at zstd level 3 (`COMPRESSION_ZSTD_LEVEL`, 1-19;
+  gzip keeps its default level); zstd/gzip request bodies accepted, with
+  `MAX_REQUEST_BODY_BYTES` counting decompressed bytes; optional strict mode
+  (`COMPRESSION_REQUIRE_ZSTD`) answers 406 to clients that cannot accept zstd (probes,
+  `/metrics` and `/mcp` exempt). Send `Accept-Encoding: identity` for an uncompressed
+  response.
 - JUnit 5 + Micronaut Test + Testcontainers (no mocks), JaCoCo, Spotless, javac lint
 
 ## Endpoints
@@ -33,11 +40,13 @@ tests; inside, it is idiomatic Micronaut.
 | `/swagger-ui` | OpenAPI UI |
 
 **Errors** are always `application/json {"detail": "..."}`: 400 unreadable body,
-401 (auth on), 403 (`/mcp` Host/Origin rejected), 404, 405, 413 (body or batch too
-large), 415, 422 (validation and conversion errors, invalid Arrow batch), 500 (no
+401 (auth on), 403 (`/mcp` Host/Origin rejected), 404, 405, 406 (strict compression),
+413 (body or batch too large), 415, 422 (validation and conversion errors, invalid Arrow batch), 500 (no
 internals), 503 (a store is down or timing out; detail `Service Unavailable`). One
 `ErrorResponseProcessor` (`controller/ErrorDetailResponseProcessor`) renders every
 error; exception handlers only pick the status.
+406 `{"detail": "Accept-Encoding must allow zstd"}` in strict mode; 415 with
+`Accept-Encoding: zstd, gzip` for an unsupported request `Content-Encoding`.
 
 **Correlation id.** `X-Request-ID` is adopted only if it is 1-128 chars of
 `[A-Za-z0-9._-]`, otherwise a new UUID is generated; it is echoed on the response and

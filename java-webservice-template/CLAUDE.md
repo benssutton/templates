@@ -33,6 +33,18 @@ src/test/.../support/    IntegrationSupport (PG+CH+Redis), SolaceSupport + Semp,
 src/test/.../publisher/  ExampleSolacePublisher (compose demo; Dockerfile target `publisher`)
 ```
 
+**Compression.** Micronaut's own compressor and request decoder are off
+(`micronaut.server.netty.compression-threshold: -1`,
+`request-decompression-enabled: false`): its single level would also be fed to gzip,
+which rejects levels above 9. `core/compression/ContentCodingPipeline` installs two
+Netty handlers after the HTTP codec: `ContentCodingHandler` (decodes zstd/gzip
+request bodies, so max-request-size counts decompressed bytes; normalises
+Accept-Encoding to the single winning coding, because Netty's compressor takes zstd
+whenever it is listed, ignoring q-values) and `ZstdContentCompressor` (zstd/gzip
+responses, Vary). `CompressionPolicyFilter` answers 415 and strict mode's 406.
+`ContentCoding` holds the parsing rules; change them there only. The handlers assume
+HTTP/1.1.
+
 ## Gotchas
 - Always `./mvnw clean ...` after editing sources: incremental compile breaks on Windows
   when the drive-letter case of the source root flips (`/C:/` vs `/c:/`).
