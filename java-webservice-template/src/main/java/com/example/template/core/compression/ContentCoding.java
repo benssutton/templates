@@ -27,14 +27,15 @@ public final class ContentCoding {
         /**
          * The one coding to answer with, as an explicit Accept-Encoding value, or null when neither
          * is acceptable. Only the winner is listed because Netty's compressor takes zstd whenever
-         * it is listed, ignoring q-values; zstd wins ties.
+         * it is listed, ignoring q-values; zstd wins ties. It carries no q: any q above 0 is
+         * acceptable, and a rounded one could print as q=0.
          */
         @Nullable
         public String header() {
             if (zstd > 0 && zstd >= gzip) {
-                return String.format(Locale.ROOT, "zstd;q=%.3f", zstd);
+                return "zstd";
             }
-            return gzip > 0 ? String.format(Locale.ROOT, "gzip;q=%.3f", gzip) : null;
+            return gzip > 0 ? "gzip" : null;
         }
     }
 

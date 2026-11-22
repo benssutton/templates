@@ -41,10 +41,11 @@ tests; inside, it is idiomatic Micronaut.
 
 **Errors** are always `application/json {"detail": "..."}`: 400 unreadable body,
 401 (auth on), 403 (`/mcp` Host/Origin rejected), 404, 405, 406 (strict compression),
-413 (body or batch too large), 415, 422 (validation and conversion errors, invalid Arrow batch), 500 (no
-internals), 503 (a store is down or timing out; detail `Service Unavailable`). One
-`ErrorResponseProcessor` (`controller/ErrorDetailResponseProcessor`) renders every
-error; exception handlers only pick the status.
+413 (body or batch too large), 415, 422 (validation and conversion errors, invalid
+Arrow batch), 500 (no internals), 503 (a store is down or timing out; detail
+`Service Unavailable`). One `ErrorResponseProcessor`
+(`controller/ErrorDetailResponseProcessor`) renders every error; exception handlers
+only pick the status.
 406 `{"detail": "Accept-Encoding must allow zstd"}` in strict mode; 415 with
 `Accept-Encoding: zstd, gzip` for an unsupported request `Content-Encoding`.
 

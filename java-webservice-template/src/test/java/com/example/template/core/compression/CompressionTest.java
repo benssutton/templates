@@ -1,7 +1,9 @@
 package com.example.template.core.compression;
 
+import static com.example.template.support.ArrowBatches.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.example.template.support.ArrowBatches;
 import com.example.template.support.IntegrationSupport;
 import com.github.luben.zstd.Zstd;
 import com.github.luben.zstd.ZstdInputStream;
@@ -152,6 +154,7 @@ class CompressionTest extends IntegrationSupport {
             {"zstd;q=0.5, gzip", "gzip"},
             {"*", "zstd"},
             {"*, zstd;q=0", "gzip"},
+            {"zstd;q=0.0001", "zstd"},
             {"identity", null},
             {"br, deflate", null},
             {null, null},
@@ -224,5 +227,31 @@ class CompressionTest extends IntegrationSupport {
             assertThat(r.headers().firstValue("Accept-Encoding")).contains("zstd, gzip");
             assertThat(utf8(r.body())).isEqualTo("{\"detail\":\"Unsupported Content-Encoding\"}");
         }
+    }
+
+    @Test
+    void zstdBodiesReachTheRealEndpoints() throws Exception {
+        String key = unique("zstd-config");
+        String json = "{\"key\":\"" + key + "\",\"value\":\"v\"}";
+        HttpResponse<byte[]> created =
+                post(
+                        "/config",
+                        "application/json",
+                        "zstd",
+                        Zstd.compress(json.getBytes(StandardCharsets.UTF_8), 3));
+        assertThat(created.statusCode()).isEqualTo(201);
+        assertThat(utf8(created.body())).isEqualTo(json);
+
+        byte[] batch = ArrowBatches.encode(List.of(row(4242, "upsert")));
+        // the limit counts decompressed bytes, so the batch itself must fit
+        assertThat(batch.length).isLessThan(1024);
+        HttpResponse<byte[]> accepted =
+                post(
+                        "/data/ingest",
+                        "application/vnd.apache.arrow.stream",
+                        "zstd",
+                        Zstd.compress(batch, 3));
+        assertThat(accepted.statusCode()).isEqualTo(202);
+        assertThat(utf8(accepted.body())).isEqualTo("{\"accepted\":true}");
     }
 }

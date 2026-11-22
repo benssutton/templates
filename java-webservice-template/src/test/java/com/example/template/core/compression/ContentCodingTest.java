@@ -50,11 +50,18 @@ class ContentCodingTest {
 
     @Test
     void canonicalHeaderNamesOnlyTheWinningCoding() {
-        assertThat(new ContentCoding.Weights(1.0, 0.5).header()).isEqualTo("zstd;q=1.000");
-        assertThat(new ContentCoding.Weights(1.0, 1.0).header()).isEqualTo("zstd;q=1.000");
-        assertThat(new ContentCoding.Weights(0.5, 1.0).header()).isEqualTo("gzip;q=1.000");
-        assertThat(new ContentCoding.Weights(0.0, 1.0).header()).isEqualTo("gzip;q=1.000");
+        assertThat(new ContentCoding.Weights(1.0, 0.5).header()).isEqualTo("zstd");
+        assertThat(new ContentCoding.Weights(1.0, 1.0).header()).isEqualTo("zstd");
+        assertThat(new ContentCoding.Weights(0.5, 1.0).header()).isEqualTo("gzip");
+        assertThat(new ContentCoding.Weights(0.0, 1.0).header()).isEqualTo("gzip");
         assertThat(new ContentCoding.Weights(0.0, 0.0).header()).isNull();
+    }
+
+    @Test
+    void anyPositiveQValueIsAcceptableInTheHeader() {
+        assertThat(parse("zstd;q=0.0001").header()).isEqualTo("zstd");
+        assertThat(parse("gzip;q=0.0001").header()).isEqualTo("gzip");
+        assertThat(parse("zstd;q=0.0001, gzip;q=0.0002").header()).isEqualTo("gzip");
     }
 
     @Test
