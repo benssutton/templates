@@ -38,8 +38,9 @@ starts its own (Testcontainers) and destroys them afterwards. Do not use
 ```
 main.py            create_app(settings) + lifespan: connect, migrate, build AppServices
 settings.py        every setting (env / .env override)
-core/              pure-ASGI middleware (body limit, correlation, auth, Server-Timing,
-                   last request), errors, logging, tracing, retry, typed dependencies
+core/              pure-ASGI middleware (compression, body limit, correlation, auth,
+                   Server-Timing, last request), errors, logging, tracing, retry,
+                   typed dependencies
 routers/           thin REST endpoints        services/   logic + AppServices dataclass
 schemas/           Pydantic models            mcp_routers/tools.py   MCP tools
 persistence/       store clients, LSM store, migrations runner
@@ -64,13 +65,24 @@ StreamIngestService (for ingest health); it imports no other service.
 **Middleware is pure ASGI only.** Never add `BaseHTTPMiddleware` /
 `@app.middleware("http")`: it runs `receive()` in a task group, turning the 413
 raised mid-read into an ExceptionGroup (FastAPI then answers 400). Order
-(outermost first): body limit, correlation, CORS, auth (if enabled), Server-Timing,
-last request.
+(outermost first): canonical path, compression, body limit, correlation,
+CORS, auth (if enabled), Server-Timing, last request. Compression must stay
+outside the body limit: it decompresses request bodies (at most limit + 1 bytes),
+so the limit counts decompressed bytes.
 
 **Errors.** Every error body is `{"detail": ...}`. Raise `HTTPException` in routes;
 driver connection/timeout errors (`core/errors.STORE_UNAVAILABLE_ERRORS`) become
 503 without any code in the service; anything else becomes a generic 500. The
 mounted MCP app's plain-text rejections are rewritten by `JsonErrorBodyMiddleware`.
+
+**Compression.** `core/compression.py` compresses text-based responses with zstd
+(preferred) or gzip from Accept-Encoding (`core/content_coding.py` parses it; a
+missing header means identity), from `compression_min_bytes` (1024) at
+`compression_zstd_level` (3). zstd/gzip request bodies are decompressed before the
+app sees them; other codings get 415, undecodable bodies 400. Strict mode
+(`compression_require_zstd`) answers 406 unless the client accepts zstd, except on
+/health/live, /health/ready, /metrics, /mcp and OPTIONS. Import zstd from
+`core/zstd_compat.py`, never directly (3.12 needs the backport).
 
 **Stores.** Each client is an async context manager that connects with backoff,
 smoke-tests and (Postgres, ClickHouse) applies migrations in `__aenter__`. All
@@ -94,7 +106,7 @@ size against `max_ingest_batch_bytes`, then `LSMStore.validate`) before writing
 any; HTTP maps refusals to 413/422, Solace to REJECTED. Settlement: ACCEPTED after
 the write, FAILED (redelivered with backoff) when the write raises, REJECTED for
 unreadable, unmergeable or oversized messages. The HTTP body limit
-(`max_request_body_bytes`) is separate and enforced by the outermost middleware.
+(`max_request_body_bytes`) is separate and enforced by the body-limit middleware.
 
 **Solace.** One durable exclusive queue per replica. The SDK reconnects forever;
 a terminal interruption makes `deliveries()` raise, the loop backs off and

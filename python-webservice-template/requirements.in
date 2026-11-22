@@ -28,6 +28,9 @@ asyncpg>=0.29,<1.0
 # ClickHouse
 clickhouse-connect[async]>=0.7,<2.0
 
+# zstd for HTTP content coding; in the standard library from Python 3.14.
+backports-zstd>=1.8,<2.0; python_version < "3.14"
+
 # Redis
 redis[hiredis]>=5.0,<7.0
 

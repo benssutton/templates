@@ -30,8 +30,10 @@ attrs==26.1.0
     #   aiohttp
     #   jsonschema
     #   referencing
-backports-zstd==1.8.0
-    # via clickhouse-connect
+backports-zstd==1.8.0 ; python_version < "3.14"
+    # via
+    #   -r requirements.in
+    #   clickhouse-connect
 certifi==2026.10.23
     # via
     #   clickhouse-connect

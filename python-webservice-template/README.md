@@ -55,7 +55,7 @@ Pinned by tests here and by the shared k6 contract (`tests/performance/contract.
 
 - JSON field names are snake_case (`ttl_seconds`, `latency_ms`).
 - Every error is `application/json` `{"detail": <string or list>}`: 400, 401, 404,
-  405, 413, 422, 500, 503, including `/mcp` Host/Origin rejections
+  405, 406, 413, 415, 422, 500, 503, including `/mcp` Host/Origin rejections
   ([core/errors.py](core/errors.py)). Internal error text is logged, not returned.
 - A store outage on a request path answers 503 `{"detail": "Service Unavailable"}`
   within the client timeouts.
@@ -65,6 +65,8 @@ Pinned by tests here and by the shared k6 contract (`tests/performance/contract.
 - `X-Request-ID` is adopted only if it is 1-128 chars of `[A-Za-z0-9._-]`;
   otherwise a new id is generated.
 - `/config` and `/cache` answer with or without a trailing slash.
+- 406 `{"detail": "Accept-Encoding must allow zstd"}` in strict mode; 415 with
+  `Accept-Encoding: zstd, gzip` for an unsupported request `Content-Encoding`.
 
 ---
 
@@ -160,7 +162,8 @@ into the LSM store; `/data/cache` serves them.
 | **Graceful shutdown** | uvicorn waits `shutdown_timeout_seconds` for in-flight requests; the lifespan then closes the ingest thread and every client | [main.py](main.py) |
 | **Ingest self-recovery** | SDK reconnects; unsettled messages are redelivered; after a terminal interruption the loop reconnects with backoff; repeated bind failures request a graceful `SIGTERM` | [`_ingest_loop`](services/stream_ingest.py) |
 | **Disconnect watchdog** | If the transport stays non-connected longer than `ingest_max_disconnect_seconds`, the app shuts itself down rather than serve stale data | [`_disconnect_watchdog`](services/stream_ingest.py) |
-| **Request body limit** | Outermost middleware answers 413 for an oversized body (fast path on `Content-Length`; byte counting for chunked uploads), even when a mounted app such as MCP swallows the error | [core/request_limits.py](core/request_limits.py) |
+| **Compression** | zstd (preferred) or gzip responses negotiated from `Accept-Encoding`, from 1 KiB (`COMPRESSION_MIN_BYTES`) at zstd level 3 (`COMPRESSION_ZSTD_LEVEL`, 1-19); zstd/gzip request bodies accepted, with `MAX_REQUEST_BODY_BYTES` counting decompressed bytes; optional strict mode (`COMPRESSION_REQUIRE_ZSTD`) answers 406 to clients that cannot accept zstd (probes, `/metrics` and `/mcp` exempt). Send `Accept-Encoding: identity` for an uncompressed response | [core/compression.py](core/compression.py), [core/content_coding.py](core/content_coding.py) |
+| **Request body limit** | Middleware just inside compression answers 413 for an oversized body (fast path on `Content-Length`; byte counting for chunked uploads), even when a mounted app such as MCP swallows the error | [core/request_limits.py](core/request_limits.py) |
 | **Decoded batch limit** | `max_ingest_batch_bytes`, checked for every batch before any is written: 413 over HTTP, REJECTED over Solace | [services/stream_ingest.py](services/stream_ingest.py) |
 
 ---
@@ -255,7 +258,7 @@ docker run --rm -v "$PWD:/src" -w /src python:3.12.16-slim sh -c \
 main.py                  App factory + lifespan (wiring, fail-fast startup)
 settings.py              Typed configuration (Pydantic BaseSettings)
 core/                    Cross-cutting infra: auth, errors, correlation, logging,
-                         tracing, retry, body limit, Server-Timing, last request
+                         tracing, retry, compression, body limit, Server-Timing, last request
 routers/                 REST endpoints (thin): health, data, config, cache, metrics
 mcp_routers/tools.py     MCP tools mirroring the REST read endpoints
 schemas/                 Pydantic request/response models
