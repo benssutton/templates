@@ -58,8 +58,11 @@ async def small(_: Request) -> Response:
 
 
 async def status(request: Request) -> Response:
+    # A body over the threshold, so only the status check keeps it uncompressed.
     return Response(
-        status_code=request.path_params["code"], media_type="application/json"
+        payload(2000),
+        status_code=request.path_params["code"],
+        media_type="application/json",
     )
 
 
@@ -188,7 +191,8 @@ async def test_204_and_304_are_never_compressed() -> None:
         for code in (204, 304):
             r, raw = await send(app, f"/status/{code}", accept="zstd")
             assert r.status_code == code
-            assert "content-encoding" not in r.headers and raw == b""
+            assert "content-encoding" not in r.headers, (code, app)
+            assert raw == payload(2000)
 
 
 async def test_already_encoded_response_is_not_compressed_again() -> None:
