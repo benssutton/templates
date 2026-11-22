@@ -71,6 +71,19 @@ async def partial(_: Request) -> Response:
     )
 
 
+async def ranged(_: Request) -> Response:
+    # Status 200, so only the Content-Range check keeps it uncompressed.
+    return Response(
+        payload(2000),
+        media_type="text/plain",
+        headers={"Content-Range": "bytes 0-1999/4000"},
+    )
+
+
+async def vary_star(_: Request) -> Response:
+    return Response(payload(2000), media_type="application/json", headers={"Vary": "*"})
+
+
 async def small(_: Request) -> Response:
     return JSONResponse({"ok": True})
 
@@ -115,6 +128,8 @@ def make_app(**options: Any) -> Starlette:
             Route("/vary", with_vary),
             Route("/already-varies", already_varies),
             Route("/partial", partial),
+            Route("/ranged", ranged),
+            Route("/vary-star", vary_star),
             Route("/status/{code:int}", status),
             Route("/pre-encoded", pre_encoded),
             Route("/empty", empty),
@@ -279,6 +294,18 @@ TEXT_START: Message = {
 }
 
 
+async def test_content_range_alone_prevents_compression() -> None:
+    r, raw = await send(make_app(), "/ranged", accept="zstd")
+    assert r.status_code == 200
+    assert "content-encoding" not in r.headers
+    assert raw == payload(2000)
+
+
+async def test_vary_star_is_left_unchanged() -> None:
+    r, _ = await send(make_app(), "/vary-star", accept="zstd")
+    assert r.headers.get_list("vary") == ["*"]
+
+
 async def test_held_start_goes_out_before_a_non_body_message() -> None:
     sent = await call_raw(
         [TEXT_START, {"type": "http.response.pathsend", "path": "/srv/big.txt"}]
@@ -305,6 +332,54 @@ async def test_trailers_after_a_small_body_do_not_repeat_the_start() -> None:
         "http.response.body",
         "http.response.trailers",
     ]
+
+
+async def test_body_held_below_the_threshold_goes_out_before_pathsend() -> None:
+    pathsend: Message = {"type": "http.response.pathsend", "path": "/srv/big.txt"}
+    sent = await call_raw(
+        [
+            TEXT_START,
+            {"type": "http.response.body", "body": b"abc", "more_body": True},
+            pathsend,
+        ]
+    )
+    assert [m["type"] for m in sent] == [
+        "http.response.start",
+        "http.response.body",
+        "http.response.pathsend",
+    ]
+    assert sent[1]["body"] == b"abc" and sent[1]["more_body"] is True
+
+
+async def test_empty_held_body_is_not_flushed_before_pathsend() -> None:
+    sent = await call_raw(
+        [
+            TEXT_START,
+            {"type": "http.response.body", "body": b"", "more_body": True},
+            {"type": "http.response.pathsend", "path": "/srv/big.txt"},
+        ]
+    )
+    assert [m["type"] for m in sent] == [
+        "http.response.start",
+        "http.response.pathsend",
+    ]
+
+
+async def test_trailers_follow_a_compressed_stream_without_a_second_start() -> None:
+    sent = await call_raw(
+        [
+            TEXT_START,
+            {"type": "http.response.body", "body": payload(2000), "more_body": True},
+            {"type": "http.response.body", "body": b""},
+            {"type": "http.response.trailers", "headers": [], "more_trailers": False},
+        ]
+    )
+    types = [m["type"] for m in sent]
+    assert types.count("http.response.start") == 1
+    assert types[-1] == "http.response.trailers"
+    assert dict(sent[0]["headers"])[b"content-encoding"] == b"zstd"
+    body = b"".join(m["body"] for m in sent if m["type"] == "http.response.body")
+    assert zstd.decompress(body) == payload(2000)
 
 
 async def test_disabled_sends_identity() -> None:

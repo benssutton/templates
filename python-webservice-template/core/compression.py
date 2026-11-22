@@ -277,8 +277,9 @@ class CompressionMiddleware:
                 return
             if message["type"] != "http.response.body":
                 if encoder is None:
-                    # pathsend, trailers, ...: the held start (and any body held
-                    # with it) must go out first, uncompressed.
+                    # pathsend, zerocopysend, debug (trailers only follow a final
+                    # body): the held start, and any body held with it, must go
+                    # out first, uncompressed.
                     passthrough = True
                     await send(start)
                     if size:
