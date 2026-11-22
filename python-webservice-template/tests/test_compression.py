@@ -1,0 +1,196 @@
+"""CompressionMiddleware on a minimal app: real HTTP through ASGITransport, raw
+(undecoded) bodies, so each test sees exactly what a client receives."""
+
+import gzip
+from typing import Any
+
+from httpx import ASGITransport, AsyncClient
+from httpx import Response as HttpxResponse
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.routing import Route
+
+from core.compression import CompressionMiddleware
+from core.request_limits import MaxBodySizeMiddleware
+from core.zstd_compat import zstd
+
+LIMIT = 4096
+
+
+def payload(n: int) -> bytes:
+    """A JSON document of exactly n bytes (n >= 8)."""
+    return b'{"x":"' + b"a" * (n - 8) + b'"}'
+
+
+async def sized(request: Request) -> Response:
+    return Response(payload(request.path_params["n"]), media_type="application/json")
+
+
+async def streamed(_: Request) -> Response:
+    async def chunks():
+        for _ in range(4):
+            yield payload(1000)
+
+    return StreamingResponse(chunks(), media_type="application/json")
+
+
+async def sse(_: Request) -> Response:
+    async def events():
+        yield b"data: " + b"a" * 2000 + b"\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream")
+
+
+async def binary(_: Request) -> Response:
+    return Response(b"\0" * 4096, media_type="application/octet-stream")
+
+
+async def with_vary(_: Request) -> Response:
+    return Response(
+        payload(2000), media_type="application/json", headers={"Vary": "Origin"}
+    )
+
+
+async def small(_: Request) -> Response:
+    return JSONResponse({"ok": True})
+
+
+async def echo(request: Request) -> Response:
+    body = await request.body()
+    return Response(
+        body,
+        media_type="application/octet-stream",
+        headers={"x-seen-encoding": request.headers.get("content-encoding", "")},
+    )
+
+
+def make_app(**options: Any) -> Starlette:
+    app = Starlette(
+        routes=[
+            Route("/sized/{n:int}", sized),
+            Route("/streamed", streamed),
+            Route("/sse", sse),
+            Route("/binary", binary),
+            Route("/vary", with_vary),
+            Route("/echo", echo, methods=["POST"]),
+            Route("/data", small),
+            Route("/health/live", small),
+            Route("/health/ready", small),
+            Route("/metrics", small),
+            Route("/mcp/", small, methods=["GET", "POST"]),
+        ]
+    )
+    app.add_middleware(MaxBodySizeMiddleware, max_bytes=LIMIT)
+    app.add_middleware(CompressionMiddleware, max_body_bytes=LIMIT, **options)
+    return app
+
+
+async def send(
+    app: Starlette,
+    path: str,
+    *,
+    method: str = "GET",
+    accept: str | None = None,
+    headers: dict[str, str] | None = None,
+    content: bytes | None = None,
+) -> tuple[HttpxResponse, bytes]:
+    """`accept=None` sends no Accept-Encoding at all (httpx adds one by default)."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        del c.headers["accept-encoding"]
+        request_headers = dict(headers or {})
+        if accept is not None:
+            request_headers["accept-encoding"] = accept
+        async with c.stream(
+            method, path, headers=request_headers, content=content
+        ) as r:
+            raw = b"".join([chunk async for chunk in r.aiter_raw()])
+    return r, raw
+
+
+def vary(r: HttpxResponse) -> list[str]:
+    return [
+        v.strip().lower() for v in r.headers.get("vary", "").split(",") if v.strip()
+    ]
+
+
+async def test_zstd_is_chosen_and_decodes_to_the_original() -> None:
+    r, raw = await send(make_app(), "/sized/2000", accept="gzip, zstd")
+    assert r.headers["content-encoding"] == "zstd"
+    assert zstd.decompress(raw) == payload(2000)
+    assert int(r.headers["content-length"]) == len(raw)
+    assert "accept-encoding" in vary(r)
+
+
+async def test_gzip_when_only_gzip_is_accepted() -> None:
+    r, raw = await send(make_app(), "/sized/2000", accept="gzip")
+    assert r.headers["content-encoding"] == "gzip"
+    assert gzip.decompress(raw) == payload(2000)
+
+
+async def test_identity_and_missing_header_are_uncompressed_but_vary() -> None:
+    for accept in ("identity", None):
+        r, raw = await send(make_app(), "/sized/2000", accept=accept)
+        assert "content-encoding" not in r.headers
+        assert raw == payload(2000)
+        assert "accept-encoding" in vary(r)
+
+
+async def test_threshold_boundary() -> None:
+    app = make_app(min_bytes=1024)
+    below, raw_below = await send(app, "/sized/1023", accept="zstd")
+    at, raw_at = await send(app, "/sized/1024", accept="zstd")
+    assert "content-encoding" not in below.headers and raw_below == payload(1023)
+    assert at.headers["content-encoding"] == "zstd"
+    assert zstd.decompress(raw_at) == payload(1024)
+
+
+async def test_streamed_body_is_compressed_without_content_length() -> None:
+    r, raw = await send(make_app(), "/streamed", accept="zstd")
+    assert r.headers["content-encoding"] == "zstd"
+    assert "content-length" not in r.headers
+    assert zstd.decompress(raw) == payload(1000) * 4
+
+
+async def test_head_sse_and_binary_are_never_compressed() -> None:
+    head, _ = await send(make_app(), "/sized/2000", method="HEAD", accept="zstd")
+    stream, stream_raw = await send(make_app(), "/sse", accept="zstd")
+    blob, blob_raw = await send(make_app(), "/binary", accept="zstd")
+    assert "content-encoding" not in head.headers
+    assert "content-encoding" not in stream.headers and stream_raw.startswith(b"data: ")
+    assert "content-encoding" not in blob.headers and blob_raw == b"\0" * 4096
+
+
+async def test_vary_is_merged_with_an_existing_value() -> None:
+    r, _ = await send(make_app(), "/vary", accept="zstd")
+    assert vary(r) == ["origin", "accept-encoding"]
+
+
+async def test_disabled_sends_identity() -> None:
+    r, raw = await send(make_app(enabled=False), "/sized/2000", accept="zstd")
+    assert "content-encoding" not in r.headers and raw == payload(2000)
+
+
+async def test_strict_mode_compresses_below_the_threshold() -> None:
+    r, raw = await send(make_app(require_zstd=True), "/sized/20", accept="zstd")
+    assert r.headers["content-encoding"] == "zstd"
+    assert zstd.decompress(raw) == payload(20)
+
+
+async def test_strict_mode_refuses_clients_without_zstd() -> None:
+    app = make_app(require_zstd=True)
+    for accept in (None, "identity", "gzip", "zstd;q=0"):
+        r, raw = await send(app, "/data", accept=accept)
+        assert r.status_code == 406, accept
+        assert r.headers["content-type"] == "application/json"
+        assert "content-encoding" not in r.headers
+        assert raw == b'{"detail": "Accept-Encoding must allow zstd"}'
+
+
+async def test_strict_mode_exempts_probes_metrics_mcp_and_preflight() -> None:
+    app = make_app(require_zstd=True)
+    for path in ("/health/live", "/health/ready", "/metrics", "/mcp/"):
+        r, _ = await send(app, path, accept="identity")
+        assert r.status_code == 200, path
+    preflight, _ = await send(app, "/data", method="OPTIONS", accept=None)
+    assert preflight.status_code != 406
