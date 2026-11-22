@@ -214,4 +214,15 @@ class CompressionTest extends IntegrationSupport {
         HttpResponse<byte[]> r = post("/__compression/echo", "text/plain", "zstd", bomb);
         assertThat(r.statusCode()).isEqualTo(413);
     }
+
+    @Test
+    void unsupportedOrStackedCodingIs415() throws Exception {
+        byte[] body = "hello".getBytes(StandardCharsets.UTF_8);
+        for (String coding : List.of("br", "deflate", "gzip, zstd")) {
+            HttpResponse<byte[]> r = post("/__compression/echo", "text/plain", coding, body);
+            assertThat(r.statusCode()).as(coding).isEqualTo(415);
+            assertThat(r.headers().firstValue("Accept-Encoding")).contains("zstd, gzip");
+            assertThat(utf8(r.body())).isEqualTo("{\"detail\":\"Unsupported Content-Encoding\"}");
+        }
+    }
 }
