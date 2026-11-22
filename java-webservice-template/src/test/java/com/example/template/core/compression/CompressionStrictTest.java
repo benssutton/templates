@@ -7,12 +7,14 @@ import io.micronaut.context.annotation.Property;
 import io.micronaut.runtime.server.EmbeddedServer;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import jakarta.inject.Inject;
+import java.io.ByteArrayInputStream;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
+import java.util.zip.GZIPInputStream;
 import org.junit.jupiter.api.Test;
 
 @MicronautTest
@@ -47,6 +49,22 @@ class CompressionStrictTest extends IntegrationSupport {
             assertThat(r.statusCode()).as(Arrays.toString(headers)).isEqualTo(406);
             assertThat(r.headers().firstValue("Content-Encoding")).isEmpty();
             assertThat(r.body()).isEqualTo("{\"detail\":\"Accept-Encoding must allow zstd\"}");
+        }
+    }
+
+    @Test
+    void zstdAtALowerQIsAcceptedAndGzipWins() throws Exception {
+        HttpResponse<byte[]> r =
+                http.send(
+                        HttpRequest.newBuilder(server.getURI().resolve("/"))
+                                .header("Accept-Encoding", "zstd;q=0.5, gzip")
+                                .GET()
+                                .build(),
+                        HttpResponse.BodyHandlers.ofByteArray());
+        assertThat(r.statusCode()).isEqualTo(200);
+        assertThat(r.headers().firstValue("Content-Encoding")).contains("gzip");
+        try (var in = new GZIPInputStream(new ByteArrayInputStream(r.body()))) {
+            assertThat(in.readAllBytes()).isNotEmpty();
         }
     }
 

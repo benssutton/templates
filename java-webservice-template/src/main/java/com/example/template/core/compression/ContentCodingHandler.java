@@ -174,6 +174,8 @@ final class ContentCodingHandler extends HttpContentDecoder {
         HttpHeaders headers = request.headers();
         ContentCoding.Weights weights =
                 ContentCoding.parse(headers.getAll(HttpHeaderNames.ACCEPT_ENCODING));
+        // CompressionPolicyFilter answers strict mode's 406 when this leaves no Accept-Encoding,
+        // so the header must stay removed exactly when strict mode refuses the request.
         headers.remove(HttpHeaderNames.ACCEPT_ENCODING);
         if (weights == null
                 || ContentCoding.strictRefuses(

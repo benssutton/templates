@@ -36,11 +36,14 @@ public class CompressionPolicyFilter implements Ordered {
     @Nullable
     public HttpResponse<?> refuse(HttpRequest<?> request) {
         // 406 first: a client that cannot read zstd could not read any other answer either.
-        if (ContentCoding.strictRefuses(
-                settings.requireZstd(),
-                request.getMethodName(),
-                ContentCoding.path(request.getUri().toString()),
-                ContentCoding.parse(request.getHeaders().getAll(HttpHeaders.ACCEPT_ENCODING)))) {
+        // Decided from ContentCodingHandler's outcome, not by re-parsing: it has already rewritten
+        // Accept-Encoding to the winning coding (possibly gzip), or removed it exactly when strict
+        // mode refuses the request.
+        if (ContentCoding.strictApplies(
+                        settings.requireZstd(),
+                        request.getMethodName(),
+                        ContentCoding.path(request.getUri().toString()))
+                && !request.getHeaders().contains(HttpHeaders.ACCEPT_ENCODING)) {
             return HttpResponse.<ErrorDetail>status(HttpStatus.NOT_ACCEPTABLE)
                     .contentType(MediaType.APPLICATION_JSON_TYPE)
                     .body(new ErrorDetail("Accept-Encoding must allow zstd"));

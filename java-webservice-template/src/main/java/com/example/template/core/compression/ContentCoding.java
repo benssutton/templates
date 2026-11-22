@@ -71,15 +71,15 @@ public final class ContentCoding {
         return new Weights(zstd == null ? fallback : zstd, gzip == null ? fallback : gzip);
     }
 
-    /**
-     * Strict mode's refusal, shared by the Netty handler and the filter so both decide alike:
-     * anything but a preflight or an exempt route needs an Accept-Encoding that allows zstd.
-     */
+    /** Whether strict mode governs a request: anything but a preflight or an exempt route. */
+    public static boolean strictApplies(boolean requireZstd, String method, String path) {
+        return requireZstd && !method.equals("OPTIONS") && !isExempt(path);
+    }
+
+    /** Strict mode's refusal: a governed request needs an Accept-Encoding that allows zstd. */
     public static boolean strictRefuses(
             boolean requireZstd, String method, String path, @Nullable Weights weights) {
-        return requireZstd
-                && !method.equals("OPTIONS")
-                && !isExempt(path)
+        return strictApplies(requireZstd, method, path)
                 && (weights == null || !weights.acceptsZstd());
     }
 
