@@ -95,6 +95,8 @@ uuid = { version = "1.29.2", features = ["v4"] }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 # Removes the shared test containers when the test binary exits (statics are never dropped).
 dtor = "1.0.7"
+# Decode compressed responses and build compressed request bodies in tests.
+flate2 = "1"
 rcgen = "0.14.10"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "http2", "rustls-no-provider"] }
 # No TLS features: the local npipe / unix Docker socket needs none, and the
@@ -104,6 +106,7 @@ testcontainers = { version = "0.27.3", default-features = false }
 testcontainers-modules = { version = "0.15.0", default-features = false, features = ["postgres", "redis"] }
 # Paused-clock tests for the ingest backoff, watchdog and consecutive-failure paths.
 tokio = { version = "1.54.1", features = ["full", "test-util"] }
+zstd = "0.14"
 
 [profile.release]
 lto = "fat"

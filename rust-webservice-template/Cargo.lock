@@ -3670,6 +3670,7 @@ dependencies = [
  "dtor",
  "fastrand",
  "fe2o3-amqp",
+ "flate2",
  "garde",
  "jsonwebtoken",
  "metrics",
@@ -3701,6 +3702,7 @@ dependencies = [
  "utoipa-axum",
  "utoipa-swagger-ui",
  "uuid",
+ "zstd",
 ]
 
 [[package]]

@@ -4,6 +4,7 @@
 //! Content-Type, 422 when it parses but is invalid.
 //! `ValidJson` and `ValidQuery` also run the type's garde rules.
 
+use crate::core::compression::CompressedRequest;
 use crate::error::AppError;
 use crate::ingestion::ipc::decode_stream;
 use arrow::array::RecordBatch;
@@ -31,11 +32,12 @@ where
     type Rejection = AppError;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let compressed = is_compressed(&req);
         let Json(value) = Json::<T>::from_request(req, state)
             .await
             .map_err(|rejection| match rejection {
                 JsonRejection::JsonDataError(e) => AppError::Unprocessable(e.body_text()),
-                JsonRejection::BytesRejection(e) => bytes_rejection(e),
+                JsonRejection::BytesRejection(e) => bytes_rejection(e, compressed),
                 JsonRejection::MissingJsonContentType(e) => {
                     AppError::UnsupportedMediaType(e.body_text())
                 }
@@ -66,12 +68,19 @@ where
     }
 }
 
-fn bytes_rejection(rejection: BytesRejection) -> AppError {
+/// A read error on a body that arrived zstd/gzip-encoded is a bad encoding.
+fn bytes_rejection(rejection: BytesRejection, compressed: bool) -> AppError {
     if rejection.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE {
         AppError::PayloadTooLarge("request body exceeds max_request_body_bytes".into())
+    } else if compressed {
+        AppError::BadRequest("Malformed compressed request body".into())
     } else {
         AppError::BadRequest(rejection.body_text())
     }
+}
+
+fn is_compressed(req: &Request) -> bool {
+    req.extensions().get::<CompressedRequest>().is_some()
 }
 
 /// An Arrow IPC stream body, fully decoded. Decoding is CPU work
@@ -107,9 +116,10 @@ impl<S: Send + Sync> FromRequest<S> for ArrowStream {
                 "Content-Type must be application/vnd.apache.arrow.stream".into(),
             ));
         }
+        let compressed = is_compressed(&req);
         let body = Bytes::from_request(req, state)
             .await
-            .map_err(bytes_rejection)?;
+            .map_err(|e| bytes_rejection(e, compressed))?;
         let decoded = crate::core::boundary_timing::timed(
             "ingest.decode",
             tokio::task::spawn_blocking(move || decode_stream(&body)),
