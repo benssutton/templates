@@ -110,9 +110,6 @@ final class ZstdFrameTracker extends ChannelInboundHandlerAdapter {
                 skip = field;
                 expect(Field.MAGIC, 4);
             }
-            case CORRUPT -> {
-                // unreachable: scanning stops
-            }
         }
     }
 

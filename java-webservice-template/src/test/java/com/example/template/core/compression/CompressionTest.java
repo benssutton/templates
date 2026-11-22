@@ -173,7 +173,7 @@ class CompressionTest extends IntegrationSupport {
 
     @Test
     void aHighRatioBombIs413() throws Exception {
-        byte[] bomb = CompressionFixtures.zstdZeros(200L << 20);
+        byte[] bomb = CompressionFixtures.zstdZeros(50L << 20);
         HttpResponse<byte[]> r = post("/__compression/echo", "text/plain", "zstd", bomb);
         assertThat(r.statusCode()).isEqualTo(413);
     }

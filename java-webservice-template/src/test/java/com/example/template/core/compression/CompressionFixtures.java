@@ -43,6 +43,18 @@ final class CompressionFixtures {
         return out.toByteArray();
     }
 
+    /** gzip of {@code n} zero bytes, streamed like zstdZeros. */
+    static byte[] gzipZeros(long n) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] block = new byte[1 << 20];
+        try (GZIPOutputStream gz = new GZIPOutputStream(out)) {
+            for (long left = n; left > 0; left -= block.length) {
+                gz.write(block, 0, (int) Math.min(left, block.length));
+            }
+        }
+        return out.toByteArray();
+    }
+
     @Controller("/__compression")
     static class Payloads {
         @Get(value = "/sized/{n}", produces = MediaType.APPLICATION_JSON)
