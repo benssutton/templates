@@ -81,4 +81,53 @@ class SettingsValidationTest {
                     .isInstanceOf(RuntimeException.class);
         }
     }
+
+    @Test
+    void compressionDefaults() {
+        try (ApplicationContext ctx = start(Map.of())) {
+            CompressionSettings c = ctx.getBean(CompressionSettings.class);
+            assertThat(c.enabled()).isTrue();
+            assertThat(c.minBytes()).isEqualTo(1024);
+            assertThat(c.zstdLevel()).isEqualTo(3);
+            assertThat(c.requireZstd()).isFalse();
+            assertThat(c.effectiveMinBytes()).isEqualTo(1024);
+        }
+    }
+
+    @Test
+    void strictModeIgnoresTheThreshold() {
+        try (ApplicationContext ctx = start(Map.of("template.compression.require-zstd", "true"))) {
+            assertThat(ctx.getBean(CompressionSettings.class).effectiveMinBytes()).isZero();
+        }
+    }
+
+    @Test
+    void zstdLevelOutside1To19FailsStartup() {
+        for (String level : List.of("0", "20")) {
+            assertThatThrownBy(
+                            () -> {
+                                try (ApplicationContext ctx =
+                                        start(Map.of("template.compression.zstd-level", level))) {
+                                    ctx.getBean(CompressionSettings.class);
+                                }
+                            })
+                    .as(level)
+                    .hasStackTraceContaining("zstdLevel");
+        }
+    }
+
+    @Test
+    void strictModeNeedsCompressionEnabled() {
+        assertThatThrownBy(
+                        () -> {
+                            try (ApplicationContext ctx =
+                                    start(
+                                            Map.of(
+                                                    "template.compression.enabled", "false",
+                                                    "template.compression.require-zstd", "true"))) {
+                                ctx.getBean(CompressionSettings.class);
+                            }
+                        })
+                .hasStackTraceContaining("template.compression.require-zstd");
+    }
 }
