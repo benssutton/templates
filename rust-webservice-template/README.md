@@ -1,8 +1,8 @@
 # rust-webservice-template
 
-An idiomatic axum/Tower service (Rust 2021) with the same HTTP contract as
-its Python and Java siblings: same endpoints, JSON field names, error bodies
-and status codes, so a client or a contract test cannot tell them apart.
+An idiomatic axum/Tower service (Rust 2024) with a fixed HTTP contract:
+endpoints, JSON field names, error bodies and status codes are pinned by
+contract tests, so clients depend on the contract, not the implementation.
 Inside, it is written the way an axum service is written: one Tower
 `ServiceBuilder`-style layer stack, typed extractors, `AppError` as the one
 error type, and traits only at real seams.
@@ -34,7 +34,7 @@ block the single writer.
   **cargo-deny**
 
 ## The shared contract
-What every sibling implements, and the integration tests here pin:
+Pinned by the integration tests here and the shared k6 contract (`tests/performance/contract.js`):
 
 | Rule | Where |
 |---|---|
@@ -145,9 +145,9 @@ Prerequisites:
 - `cargo install cargo-llvm-cov cargo-deny` and
   `rustup component add llvm-tools-preview`.
 - Docker Desktop or Docker Engine with ≥ 3 GiB of memory.
-- Python for `run_CICD.py` (the repo's `p315` conda env, see the root
-  `CLAUDE.md`; CI uses 3.13), with `solace-pubsubplus` and `pyarrow` for the
-  SMF interop test.
+- The repo's `p315` conda env for `run_CICD.py` (see the root `CLAUDE.md`;
+  CI uses 3.13), with `solace-pubsubplus` and `pyarrow` for the SMF interop
+  test.
 
 ```bash
 cd rust-webservice-template

@@ -80,7 +80,7 @@ extension is enabled deliberately for future embedding features.
 
 **Migrations.** Add `migrations/<store>/NNN_name.sql`; never edit an applied file.
 Postgres runs all pending files in one transaction under the advisory lock
-(`SCHEMA_LOCK_ID`, same as Rust). ClickHouse files must be one idempotent
+(`SCHEMA_LOCK_ID`). ClickHouse files must be one idempotent
 statement each (no transactions or locks there).
 
 **LSM store.** Single logical writer: `ingest()` holds a `threading.Lock` for the

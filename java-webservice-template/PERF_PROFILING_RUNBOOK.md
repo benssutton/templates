@@ -1,7 +1,7 @@
 # Performance Profiling Runbook
 
-Two-layer bottleneck triage, mirroring the Python template (which uses py-spy);
-here Layer 2 uses **async-profiler**, the JVM equivalent.
+Two-layer bottleneck triage: Layer 1 shows *where* the time goes, Layer 2
+(**async-profiler**) shows *what kind* of time it is.
 
 ## Layer 1 — Where (Server-Timing + k6)
 
@@ -9,8 +9,8 @@ Every HTTP response carries a `Server-Timing` header with per-boundary durations
 plus a `total`. The k6 profile scripts parse it into a ranked attribution table.
 
 Boundaries: `clickhouse.count`, `clickhouse.select` (GET /data); `ingest.decode`,
-`ingest.lsm_write` (POST /data/ingest). The Java service emits the same header
-format as the Python one, so the reused k6 scripts work unchanged.
+`ingest.lsm_write` (POST /data/ingest). The shared k6 scripts parse this header
+format, so keep it unchanged.
 
 ### Run it
 k6 runs from the `perf-scripts` Docker image (same convention as CI); the app

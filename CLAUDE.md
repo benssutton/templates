@@ -15,7 +15,7 @@ Run from the repo root. See the "Pipeline" section of README.md.
 Each service also has its own CLAUDE.md with service-specific detail.
 
 ## Comments
-Each service's code must read on its own: no comment refers to another template
-(tests/cicd/test_no_cross_template_refs.py enforces this). Repeat an explanation
-in each project rather than pointing at another. Comment why, briefly, and only
+Each service's code and docs must read on their own: no comment or service doc
+refers to another template (tests/cicd/test_no_cross_template_refs.py enforces
+this). Repeat an explanation in each project rather than pointing at another. Comment why, briefly, and only
 where the code is not self-explanatory.

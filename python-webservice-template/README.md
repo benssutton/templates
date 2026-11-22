@@ -51,7 +51,7 @@ is what lets the whole test suite run in one pytest session.
 
 ## 2. Wire Contract
 
-Shared with the Java and Rust templates and pinned by tests:
+Pinned by tests here and by the shared k6 contract (`tests/performance/contract.js`):
 
 - JSON field names are snake_case (`ttl_seconds`, `latency_ms`).
 - Every error is `application/json` `{"detail": <string or list>}`: 400, 401, 404,
@@ -128,11 +128,9 @@ into the LSM store; `/data/cache` serves them.
   backs off (`ingest_retry_*` settings) and the next call connects a fresh
   service. A successful bind resets the failure count, so only failures to bind
   add up to a shutdown (`ingest_max_consecutive_failures`).
-- **Deliberate divergences from the Java template.** *Startup:* Python connects to
-  Solace with backoff in the lifespan and fails startup if the broker is
-  unreachable; Java connects lazily. *Size limit:* Python measures each batch's
-  decoded Arrow `nbytes`; Java measures the encoded payload on Solace deliveries
-  only.
+- **Startup and size limit.** The lifespan connects to Solace with backoff and
+  fails startup if the broker is unreachable. The batch size limit applies to
+  each batch's decoded Arrow `nbytes`.
 - **Extension point: message replay.** The durable queue buffers only unacked
   messages; to rebuild the cache after a restart, start the receiver with a replay
   strategy (`with_message_replay`) against a broker replay log.

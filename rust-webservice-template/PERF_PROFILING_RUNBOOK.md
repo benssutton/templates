@@ -1,7 +1,6 @@
 # Performance Profiling Runbook
 
-Two-layer bottleneck triage, mirroring the Python template (py-spy) and the
-Java template (async-profiler). Layer 1 answers *where* the time goes (every
+Two-layer bottleneck triage. Layer 1 answers *where* the time goes (every
 run, report-only). Layer 2 answers *what kind* of time it is (on demand), with
 Linux `perf` and an inferno flamegraph.
 
@@ -24,7 +23,7 @@ Boundaries: `clickhouse.count`, `clickhouse.select` (GET /data); `lsm.query`
 k6 runs from the `perf-scripts` image (the same image as CI; no local k6
 install). The app serves HTTPS with a self-signed certificate and the image
 sets `K6_INSECURE_SKIP_TLS_VERIFY`, so `BASE_URL=https://app` works on the
-compose network. The scripts are Python's, byte for byte
+compose network. The scripts are shared byte for byte across the repo
 (`tests/cicd/test_perf_scripts.py`).
 
 ```bash

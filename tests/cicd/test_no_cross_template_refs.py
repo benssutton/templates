@@ -1,4 +1,4 @@
-"""Service source never refers to another template: each one reads on its own.
+"""Service source and docs never refer to another template: each reads on its own.
 
 Shared k6 scripts (tests/performance) are excluded: they are byte-identical in
 all three services and describe all three by design.
@@ -16,9 +16,12 @@ OTHERS = {
     "java": r"python|rust|fastapi|pydantic|axum|tokio|cargo|sibling|container\.py|_track_last_request",
     "rust": r"python|java|fastapi|pydantic|micronaut|maven|jvm|spring|sibling",
 }
-SUFFIXES = {".py", ".java", ".rs", ".yml", ".yaml", ".toml", ".xml", ".properties", ".sh"}
+SUFFIXES = {".py", ".java", ".rs", ".yml", ".yaml", ".toml", ".xml", ".properties", ".sh", ".md"}
 NAMES = {"Dockerfile"}
 SKIP_PARTS = {"target", "__pycache__", "performance", "node_modules", ".pytest_cache"}
+# The repo's own tooling, not a comparison: the pipeline command and the interpreter
+# the Rust SMF interop test runs.
+TOOLING = re.compile(r"python run_CICD\.py|SMF_PYTHON=\S+")
 
 # path (relative to the service) -> reason; for a reference that must stay
 ALLOWED: dict[str, dict[str, str]] = {
@@ -50,6 +53,6 @@ def test_no_reference_to_another_template(service: str) -> None:
         if rel in ALLOWED[service]:
             continue
         for n, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
-            if pattern.search(line):
+            if pattern.search(TOOLING.sub("", line)):
                 hits.append(f"{rel}:{n}: {line.strip()}")
     assert not hits, f"{service} refers to another template:\n" + "\n".join(hits)

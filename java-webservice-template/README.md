@@ -2,10 +2,9 @@
 
 A Micronaut (Java 25) webservice template: REST endpoints over Postgres, ClickHouse,
 Redis and an in-memory stream store fed by HTTP or Solace, with health, metrics, MCP
-tools, and tests against real dependencies. It is one of three sibling templates
-(Python, Java, Rust). Each is idiomatic in its own language; they share one wire
-contract (paths, snake_case JSON, `{"detail"}` errors, status codes, env vars), and
-parity is held by contract tests, not by mirroring code.
+tools, and tests against real dependencies. Its wire contract (paths, snake_case
+JSON, `{"detail"}` errors, status codes, env vars) is fixed and pinned by contract
+tests; inside, it is idiomatic Micronaut.
 
 ## Stack
 - **Micronaut 5** (platform 5.2.5) on **Java 25**, Maven, Netty, virtual threads
@@ -176,13 +175,13 @@ mounted at `/app/certs`; real deployments mount their own. Compose opts into
   not-found style result, a `CallToolResult` with `isError` (a thrown exception becomes
   a JSON-RPC protocol error). Test it with the SDK client in `McpEndpointTest`.
 
-## Deliberate differences from the Python and Rust templates
+## Design choices
 1. **Single-column LSM key**: the merge key is `id` only (`LSM_KEY_COLUMNS` accepts just `id`).
 2. **Stateless MCP transport** (micronaut-mcp's stateless Streamable HTTP: JSON responses,
-   no sessions); Python and Rust are session-based.
-3. **Lazy Solace connect** (above); Python connects in its lifespan and fails startup.
+   no sessions).
+3. **Lazy Solace connect** (above): startup does not wait for the broker.
 4. **Solace batch limit** is checked on the encoded payload before decoding; HTTP checks
-   the decoded Arrow buffers per batch, like the other templates.
+   the decoded Arrow buffers per batch.
 5. **`memory_rss_bytes` / `system_boot_seconds`** come from `/proc` and are `null`
    off Linux.
 

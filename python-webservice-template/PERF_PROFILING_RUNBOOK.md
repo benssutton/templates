@@ -81,7 +81,7 @@ Artifacts land in `tests/performance/profile/artifacts/`:
 | Layer 1 says | py-spy shows | Verdict | Investigate |
 |---|---|---|---|
 | Large share in `clickhouse.*` / `postgres.*` / `lsm.query` | threads parked in recv/await; sparse `flame_gil.svg` | **I/O-bound** on that store | pooling, query shape, indexing, network |
-| Large `app_residual` (or `ingest.decode`) | heavy Python frames in `flame_gil.svg` (pyarrow decode, polars merge, pydantic) | **CPU/GIL-bound** in-process | offload to a thread / Rust, reduce work |
+| Large `app_residual` (or `ingest.decode`) | heavy Python frames in `flame_gil.svg` (pyarrow decode, polars merge, pydantic) | **CPU/GIL-bound** in-process | offload to a thread or a native extension, reduce work |
 
 If `flame_gil.svg` is a small fraction of `flame_all.svg`, the process is
 waiting (I/O); if it is most of it, the process is computing under the GIL.

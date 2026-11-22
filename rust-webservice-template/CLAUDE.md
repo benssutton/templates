@@ -1,11 +1,11 @@
 # Rust Template
 
-An idiomatic axum/Tower service whose HTTP contract matches the Python and
-Java siblings. Read [README.md](README.md) first: the shared contract, the
+An idiomatic axum/Tower service with a fixed HTTP contract. Read
+[README.md](README.md) first: the shared contract, the
 feature map, the request path and the "Adding things" recipes.
 
 ## Commands
-From the repo root (p315 Python, see the root `CLAUDE.md`):
+From the repo root (the `p315` env, see the root `CLAUDE.md`):
 `python run_CICD.py rust fast` (fmt-check + clippy on both feature sets),
 `python run_CICD.py rust test` (one instrumented run, all features),
 `python run_CICD.py rust deny`. In this directory:
@@ -83,7 +83,7 @@ tests/it/          THE integration-test binary (main.rs + one module per feature
   Dockerfile, compose files and `.env.example` (sqlx checksums migrations,
   and CRLF scripts fail in Linux containers).
 - **k6 scripts are shared byte for byte** (root
-  `tests/cicd/test_perf_scripts.py`): change them in Python and copy.
+  `tests/cicd/test_perf_scripts.py`): change every service's copy together.
   Under Git Bash prefix `docker run ... /scripts/...` with `MSYS_NO_PATHCONV=1`.
 - **Coverage:** `--fail-under-lines 90`, no exclusions; a file that drags it
   down needs a test.
