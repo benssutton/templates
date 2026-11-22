@@ -2,6 +2,7 @@
 (undecoded) bodies, so each test sees exactly what a client receives."""
 
 import gzip
+import os
 from typing import Any
 
 from httpx import ASGITransport, AsyncClient
@@ -194,3 +195,91 @@ async def test_strict_mode_exempts_probes_metrics_mcp_and_preflight() -> None:
         assert r.status_code == 200, path
     preflight, _ = await send(app, "/data", method="OPTIONS", accept=None)
     assert preflight.status_code != 406
+
+
+BODY = b"hello world " * 100
+
+
+async def test_zstd_and_gzip_bodies_reach_the_app_decompressed() -> None:
+    for encoding, data in (
+        ("zstd", zstd.compress(BODY)),
+        ("gzip", gzip.compress(BODY)),
+        (" ZSTD ", zstd.compress(BODY)),
+    ):
+        r, raw = await send(
+            make_app(),
+            "/echo",
+            method="POST",
+            headers={"content-encoding": encoding},
+            content=data,
+        )
+        assert r.status_code == 200, encoding
+        assert raw == BODY
+        assert r.headers["x-seen-encoding"] == ""
+
+
+async def test_identity_and_absent_content_encoding_pass_through() -> None:
+    for headers in ({"content-encoding": "identity"}, {}):
+        r, raw = await send(
+            make_app(), "/echo", method="POST", headers=headers, content=BODY
+        )
+        assert r.status_code == 200 and raw == BODY
+
+
+async def test_unsupported_or_stacked_coding_is_415() -> None:
+    for encoding in ("br", "deflate", "gzip, zstd"):
+        r, raw = await send(
+            make_app(),
+            "/echo",
+            method="POST",
+            headers={"content-encoding": encoding},
+            content=BODY,
+        )
+        assert r.status_code == 415, encoding
+        assert r.headers["accept-encoding"] == "zstd, gzip"
+        assert raw == b'{"detail": "Unsupported Content-Encoding"}'
+
+
+async def test_undecodable_bodies_are_400() -> None:
+    frame = zstd.compress(BODY)
+    for encoding, data in (
+        ("zstd", b"not zstd at all"),
+        ("zstd", frame[:-4]),  # truncated
+        ("zstd", frame + b"trailing"),
+        ("gzip", b"not gzip"),
+        ("zstd", b""),
+    ):
+        r, raw = await send(
+            make_app(),
+            "/echo",
+            method="POST",
+            headers={"content-encoding": encoding},
+            content=data,
+        )
+        assert r.status_code == 400, data[:12]
+        assert raw == b'{"detail": "Malformed compressed request body"}'
+
+
+async def test_decompression_bomb_is_413_without_full_expansion() -> None:
+    bomb = zstd.compress(b"\0" * (LIMIT * 1000))  # 4 MB of zeros in a few hundred bytes
+    assert len(bomb) < LIMIT
+    r, _ = await send(
+        make_app(),
+        "/echo",
+        method="POST",
+        headers={"content-encoding": "zstd"},
+        content=bomb,
+    )
+    assert r.status_code == 413
+
+
+async def test_compressed_body_over_the_limit_is_413() -> None:
+    incompressible = zstd.compress(os.urandom(LIMIT * 2))
+    r, _ = await send(
+        make_app(),
+        "/echo",
+        method="POST",
+        headers={"content-encoding": "zstd"},
+        content=incompressible,
+    )
+    assert r.status_code == 413

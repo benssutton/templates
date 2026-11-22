@@ -57,6 +57,75 @@ async def _send_error(
     await send({"type": "http.response.body", "body": body})
 
 
+_PAYLOAD_TOO_LARGE = "Payload Too Large"
+
+
+class _MalformedBody(Exception):
+    pass
+
+
+def _decompress(coding: str, data: bytes, limit: int) -> bytes:
+    """At most limit + 1 bytes: one byte over is enough for the body limit to
+    refuse it, so a decompression bomb is never fully expanded. A single
+    frame/member only: trailing data is treated as malformed."""
+    try:
+        if coding == "zstd":
+            d = zstd.ZstdDecompressor()
+            out = d.decompress(data, max_length=limit + 1)
+            done, rest = d.eof, d.unused_data
+        else:
+            g = zlib.decompressobj(wbits=31)
+            out = g.decompress(data, limit + 1)
+            done, rest = g.eof, g.unused_data
+    except (zstd.ZstdError, zlib.error) as exc:
+        raise _MalformedBody from exc
+    if len(out) > limit:
+        return out
+    if not done or rest:
+        raise _MalformedBody
+    return out
+
+
+async def _read(receive: Receive, limit: int) -> bytes | None:
+    """The whole request body, or None once it passes `limit` bytes."""
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        message = await receive()
+        if message["type"] != "http.request":
+            return b"".join(chunks)  # disconnect: the app sees a short body
+        chunk = message.get("body", b"")
+        size += len(chunk)
+        if size > limit:
+            return None
+        chunks.append(chunk)
+        if not message.get("more_body", False):
+            return b"".join(chunks)
+
+
+def _replay(body: bytes, receive: Receive) -> Receive:
+    sent = False
+
+    async def replay() -> Message:
+        nonlocal sent
+        if sent:
+            return await receive()  # later calls wait for http.disconnect
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return replay
+
+
+def _decoded_scope(scope: Scope, length: int) -> Scope:
+    headers = [
+        (k, v)
+        for k, v in scope["headers"]
+        if k not in (b"content-encoding", b"content-length", b"transfer-encoding")
+    ]
+    headers.append((b"content-length", str(length).encode()))
+    return {**scope, "headers": headers}
+
+
 class _Encoder:
     """Streaming compressor; chunk() flushes so a streamed response is never held back."""
 
@@ -116,6 +185,29 @@ class CompressionMiddleware:
         ):
             await _send_error(send, 406, "Accept-Encoding must allow zstd")
             return
+        encoding = Headers(scope=scope).get("content-encoding", "").strip().lower()
+        if encoding not in ("", "identity"):
+            if encoding not in ("zstd", "gzip"):
+                await _send_error(
+                    send,
+                    415,
+                    "Unsupported Content-Encoding",
+                    [(b"accept-encoding", b"zstd, gzip")],
+                )
+                return
+            compressed = await _read(receive, self.max_body_bytes)
+            if compressed is None:
+                await _send_error(send, 413, _PAYLOAD_TOO_LARGE)
+                return
+            try:
+                body = _decompress(encoding, compressed, self.max_body_bytes)
+            except _MalformedBody:
+                await _send_error(send, 400, "Malformed compressed request body")
+                return
+            # An over-limit result keeps one extra byte; MaxBodySizeMiddleware,
+            # inside this one, answers its 413 from the Content-Length.
+            scope = _decoded_scope(scope, len(body))
+            receive = _replay(body, receive)
         if not self.enabled:
             await self.app(scope, receive, send)
             return
