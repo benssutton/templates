@@ -4,6 +4,7 @@
 //! Content-Type, 422 when it parses but is invalid.
 //! `ValidJson` and `ValidQuery` also run the type's garde rules.
 
+use crate::core::compression::CompressedRequest;
 use crate::error::AppError;
 use crate::ingestion::ipc::decode_stream;
 use arrow::array::RecordBatch;
@@ -31,11 +32,12 @@ where
     type Rejection = AppError;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let compressed = is_compressed(&req);
         let Json(value) = Json::<T>::from_request(req, state)
             .await
             .map_err(|rejection| match rejection {
                 JsonRejection::JsonDataError(e) => AppError::Unprocessable(e.body_text()),
-                JsonRejection::BytesRejection(e) => bytes_rejection(e),
+                JsonRejection::BytesRejection(e) => bytes_rejection(e, compressed),
                 JsonRejection::MissingJsonContentType(e) => {
                     AppError::UnsupportedMediaType(e.body_text())
                 }
@@ -66,12 +68,47 @@ where
     }
 }
 
-fn bytes_rejection(rejection: BytesRejection) -> AppError {
+/// A decoder error on a body that arrived zstd/gzip-encoded is a bad
+/// encoding; any other read error keeps axum's own text.
+fn bytes_rejection(rejection: BytesRejection, compressed: bool) -> AppError {
     if rejection.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE {
         AppError::PayloadTooLarge("request body exceeds max_request_body_bytes".into())
+    } else if compressed && is_decode_error(&rejection) {
+        AppError::BadRequest("Malformed compressed request body".into())
     } else {
         AppError::BadRequest(rejection.body_text())
     }
+}
+
+/// The decoders raise a bare `io::Error`, which ends up directly under an
+/// `axum::Error`: `Other` for corrupt zstd or deflate data, `InvalidData` for
+/// a bad gzip header or trailer, `UnexpectedEof` for a truncated stream.
+/// Errors from the inner body keep their own type (hyper's wrap an
+/// `io::Error` of the same kinds for a bad chunked body), so an `io::Error`
+/// under any other error is not the decoder's. `UnexpectedEof` counts
+/// because a client that really disconnected cannot receive this response.
+fn is_decode_error(error: &(dyn std::error::Error + 'static)) -> bool {
+    use std::io::ErrorKind;
+    let mut next = Some(error);
+    while let Some(err) = next {
+        next = err.source();
+        if err.is::<axum::Error>()
+            && let Some(io) = next.and_then(|e| e.downcast_ref::<std::io::Error>())
+        {
+            return matches!(
+                io.kind(),
+                ErrorKind::Other
+                    | ErrorKind::InvalidData
+                    | ErrorKind::InvalidInput
+                    | ErrorKind::UnexpectedEof
+            );
+        }
+    }
+    false
+}
+
+fn is_compressed(req: &Request) -> bool {
+    req.extensions().get::<CompressedRequest>().is_some()
 }
 
 /// An Arrow IPC stream body, fully decoded. Decoding is CPU work
@@ -107,9 +144,10 @@ impl<S: Send + Sync> FromRequest<S> for ArrowStream {
                 "Content-Type must be application/vnd.apache.arrow.stream".into(),
             ));
         }
+        let compressed = is_compressed(&req);
         let body = Bytes::from_request(req, state)
             .await
-            .map_err(bytes_rejection)?;
+            .map_err(|e| bytes_rejection(e, compressed))?;
         let decoded = crate::core::boundary_timing::timed(
             "ingest.decode",
             tokio::task::spawn_blocking(move || decode_stream(&body)),
@@ -119,5 +157,51 @@ impl<S: Send + Sync> FromRequest<S> for ArrowStream {
         decoded
             .map(Self)
             .map_err(|e| AppError::BadRequest(format!("body is not an Arrow IPC stream: {e}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_decode_error;
+    use std::io::{Error, ErrorKind};
+
+    fn wrapped(kind: ErrorKind) -> axum::Error {
+        axum::Error::new(Error::new(kind, "x"))
+    }
+
+    #[test]
+    fn decoder_errors_are_told_apart_from_connection_errors() {
+        for kind in [
+            ErrorKind::Other,
+            ErrorKind::InvalidData,
+            ErrorKind::InvalidInput,
+            ErrorKind::UnexpectedEof,
+        ] {
+            assert!(is_decode_error(&wrapped(kind)), "{kind:?}");
+        }
+        for kind in [ErrorKind::ConnectionReset, ErrorKind::BrokenPipe] {
+            assert!(!is_decode_error(&wrapped(kind)), "{kind:?}");
+        }
+        assert!(!is_decode_error(&axum::Error::new("connection closed")));
+        // An io::Error under another error type comes from the inner body.
+        for kind in [ErrorKind::UnexpectedEof, ErrorKind::InvalidData] {
+            let nested = axum::Error::new(Wrapper(Error::new(kind, "x")));
+            assert!(!is_decode_error(&nested), "{kind:?}");
+        }
+    }
+
+    #[derive(Debug)]
+    struct Wrapper(Error);
+
+    impl std::fmt::Display for Wrapper {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("body error")
+        }
+    }
+
+    impl std::error::Error for Wrapper {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
     }
 }

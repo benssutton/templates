@@ -29,6 +29,10 @@ solace = ["dep:fe2o3-amqp"]
 name = "lsm"
 harness = false
 
+[[bench]]
+name = "compression"
+harness = false
+
 [dependencies]
 anyhow = "1.0.104"
 # Atomically swapped LSM snapshot (readers never block the single writer).
@@ -81,7 +85,7 @@ thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["full"] }
 tokio-util = "0.7.20"
 tower = { version = "0.5.3", default-features = false, features = ["limit", "load-shed", "util"] }
-tower-http = { version = "0.6.11", features = ["compression-gzip", "cors", "limit", "normalize-path", "request-id", "timeout", "trace", "util"] }
+tower-http = { version = "0.6.11", features = ["compression-gzip", "compression-zstd", "cors", "decompression-gzip", "decompression-zstd", "limit", "map-request-body", "normalize-path", "request-id", "timeout", "trace", "util"] }
 tracing = "0.1.44"
 tracing-opentelemetry = { version = "0.34.0", default-features = false }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
@@ -95,6 +99,8 @@ uuid = { version = "1.29.2", features = ["v4"] }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 # Removes the shared test containers when the test binary exits (statics are never dropped).
 dtor = "1.0.7"
+# Decode compressed responses and build compressed request bodies in tests.
+flate2 = "1.1.9"
 rcgen = "0.14.10"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "http2", "rustls-no-provider"] }
 # No TLS features: the local npipe / unix Docker socket needs none, and the
@@ -104,6 +110,7 @@ testcontainers = { version = "0.27.3", default-features = false }
 testcontainers-modules = { version = "0.15.0", default-features = false, features = ["postgres", "redis"] }
 # Paused-clock tests for the ingest backoff, watchdog and consecutive-failure paths.
 tokio = { version = "1.54.1", features = ["full", "test-util"] }
+zstd = "0.14.4"
 
 [profile.release]
 lto = "fat"
