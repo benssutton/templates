@@ -45,7 +45,7 @@ tests/it/          THE integration-test binary (main.rs + one module per feature
   streams end with it) -> close consumer and stores (`App::close`).
 - **Compression.** `src/core/compression.rs`: `negotiate` (outside the
   compression layer) answers strict mode's 406 and unsupported-coding 415,
-  rewrites Accept-Encoding to an explicit zstd/gzip list (tower-http ignores
+  rewrites Accept-Encoding to the winning coding alone (tower-http ignores
   `*`) and adds Vary; `Compressible` decides what tower-http compresses.
   `RequestDecompressionLayer` must stay outside `RequestBodyLimitLayer` (limit
   on decompressed bytes) and inside `ensure_json`. `extract.rs` reports read

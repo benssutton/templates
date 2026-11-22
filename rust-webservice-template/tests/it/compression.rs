@@ -114,6 +114,7 @@ async fn q_values_wildcard_and_identity_are_honoured() {
     let app = app_with(|_| {}).await;
     for (accept, expected) in [
         ("zstd;q=0.5, gzip", Some("gzip")),
+        ("zstd;q=0.9996, gzip", Some("gzip")),
         ("*", Some("zstd")),
         ("*, zstd;q=0", Some("gzip")),
         ("identity", None),
@@ -144,6 +145,7 @@ async fn strict_mode_refuses_without_zstd_and_exempts_probes_metrics_mcp_preflig
         let (status, headers, body) = get(&app, reqwest::Method::GET, DOC, accept).await;
         assert_eq!(status, StatusCode::NOT_ACCEPTABLE, "{accept:?}");
         assert_eq!(encoding(&headers), None);
+        assert!(varies(&headers), "{accept:?}");
         let body: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body, json!({"detail": "Accept-Encoding must allow zstd"}));
     }
@@ -226,11 +228,40 @@ async fn unsupported_and_undecodable_bodies_are_refused() {
         assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE, "{coding}");
         assert_eq!(headers.get(ACCEPT_ENCODING).unwrap(), "zstd, gzip");
         assert_eq!(body, json!({"detail": "Unsupported Content-Encoding"}));
+        assert!(varies(&headers), "{coding}");
     }
+    // Codings stacked across two header lines are refused like a list.
+    let response = app
+        .client()
+        .post(app.url("/config"))
+        .header(CONTENT_TYPE, "application/json")
+        .header(CONTENT_ENCODING, "gzip")
+        .header(CONTENT_ENCODING, "zstd")
+        .body(config_body())
+        .send()
+        .await
+        .expect("POST");
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert_eq!(
+        response.headers().get(ACCEPT_ENCODING).unwrap(),
+        "zstd, gzip"
+    );
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body, json!({"detail": "Unsupported Content-Encoding"}));
     let (status, _, body) = post(
         &app,
         "/config",
         "application/json",
+        "zstd",
+        b"not zstd at all".to_vec(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body, json!({"detail": "Malformed compressed request body"}));
+    let (status, _, body) = post(
+        &app,
+        "/data/ingest",
+        "application/vnd.apache.arrow.stream",
         "zstd",
         b"not zstd at all".to_vec(),
     )

@@ -4,8 +4,8 @@
 //! `negotiate` runs outside tower-http's `CompressionLayer` and
 //! `RequestDecompressionLayer`. It answers strict mode's 406 itself, so that
 //! response is never compressed; refuses request codings other than zstd and
-//! gzip with 415; and rewrites `Accept-Encoding` to an explicit zstd/gzip
-//! list so the compression layer follows this module's rules (a `*` entry
+//! gzip with 415; and rewrites `Accept-Encoding` to the winning coding
+//! alone so the compression layer follows this module's rules (a `*` entry
 //! counts; HEAD responses are never encoded; a missing header means
 //! identity). It adds `Vary: Accept-Encoding` to every text-based response,
 //! compressed or not, so caches keep the variants apart.
@@ -38,18 +38,17 @@ impl Weights {
         self.zstd > 0.0
     }
 
-    /// The `Accept-Encoding` the compression layer sees; `None` when neither
-    /// coding is acceptable.
-    fn header(self) -> Option<HeaderValue> {
-        let parts: Vec<String> = [("zstd", self.zstd), ("gzip", self.gzip)]
-            .into_iter()
-            .filter(|(_, q)| *q > 0.0)
-            .map(|(name, q)| format!("{name};q={q:.3}"))
-            .collect();
-        if parts.is_empty() {
-            return None;
+    /// The `Accept-Encoding` the compression layer sees: only the winning
+    /// coding, so its own q-value handling cannot pick differently. zstd wins
+    /// ties; `None` when neither coding is acceptable.
+    fn winning_coding(self) -> Option<HeaderValue> {
+        if self.zstd > 0.0 && self.zstd >= self.gzip {
+            Some(HeaderValue::from_static("zstd"))
+        } else if self.gzip > 0.0 {
+            Some(HeaderValue::from_static("gzip"))
+        } else {
+            None
         }
-        HeaderValue::from_str(&parts.join(", ")).ok()
     }
 }
 
@@ -158,6 +157,15 @@ fn varies_on_accept_encoding(headers: &HeaderMap) -> bool {
         .any(|v| v.trim().eq_ignore_ascii_case("accept-encoding"))
 }
 
+fn with_vary(mut response: Response) -> Response {
+    if is_text(response.headers()) && !varies_on_accept_encoding(response.headers()) {
+        response
+            .headers_mut()
+            .append(header::VARY, HeaderValue::from_static("accept-encoding"));
+    }
+    response
+}
+
 /// State for `negotiate`.
 #[derive(Clone, Copy, Debug)]
 pub struct Negotiation {
@@ -183,10 +191,10 @@ pub async fn negotiate(
         && !exempt(req.uri().path())
         && !weights.is_some_and(Weights::accepts_zstd)
     {
-        return detail(
+        return with_vary(detail(
             StatusCode::NOT_ACCEPTABLE,
             "Accept-Encoding must allow zstd",
-        );
+        ));
     }
     match request_coding(req.headers()) {
         RequestCoding::Unsupported => {
@@ -198,7 +206,7 @@ pub async fn negotiate(
                 header::ACCEPT_ENCODING,
                 HeaderValue::from_static("zstd, gzip"),
             );
-            return response;
+            return with_vary(response);
         }
         RequestCoding::Encoded(coding) => {
             // Normalised, because the decompression layer matches exact bytes.
@@ -213,19 +221,13 @@ pub async fn negotiate(
     let accepted = if req.method() == Method::HEAD {
         None
     } else {
-        weights.and_then(Weights::header)
+        weights.and_then(Weights::winning_coding)
     };
     req.headers_mut().remove(header::ACCEPT_ENCODING);
     if let Some(value) = accepted {
         req.headers_mut().insert(header::ACCEPT_ENCODING, value);
     }
-    let mut response = next.run(req).await;
-    if is_text(response.headers()) && !varies_on_accept_encoding(response.headers()) {
-        response
-            .headers_mut()
-            .append(header::VARY, HeaderValue::from_static("accept-encoding"));
-    }
-    response
+    with_vary(next.run(req).await)
 }
 
 /// Which responses the compression layer may encode: text-based, not 204 or
@@ -311,29 +313,28 @@ mod tests {
     }
 
     #[test]
-    fn canonical_header_lists_only_acceptable_codings() {
-        let both = Weights {
-            zstd: 1.0,
-            gzip: 0.5,
+    fn rewritten_header_names_only_the_winner() {
+        let cases: [(&str, Option<&str>); 8] = [
+            ("zstd", Some("zstd")),
+            ("gzip", Some("gzip")),
+            ("zstd;q=0.5, gzip", Some("gzip")),
+            ("zstd;q=0.5, gzip;q=0.5", Some("zstd")),
+            // Distinct q-values must not round into a tie.
+            ("zstd;q=0.9996, gzip", Some("gzip")),
+            ("zstd;q=0.0001", Some("zstd")),
+            ("*, zstd;q=0", Some("gzip")),
+            ("identity", None),
+        ];
+        for (accept, expected) in cases {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::ACCEPT_ENCODING, HeaderValue::from_static(accept));
+            let winner = weights(&headers).and_then(Weights::winning_coding);
+            assert_eq!(
+                winner.as_ref().map(|v| v.to_str().unwrap()),
+                expected,
+                "{accept}"
+            );
         }
-        .header()
-        .unwrap();
-        assert_eq!(both, "zstd;q=1.000, gzip;q=0.500");
-        let gzip = Weights {
-            zstd: 0.0,
-            gzip: 1.0,
-        }
-        .header()
-        .unwrap();
-        assert_eq!(gzip, "gzip;q=1.000");
-        assert!(
-            Weights {
-                zstd: 0.0,
-                gzip: 0.0
-            }
-            .header()
-            .is_none()
-        );
     }
 
     #[test]
