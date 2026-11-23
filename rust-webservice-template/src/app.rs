@@ -1,7 +1,9 @@
 //! `create_app`: a fully isolated app per call (its own state, metrics
 //! registry and shutdown handle), so many apps can run in one test process.
 
-use crate::core::{auth, boundary_timing, cors, json_errors, last_request, request_id, telemetry};
+use crate::core::{
+    auth, boundary_timing, compression, cors, json_errors, last_request, request_id, telemetry,
+};
 use crate::error::AppError;
 use crate::ingestion;
 use crate::mcp;
@@ -20,8 +22,9 @@ use std::time::Duration;
 use tower::ServiceBuilder;
 use tower::limit::GlobalConcurrencyLimitLayer;
 use tower::util::MapRequest;
-use tower_http::compression::CompressionLayer;
+use tower_http::decompression::RequestDecompressionLayer;
 use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::map_request_body::MapRequestBodyLayer;
 use tower_http::request_id::{PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::{MakeSpan, OnResponse, TraceLayer};
@@ -157,9 +160,11 @@ impl<B> OnResponse<B> for AccessLog {
 }
 
 /// All routes and the middleware stack. Outermost first: request id ->
-/// access log -> compression -> JSON error bodies -> load shedding ->
-/// timeout -> CORS -> body limit -> Server-Timing -> last-request -> auth
-/// -> HTTP metrics -> handler.
+/// access log -> content-coding negotiation (406, 415, Vary) -> response
+/// compression -> JSON error bodies -> request decompression -> load
+/// shedding -> timeout -> CORS -> body limit -> Server-Timing ->
+/// last-request -> auth -> HTTP metrics -> handler. Decompression sits
+/// outside the body limit, so the limit counts decompressed bytes.
 ///
 /// Every layer is attached with `Router::layer`, which wraps each route (and
 /// the fallback) after path matching, so the metrics layer can read
@@ -222,8 +227,17 @@ pub fn router(state: AppState) -> Router {
         crate::core::retry::seconds(settings.request_timeout_seconds),
     ))
     .layer(shed(settings.max_concurrent_requests))
+    .layer(
+        ServiceBuilder::new()
+            .layer(RequestDecompressionLayer::new())
+            .layer(MapRequestBodyLayer::new(axum::body::Body::new)),
+    )
     .layer(map_response(json_errors::ensure_json))
-    .layer(CompressionLayer::new())
+    .layer(compression::response_layer(&settings))
+    .layer(from_fn_with_state(
+        compression::Negotiation::new(&settings),
+        compression::negotiate,
+    ))
     .layer(
         TraceLayer::new_for_http()
             .make_span_with(RequestSpan)

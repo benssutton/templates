@@ -201,6 +201,22 @@ pub struct Settings {
     #[garde(range(min = 1))]
     pub max_ingest_batch_bytes: usize,
 
+    /// Response compression: zstd preferred, gzip fallback, chosen from the
+    /// request's `Accept-Encoding`. zstd and gzip request bodies are always
+    /// accepted.
+    pub compression_enabled: bool,
+    /// Smaller responses go uncompressed: under one TCP segment, compressing
+    /// saves bytes but no round trips. Ignored in strict mode.
+    pub compression_min_bytes: u64,
+    /// Server-side only: high levels cost far more CPU for little gain. The
+    /// compression layer applies the same level to gzip, which caps it at 9.
+    #[garde(range(min = 1, max = 19))]
+    pub compression_zstd_level: i32,
+    /// 406 for clients whose `Accept-Encoding` does not allow zstd, except on
+    /// /health/live, /health/ready, /metrics and /mcp.
+    #[garde(custom(needs_compression(self.compression_enabled)))]
+    pub compression_require_zstd: bool,
+
     /// Request-id header name (inbound adoption + response echo).
     #[garde(custom(header_name))]
     pub correlation_id_header: String,
@@ -296,6 +312,10 @@ impl Default for Settings {
             ingest_max_in_flight: 4,
             max_request_body_bytes: 16 * 1024 * 1024,
             max_ingest_batch_bytes: 16 * 1024 * 1024,
+            compression_enabled: true,
+            compression_min_bytes: 1024,
+            compression_zstd_level: 3,
+            compression_require_zstd: false,
             correlation_id_header: "X-Request-ID".into(),
             cors_allow_origins: vec!["*".into()],
             cors_allow_methods: vec!["*".into()],
@@ -400,6 +420,16 @@ fn secret_when(enabled: bool) -> impl FnOnce(&SecretString, &()) -> garde::Resul
     move |secret, _| {
         if enabled && secret.expose_secret().is_empty() {
             Err(garde::Error::new("must be set when auth_enabled is true"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn needs_compression(enabled: bool) -> impl FnOnce(&bool, &()) -> garde::Result {
+    move |require, _| {
+        if *require && !enabled {
+            Err(garde::Error::new("true requires compression_enabled"))
         } else {
             Ok(())
         }

@@ -4,6 +4,12 @@ micronaut:
   server:
     port: ${SERVER_PORT:8443}
     max-request-size: ${MAX_REQUEST_BODY_BYTES:16777216}
+    netty:
+      # Content coding is done by core/compression's Netty handlers: Micronaut's
+      # compressor shares one level between gzip and zstd (gzip rejects levels above 9),
+      # and its request decoder has no zstd.
+      compression-threshold: -1
+      request-decompression-enabled: false
     cors:
       enabled: true
       configurations:
@@ -118,6 +124,12 @@ template:
   connect-max-attempts: ${CONNECT_MAX_ATTEMPTS:5}
   connect-base-delay-seconds: ${CONNECT_BASE_DELAY:1.0}
   connect-max-delay-seconds: ${CONNECT_MAX_DELAY:30.0}
+  compression:
+    enabled: ${COMPRESSION_ENABLED:true}
+    min-bytes: ${COMPRESSION_MIN_BYTES:1024}
+    zstd-level: ${COMPRESSION_ZSTD_LEVEL:3}   # 1-19
+    # true: 406 unless Accept-Encoding allows zstd (probes, /metrics and /mcp exempt).
+    require-zstd: ${COMPRESSION_REQUIRE_ZSTD:false}
   ingest:
     transport: ${INGEST_TRANSPORT:noop}   # noop (HTTP ingest only) | solace
     max-batch-bytes: ${MAX_INGEST_BATCH_BYTES:16777216}

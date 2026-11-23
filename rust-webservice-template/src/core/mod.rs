@@ -1,9 +1,10 @@
 //! Cross-cutting infrastructure: request ids, Server-Timing, CORS, JSON
-//! error bodies, authentication, last-request tracking, retry, shutdown,
-//! system metrics and telemetry.
+//! error bodies, content coding, authentication, last-request tracking,
+//! retry, shutdown, system metrics and telemetry.
 
 pub mod auth;
 pub mod boundary_timing;
+pub mod compression;
 pub mod cors;
 pub mod json_errors;
 pub mod last_request;

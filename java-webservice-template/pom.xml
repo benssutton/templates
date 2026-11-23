@@ -76,6 +76,14 @@
       <scope>compile</scope>
     </dependency>
 
+    <!-- zstd for HTTP content coding (Netty's ZstdEncoder/ZstdDecoder). The version
+         Netty 4.2.15 is built against. -->
+    <dependency>
+      <groupId>com.github.luben</groupId>
+      <artifactId>zstd-jni</artifactId>
+      <version>1.5.7-7</version>
+    </dependency>
+
     <dependency>
       <groupId>io.micronaut</groupId>
       <artifactId>micronaut-inject</artifactId>

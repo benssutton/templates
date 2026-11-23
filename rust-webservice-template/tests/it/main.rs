@@ -9,6 +9,7 @@ mod amqp_publisher;
 mod auth;
 mod boundary_timing;
 mod cache;
+mod compression;
 mod config;
 mod cors;
 mod data;
