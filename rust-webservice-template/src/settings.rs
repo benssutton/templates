@@ -8,6 +8,7 @@
 //! `from_vars`; `Settings::validate` is the same check for settings built
 //! in code (tests), and `create_app` calls it for that reason.
 
+use crate::persistence::stream_store::lsm::{LIVE_COLUMN, OP_COLUMN, ORDER_COLUMN};
 use axum::http::HeaderName;
 use garde::Validate;
 use secrecy::{ExposeSecret, SecretString};
@@ -137,8 +138,9 @@ pub struct Settings {
     #[garde(range(min = 1))]
     pub lsm_max_rows: usize,
     /// Merge partition key: the single extension point for a composite key.
+    /// Never a column the store owns (`op`, `seqno`, `_live`).
     #[serde(deserialize_with = "string_list")]
-    #[garde(length(min = 1))]
+    #[garde(length(min = 1), custom(no_store_columns))]
     pub lsm_key_columns: Vec<String>,
 
     #[garde(custom(transport_compiled_in))]
@@ -446,6 +448,25 @@ fn credentials_need_explicit_origins(
         } else {
             Ok(())
         }
+    }
+}
+
+/// The store drops `op` from what it stores, replaces `seqno` with its own
+/// write order and refuses a `_live` column, so a key on any of them would
+/// fail every merge or every batch.
+fn no_store_columns(keys: &[String], _: &()) -> garde::Result {
+    let reserved: Vec<&str> = keys
+        .iter()
+        .map(String::as_str)
+        .filter(|k| [OP_COLUMN, ORDER_COLUMN, LIVE_COLUMN].contains(k))
+        .collect();
+    if reserved.is_empty() {
+        Ok(())
+    } else {
+        Err(garde::Error::new(format!(
+            "reserved by the stream store: {}",
+            reserved.join(", ")
+        )))
     }
 }
 

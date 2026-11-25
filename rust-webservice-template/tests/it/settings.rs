@@ -268,6 +268,18 @@ fn remaining_bounds_are_enforced() {
     }
 }
 
+/// `op` is not stored in the store's parts and `seqno` is replaced by the
+/// write order, so a key on either would break every merge: refused.
+#[test]
+fn lsm_key_columns_refuse_the_store_columns() {
+    for value in [r#"["id", "op"]"#, "seqno"] {
+        let err = Settings::from_vars(vars(&[("LSM_KEY_COLUMNS", value)])).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("lsm_key_columns"), "{value}: {msg}");
+        assert!(msg.contains("reserved"), "{value}: {msg}");
+    }
+}
+
 #[test]
 fn ingest_retry_max_delay_below_base_delay_is_rejected() {
     let err = Settings::from_vars(vars(&[
