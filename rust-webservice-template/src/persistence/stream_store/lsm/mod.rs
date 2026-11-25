@@ -47,8 +47,9 @@ use kernels::{conform, drop_columns, key_converter, key_rows, merge_parts, prepa
 pub use part::LIVE_COLUMN;
 use part::Part;
 use std::collections::HashMap;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Monotonic per-row write order.
 pub const ORDER_COLUMN: &str = "seqno";
@@ -184,9 +185,16 @@ struct Core {
     /// this is the write amplification.
     written_total: AtomicU64,
     merge_failures_total: AtomicU64,
+    /// Set when a write panicked. The writer mutex does not poison, and a
+    /// panic can leave the index and bitmaps half-updated, so every later
+    /// write is refused.
+    poisoned: AtomicBool,
     /// Makes every merge fail, to test the retry rule.
     #[cfg(test)]
-    fail_merges: std::sync::atomic::AtomicBool,
+    fail_merges: AtomicBool,
+    /// Makes the next write panic once it has changed the index.
+    #[cfg(test)]
+    panic_next_write: AtomicBool,
 }
 
 impl LsmStore {
@@ -214,8 +222,11 @@ impl LsmStore {
                 evicted_total: AtomicU64::new(0),
                 written_total: AtomicU64::new(0),
                 merge_failures_total: AtomicU64::new(0),
+                poisoned: AtomicBool::new(false),
                 #[cfg(test)]
-                fail_merges: std::sync::atomic::AtomicBool::new(false),
+                fail_merges: AtomicBool::new(false),
+                #[cfg(test)]
+                panic_next_write: AtomicBool::new(false),
             }),
             writer: Arc::new(tokio::sync::Mutex::new(Writer::new(layers))),
         }
@@ -309,6 +320,24 @@ impl Core {
         Ok((schema, columns))
     }
 
+    /// `apply`, refused once poisoned. A panic in it poisons the store
+    /// before the writer lock is released, so no queued write runs on the
+    /// state it left behind.
+    fn write(&self, w: &mut Writer, batch: &RecordBatch) -> Result<u64, StoreError> {
+        if self.poisoned.load(Ordering::Acquire) {
+            return Err(StoreError::Internal(
+                "LSM store poisoned by a panicked write".into(),
+            ));
+        }
+        std::panic::catch_unwind(AssertUnwindSafe(|| self.apply(w, batch))).unwrap_or_else(|_| {
+            self.poisoned.store(true, Ordering::Release);
+            tracing::error!("LSM write panicked; the store refuses every later write");
+            Err(StoreError::Internal(
+                "LSM write panicked; the store is poisoned".into(),
+            ))
+        })
+    }
+
     /// The CPU half of `ingest`, run on the blocking pool with the writer
     /// lock held. Returns the number of live rows evicted by retention.
     fn apply(&self, w: &mut Writer, batch: &RecordBatch) -> Result<u64, StoreError> {
@@ -369,6 +398,10 @@ impl Core {
             }
         }
         w.kill(&dead);
+        #[cfg(test)]
+        if self.panic_next_write.swap(false, Ordering::Relaxed) {
+            panic!("injected write panic");
+        }
         let stored = prepared.stored.num_rows();
         if stored > 0 {
             w.layers[0].push(Part::new(part_id, prepared.stored, stored_keys));
@@ -492,7 +525,7 @@ impl Core {
 #[async_trait::async_trait]
 impl StreamStore for LsmStore {
     /// The writer lock is taken here, on the async side; only the CPU work
-    /// (`Core::apply`) runs on the blocking pool, so no async worker is held
+    /// (`Core::write`) runs on the blocking pool, so no async worker is held
     /// by a merge. The owned guard moves into the task, so the commit stays
     /// atomic and writes stay serialised. The task cannot be cancelled: once
     /// started, a write commits even if this future is dropped.
@@ -500,7 +533,7 @@ impl StreamStore for LsmStore {
         let mut guard = self.writer.clone().lock_owned().await;
         let core = self.core.clone();
         let span = tracing::Span::current();
-        tokio::task::spawn_blocking(move || span.in_scope(|| core.apply(&mut guard, &batch)))
+        tokio::task::spawn_blocking(move || span.in_scope(|| core.write(&mut guard, &batch)))
             .await
             .map_err(|e| StoreError::Internal(format!("LSM write task failed: {e}")))?
     }
@@ -544,6 +577,7 @@ impl StreamStore for LsmStore {
             max_rows: self.core.config.max_rows as u64,
             evicted_rows_total: self.core.evicted_total.load(Ordering::Relaxed),
             merge_failures_total: self.core.merge_failures_total.load(Ordering::Relaxed),
+            poisoned: self.core.poisoned.load(Ordering::Acquire),
         }
     }
 }

@@ -922,3 +922,26 @@ async fn a_failed_merge_is_retried_only_after_its_layer_grows() {
     assert_eq!(s.stats().merge_failures_total, 2);
     assert_eq!(ids(&s), (0..8).collect::<Vec<_>>());
 }
+
+/// The writer mutex does not poison, so a panic after the index changed
+/// would leave later writes running on corrupt state. The store poisons
+/// itself instead: every later write is refused, readers keep the last
+/// published snapshot, and `stats` reports it for readiness.
+#[tokio::test]
+async fn a_panicked_write_poisons_the_store() {
+    let s = store(4, 8);
+    write(&s, upserts(0..2, "a")).await;
+    s.core.panic_next_write.store(true, Ordering::Relaxed);
+    let err = s.ingest(upserts(0..1, "b")).await.unwrap_err();
+    assert!(
+        matches!(&err, StoreError::Internal(m) if m.contains("panicked")),
+        "{err}"
+    );
+    assert!(s.stats().poisoned);
+    let err = s.ingest(upserts(5..6, "c")).await.unwrap_err();
+    assert!(
+        matches!(&err, StoreError::Internal(m) if m == "LSM store poisoned by a panicked write"),
+        "{err}"
+    );
+    assert_eq!(values(&s), [(0, "a".to_owned()), (1, "a".to_owned())]);
+}

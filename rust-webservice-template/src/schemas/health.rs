@@ -57,6 +57,9 @@ pub struct StreamStoreStats {
     pub evicted_rows_total: u64,
     /// Merges that failed; each is retried once its layer gains a part.
     pub merge_failures_total: u64,
+    /// A write panicked, so the store refuses every later write; readiness
+    /// fails until the instance is restarted.
+    pub poisoned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
