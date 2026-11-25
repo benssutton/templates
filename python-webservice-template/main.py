@@ -10,7 +10,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from core.auth import BearerAuthMiddleware
 from core.boundary_timing import ServerTimingMiddleware
 from core.canonical_path import CanonicalPathMiddleware
-from core._compression_old import CompressionMiddleware
+from core.compression import add_content_coding
 from core.correlation import CorrelationIdMiddleware
 from core.errors import JsonErrorBodyMiddleware, register_exception_handlers
 from core.last_request import LastRequest, LastRequestMiddleware
@@ -162,11 +162,12 @@ def create_app(settings: Settings) -> FastAPI:
 
     # All pure ASGI, so MaxBodySizeMiddleware's mid-read 413 arrives as a plain
     # HTTPException, not an ExceptionGroup. Last added is outermost. Outside-in:
-    # CanonicalPath (every layer, auth included, sees the routed path), Compression
-    # (decompresses request bodies, so the body limit counts decompressed bytes),
-    # MaxBodySize, CorrelationId, CORS, BearerAuth (if enabled), ServerTiming,
-    # LastRequest, then routing and the /mcp mount (whose Host allow-list is
-    # FastMCP's own).
+    # CanonicalPath (every layer, auth included, sees the routed path),
+    # ContentNegotiation (406/415, picks the response coding),
+    # ResponseCompression, RequestDecompression (so the body limit counts
+    # decompressed bytes), MaxBodySize, CorrelationId, CORS, BearerAuth (if
+    # enabled), ServerTiming, LastRequest, then routing and the /mcp mount
+    # (whose Host allow-list is FastMCP's own).
     app.add_middleware(LastRequestMiddleware, last_request=last_request)
     # Just outside LastRequestMiddleware, so `total` covers handler + downstream I/O.
     app.add_middleware(ServerTimingMiddleware)
@@ -184,8 +185,8 @@ def create_app(settings: Settings) -> FastAPI:
         CorrelationIdMiddleware, header_name=settings.correlation_id_header
     )
     app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_request_body_bytes)
-    app.add_middleware(
-        CompressionMiddleware,
+    add_content_coding(
+        app,
         max_body_bytes=settings.max_request_body_bytes,
         enabled=settings.compression_enabled,
         min_bytes=settings.compression_min_bytes,
