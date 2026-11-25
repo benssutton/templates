@@ -121,7 +121,7 @@ class _CompressingSend:
         zstd_level: int,
     ) -> None:
         self._send = send
-        self._coding = coding
+        self._coding: Coding | None = coding
         self._head = head
         self._min_bytes = min_bytes
         self._zstd_level = zstd_level
