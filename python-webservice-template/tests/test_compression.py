@@ -8,12 +8,14 @@ from typing import Any
 from httpx import ASGITransport, AsyncClient
 from httpx import Response as HttpxResponse
 from starlette.applications import Starlette
+from starlette.datastructures import Headers
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 from starlette.types import Message, Receive, Scope, Send
 
-from core.compression import CompressionMiddleware
+from core._compression_old import CompressionMiddleware
+from core.compression.negotiation import ContentNegotiationMiddleware
 from core.request_limits import MaxBodySizeMiddleware
 from core.zstd_compat import zstd
 
@@ -519,3 +521,21 @@ async def test_disabled_errors_do_not_vary() -> None:
         )
         assert r.status_code == code
         assert "vary" not in r.headers
+
+
+async def test_the_app_sees_only_the_winning_coding() -> None:
+    """Negotiation rewrites Accept-Encoding to the one coding the response
+    layer will use (zstd wins ties; a `*` entry counts), or removes it."""
+    seen: list[str | None] = []
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        seen.append(Headers(scope=scope).get("accept-encoding"))
+        await Response(b"ok")(scope, receive, send)
+
+    negotiation = ContentNegotiationMiddleware(app)
+    async with AsyncClient(
+        transport=ASGITransport(app=negotiation), base_url="http://t"
+    ) as c:
+        for accept in ("gzip;q=0.5, zstd", "gzip, zstd;q=0.1", "*", "identity"):
+            await c.get("/x", headers={"accept-encoding": accept})
+    assert seen == ["zstd", "gzip", "zstd", None]

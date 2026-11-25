@@ -10,7 +10,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from core.auth import BearerAuthMiddleware
 from core.boundary_timing import ServerTimingMiddleware
 from core.canonical_path import CanonicalPathMiddleware
-from core.compression import CompressionMiddleware
+from core._compression_old import CompressionMiddleware
 from core.correlation import CorrelationIdMiddleware
 from core.errors import JsonErrorBodyMiddleware, register_exception_handlers
 from core.last_request import LastRequest, LastRequestMiddleware
