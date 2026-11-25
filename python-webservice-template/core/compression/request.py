@@ -103,6 +103,4 @@ class RequestDecompressionMiddleware:
         except _MalformedBody:
             await send_json_error(send, 400, "Malformed compressed request body")
             return
-        await self.app(
-            _decoded_scope(scope, len(body)), _replay(body, receive), send
-        )
+        await self.app(_decoded_scope(scope, len(body)), _replay(body, receive), send)

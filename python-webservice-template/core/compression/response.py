@@ -222,9 +222,7 @@ class _CompressingSend:
                 }
             )
         else:
-            await self._send(
-                {"type": "http.response.body", "body": encoder.last(body)}
-            )
+            await self._send({"type": "http.response.body", "body": encoder.last(body)})
 
 
 class ResponseCompressionMiddleware:

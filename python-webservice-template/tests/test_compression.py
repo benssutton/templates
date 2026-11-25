@@ -542,7 +542,9 @@ async def test_the_app_sees_only_the_winning_coding() -> None:
     assert seen == ["zstd", "gzip", "zstd", None]
 
 
-async def test_strict_mode_compresses_request_decoding_errors_like_any_response() -> None:
+async def test_strict_mode_compresses_request_decoding_errors_like_any_response() -> (
+    None
+):
     """Request decoding sits inside the response layer, so its JSON errors
     are compressed in strict mode like any other response."""
     r, raw = await send(
