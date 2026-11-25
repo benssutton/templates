@@ -122,11 +122,15 @@ written at most 4 times. `GET /data/cache` k-way merges the sorted parts and
 stops at `limit`; `LsmStore::live_batches` gives query engines each part with
 a zero-copy `_live` column. Over `LSM_MAX_ROWS` live rows the oldest are
 marked dead down to 90%, counted in `lsm_evicted_rows_total` and
-`/health/status` (`ingest.store`, which also reports `parts`).
+`/health/status` (`ingest.store`: `live_rows`, held `rows`, `parts`).
 `LSM_MAX_ROWS` caps live rows, not memory: a top-layer part is never
 rewritten, so its dead rows stay held (`ingest.store.rows`, `lsm_rows`) until
-every row in it is dead. Size `L` and `P` so that `P^L` batches (4,096 by
-default) cover the volume expected between restarts.
+every row in it is dead. A failed merge keeps its parts, is counted
+(`merge_failures_total`) and is retried once its layer gains a part. A
+write that panics poisons the store: later writes are refused and
+`/health/ready` fails (`ingest.store.poisoned`, `lsm_poisoned`). Size `L`
+and `P` so that `P^L` batches (4,096 by default) cover the volume expected
+between restarts.
 
 ## Choosing a broker (the `solace` feature)
 The default build has no broker: `INGEST_TRANSPORT=noop`, and

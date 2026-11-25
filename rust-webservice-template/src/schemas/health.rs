@@ -50,6 +50,8 @@ pub struct ProbeResult {
 pub struct StreamStoreStats {
     /// Rows physically held across every part, dead rows included.
     pub rows: u64,
+    /// Live rows: what `GET /data/cache` serves and `max_rows` caps.
+    pub live_rows: u64,
     /// Parts held across every layer.
     pub parts: u64,
     pub max_rows: u64,

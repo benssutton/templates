@@ -151,6 +151,7 @@ impl MetricsService {
             gauge!("ingest_seconds_since_last_batch")
                 .set(ingest.seconds_since_last_batch.unwrap_or(f64::NAN));
             gauge!("lsm_rows").set(ingest.store.rows as f64);
+            gauge!("lsm_live_rows").set(ingest.store.live_rows as f64);
             gauge!("lsm_parts").set(ingest.store.parts as f64);
             counter!("lsm_merge_failures_total").absolute(ingest.store.merge_failures_total);
             gauge!("lsm_poisoned").set(f64::from(u8::from(ingest.store.poisoned)));

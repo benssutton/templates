@@ -585,6 +585,7 @@ impl StreamStore for LsmStore {
         let snap = self.core.snapshot.load();
         StreamStoreStats {
             rows: snap.held_rows as u64,
+            live_rows: snap.live_rows as u64,
             parts: snap.parts.len() as u64,
             max_rows: self.core.config.max_rows as u64,
             evicted_rows_total: self.core.evicted_total.load(Ordering::Relaxed),

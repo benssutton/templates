@@ -758,6 +758,11 @@ async fn a_delete_after_a_merge_kills_the_merged_row() {
     assert_eq!(ids(&s), [0, 1, 2, 10, 11, 12, 13]);
     assert_eq!(s.layer_parts(), [0, 1, 0], "the delete stored nothing");
     assert_eq!(s.stats().rows, 8, "the dead row stays held in its part");
+    assert_eq!(
+        s.stats().live_rows,
+        7,
+        "rows counts held rows, live_rows the live ones"
+    );
 }
 
 /// Eviction takes the oldest rows across layers (the top first) and drops a
@@ -883,6 +888,7 @@ async fn random_writes_match_a_model() {
         let want: Vec<(i64, String)> = model.iter().map(|(k, (v, _))| (*k, v.clone())).collect();
         assert_eq!(values(&s), want, "step {step}");
         assert_eq!(s.query(0).unwrap().total, model.len(), "step {step}");
+        assert_eq!(s.stats().live_rows, model.len() as u64, "step {step}");
     }
     assert!(s.stats().evicted_rows_total > 0, "the run never evicted");
     assert!(
