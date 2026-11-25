@@ -684,7 +684,7 @@ fn check(s: &LsmStore) {
         panic!("a write is in progress");
     };
     let parts: HashMap<u64, &Part> = w.layers.iter().flatten().map(|p| (p.id, p)).collect();
-    let live: usize = parts.values().map(|p| p.live_rows).sum();
+    let live: usize = parts.values().map(|p| p.live_rows()).sum();
     assert_eq!(w.index.len(), live, "index entries != live rows");
     for (key, loc) in &w.index {
         let Some(part) = parts.get(&loc.part) else {
@@ -693,18 +693,18 @@ fn check(s: &LsmStore) {
         assert!(part.is_live(loc.row), "{loc:?} points at a dead row");
         assert_eq!(
             part.key(loc.row).as_ref(),
-            key.row().as_ref(),
+            &**key,
             "{loc:?} holds another key"
         );
     }
     for part in parts.values() {
         assert_eq!(
-            part.live_rows,
-            part.live.count_set_bits(),
+            part.live_rows(),
+            part.live().count_set_bits(),
             "part {}",
             part.id
         );
-        assert!(part.live_rows > 0, "part {} has no live rows", part.id);
+        assert!(part.live_rows() > 0, "part {} has no live rows", part.id);
     }
     let top = w.layers.len() - 1;
     for (i, layer) in w.layers[..top].iter().enumerate() {

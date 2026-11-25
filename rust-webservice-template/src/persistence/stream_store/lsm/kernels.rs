@@ -3,58 +3,71 @@
 
 use super::part::Part;
 use super::{DELETE_OP, OP_COLUMN, ORDER_COLUMN, StoreError};
-use arrow::array::{Array, ArrayRef, BooleanArray, RecordBatch, StringArray};
+use arrow::array::{Array, ArrayRef, BooleanArray, BooleanBufferBuilder, RecordBatch, StringArray};
 use arrow::compute::kernels::cmp::neq;
 use arrow::compute::{
     SortColumn, SortOptions, cast, concat_batches, filter_record_batch, lexsort_to_indices,
     take_record_batch,
 };
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use arrow::row::{RowConverter, Rows, SortField};
+use arrow::row::{Row, RowConverter, Rows, SortField};
 use std::sync::Arc;
 
 /// One stamped incoming frame, ready to write.
 pub(super) struct Prepared {
-    /// The newest row of every key in the frame (the last one written),
-    /// sorted by key.
-    pub newest: RecordBatch,
-    /// `is_delete[i]`: row `i` of `newest` deletes its key. A null `op`
+    /// The keys of the frame sorted on (key asc, seqno desc).
+    sorted_keys: Rows,
+    /// The newest row of every key (the last one written), in key order:
+    /// its row in `sorted_keys` and whether it deletes the key. A null `op`
     /// counts as a delete.
-    pub is_delete: Vec<bool>,
-    /// The rows of `newest` that are stored: every non-delete, still sorted
-    /// by key.
+    pub newest: Vec<(usize, bool)>,
+    /// The rows that are stored: the newest row of every key that is not a
+    /// delete, in key order, without `op` (it would only ever say upsert).
     pub stored: RecordBatch,
+    pub stored_keys: Rows,
 }
 
-pub(super) fn prepare(frame: &RecordBatch, keys: &[String]) -> Result<Prepared, StoreError> {
-    let newest = newest_per_key(frame, keys)?;
-    let op = cast(&column(&newest, OP_COLUMN)?, &DataType::Utf8)?;
-    let upsert = neq(&op, &StringArray::new_scalar(DELETE_OP))?;
-    let is_delete: Vec<bool> = (0..upsert.len())
-        .map(|i| !(upsert.is_valid(i) && upsert.value(i)))
-        .collect();
-    let keep: BooleanArray = is_delete.iter().map(|d| Some(!d)).collect();
-    let stored = filter_record_batch(&newest, &keep)?;
-    Ok(Prepared {
-        newest,
-        is_delete,
-        stored,
-    })
-}
-
-/// The newest row of every key: rows sorted on (key asc, seqno desc), then
-/// the first of each run of equal keys.
-fn newest_per_key(frame: &RecordBatch, keys: &[String]) -> Result<RecordBatch, StoreError> {
-    let sorted = sort(frame, keys, true)?;
-    if sorted.num_rows() == 0 {
-        return Ok(sorted);
+impl Prepared {
+    pub fn key(&self, sorted_row: usize) -> Row<'_> {
+        self.sorted_keys.row(sorted_row)
     }
-    let converter = key_converter(&sorted.schema(), keys)?;
-    let rows = key_rows(&converter, &sorted, keys)?;
-    let first_of_key: BooleanArray = (0..sorted.num_rows())
-        .map(|i| Some(i == 0 || rows.row(i) != rows.row(i - 1)))
-        .collect();
-    Ok(filter_record_batch(&sorted, &first_of_key)?)
+}
+
+/// Sort the frame on (key asc, seqno desc) and encode its keys once with
+/// the store's `converter`; the first row of each run of equal keys is the
+/// newest.
+pub(super) fn prepare(
+    frame: &RecordBatch,
+    keys: &[String],
+    converter: &RowConverter,
+) -> Result<Prepared, StoreError> {
+    let sorted = sort(frame, keys, true)?;
+    let sorted_keys = key_rows(converter, &sorted, keys)?;
+    let op = cast(&column(&sorted, OP_COLUMN)?, &DataType::Utf8)?;
+    let upsert = neq(&op, &StringArray::new_scalar(DELETE_OP))?;
+    let rows = sorted.num_rows();
+    let mut newest = Vec::new();
+    let mut keep = BooleanBufferBuilder::new(rows);
+    let mut stored_keys = converter.empty_rows(rows, 0);
+    for i in 0..rows {
+        let first_of_key = i == 0 || sorted_keys.row(i) != sorted_keys.row(i - 1);
+        let is_delete = !(upsert.is_valid(i) && upsert.value(i));
+        let stored = first_of_key && !is_delete;
+        keep.append(stored);
+        if first_of_key {
+            newest.push((i, is_delete));
+        }
+        if stored {
+            stored_keys.push(sorted_keys.row(i));
+        }
+    }
+    let stored = filter_record_batch(&sorted, &BooleanArray::new(keep.finish(), None))?;
+    Ok(Prepared {
+        sorted_keys,
+        newest,
+        stored: drop_columns(&stored, &[OP_COLUMN])?,
+        stored_keys,
+    })
 }
 
 /// The row-format encoder for the key columns. Encoded keys compare in the
@@ -93,7 +106,7 @@ pub(super) fn merge_parts(parts: &[Part], keys: &[String]) -> Result<RecordBatch
     };
     let live = parts
         .iter()
-        .map(|p| filter_record_batch(&p.batch, &BooleanArray::new(p.live.clone(), None)))
+        .map(|p| filter_record_batch(&p.batch, &BooleanArray::new(p.live().clone(), None)))
         .collect::<Result<Vec<_>, _>>()?;
     let combined = concat_batches(&first.batch.schema(), &live)?;
     sort(&combined, keys, false)

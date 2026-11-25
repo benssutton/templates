@@ -10,12 +10,19 @@
 //! When layer `i < L-1` holds `P` parts they are merged (live rows only)
 //! into one part appended to layer `i+1`. The top layer is never merged: it
 //! keeps accepting parts, so overflow happens only there. With batches
-//! counted as they arrive, a layer-`i` part covers at least `P^i` batches,
-//! at most `(L-1)(P-1)` parts sit below the top layer, the top layer holds
-//! at most `floor(n / P^(L-1))` parts after `n` batches, and every row is
-//! written at most `L` times. The first and third are exact until a batch
-//! stores nothing (all deletes) or a part is dropped because all its rows
-//! died: either way that layer fills more slowly.
+//! counted as they arrive:
+//! - coverage: a layer-`i` part covers at least `P^i` batches;
+//! - lower layers: at most `(L-1)(P-1)` parts sit below the top layer;
+//! - top layer: at most `floor(n / P^(L-1))` parts after `n` batches;
+//! - write amplification: every row is written at most `L` times.
+//!
+//! Coverage and the top-layer count are exact until a batch stores nothing
+//! (all deletes) or a part is dropped because all its rows died: either way
+//! that layer fills more slowly. A failed merge is retried only once its
+//! layer has gained a part, so the lower-layer bound waits for it.
+//!
+//! Parts do not store `op`: every stored row is an upsert, since a delete
+//! only clears a bit.
 //!
 //! Retention: over `max_rows` live rows, the oldest rows (lowest seqno) are
 //! marked dead down to 90% of the cap. A part with no live rows is dropped.
@@ -42,7 +49,7 @@ use arc_swap::ArcSwap;
 use arrow::array::{ArrayRef, RecordBatch, UInt64Array};
 use arrow::compute::interleave_record_batch;
 use arrow::datatypes::{Schema, SchemaRef};
-use arrow::row::{OwnedRow, RowConverter};
+use arrow::row::RowConverter;
 use kernels::{conform, drop_columns, key_converter, key_rows, merge_parts, prepare, quoted_list};
 pub use part::LIVE_COLUMN;
 use part::Part;
@@ -126,8 +133,9 @@ struct Writer {
     converter: Option<RowConverter>,
     /// `layers[0]` is layer 0; each layer's parts oldest first.
     layers: Vec<Vec<Part>>,
-    /// Every live key -> its row. Absent once deleted or evicted.
-    index: HashMap<OwnedRow, Loc>,
+    /// Every live key (row-format bytes) -> its row. Absent once deleted or
+    /// evicted. Looked up by `Row` bytes, so only a new key allocates.
+    index: HashMap<Box<[u8]>, Loc>,
     /// Per layer: the part count at which its merge last failed. The merge
     /// is retried only once the layer holds more parts than that.
     merge_failed_at: Vec<Option<usize>>,
@@ -149,7 +157,7 @@ impl Writer {
     }
 
     fn live_rows(&self) -> usize {
-        self.layers.iter().flatten().map(|p| p.live_rows).sum()
+        self.layers.iter().flatten().map(Part::live_rows).sum()
     }
 
     /// Clear rows (part id -> rows), copying each touched bitmap once, then
@@ -164,7 +172,7 @@ impl Writer {
             }
         }
         for layer in &mut self.layers {
-            layer.retain(|p| p.live_rows > 0);
+            layer.retain(|p| p.live_rows() > 0);
         }
     }
 }
@@ -311,8 +319,7 @@ impl Core {
             trial.push(Arc::new(UInt64Array::from_iter_values(0..rows as u64)) as ArrayRef);
             let frame = RecordBatch::try_new(schema.clone(), trial)?;
             let run = || -> Result<(), StoreError> {
-                let prepared = prepare(&frame, keys)?;
-                key_rows(&key_converter(&schema, keys)?, &prepared.stored, keys)?;
+                prepare(&frame, keys, &key_converter(&schema, keys)?)?;
                 Ok(())
             };
             run().map_err(|e| StoreError::InvalidBatch(format!("batch cannot be merged: {e}")))?;
@@ -353,23 +360,15 @@ impl Core {
         columns
             .push(Arc::new(UInt64Array::from_iter_values(start..start + rows as u64)) as ArrayRef);
         let frame = RecordBatch::try_new(schema.clone(), columns)?;
-        let prepared = prepare(&frame, keys)?;
         // Every fallible step runs before the first change to the writer, so
-        // a refused or failed write leaves the store as it was.
-        let fresh = match w.converter {
-            Some(_) => None,
-            None => Some(key_converter(&schema, keys)?),
+        // a refused or failed write leaves the store as it was. The first
+        // write's converter is kept only once the write has gone through.
+        let mut fresh = None;
+        let converter = match &w.converter {
+            Some(converter) => converter,
+            None => fresh.insert(key_converter(&schema, keys)?),
         };
-        let (newest_keys, stored_keys) = {
-            let converter = match (&fresh, &w.converter) {
-                (Some(c), _) | (None, Some(c)) => c,
-                (None, None) => return Err(StoreError::Internal("no key converter".into())),
-            };
-            (
-                key_rows(converter, &prepared.newest, keys)?,
-                key_rows(converter, &prepared.stored, keys)?,
-            )
-        };
+        let prepared = prepare(&frame, keys, converter)?;
         if let Some(converter) = fresh {
             w.converter = Some(converter);
         }
@@ -381,20 +380,23 @@ impl Core {
         let part_id = w.next_part_id();
         let mut dead: HashMap<u64, Vec<usize>> = HashMap::new();
         let mut stored_row = 0;
-        for (i, &is_delete) in prepared.is_delete.iter().enumerate() {
-            let key = newest_keys.row(i).owned();
-            if let Some(old) = w.index.remove(&key) {
-                dead.entry(old.part).or_default().push(old.row);
-            }
-            if !is_delete {
-                w.index.insert(
-                    key,
-                    Loc {
-                        part: part_id,
-                        row: stored_row,
-                    },
-                );
+        for &(i, is_delete) in &prepared.newest {
+            let key = prepared.key(i);
+            let old = if is_delete {
+                w.index.remove(key.as_ref())
+            } else {
+                let new = Loc {
+                    part: part_id,
+                    row: stored_row,
+                };
                 stored_row += 1;
+                match w.index.get_mut(key.as_ref()) {
+                    Some(loc) => Some(std::mem::replace(loc, new)),
+                    None => w.index.insert(key.as_ref().into(), new),
+                }
+            };
+            if let Some(old) = old {
+                dead.entry(old.part).or_default().push(old.row);
             }
         }
         w.kill(&dead);
@@ -404,7 +406,7 @@ impl Core {
         }
         let stored = prepared.stored.num_rows();
         if stored > 0 {
-            w.layers[0].push(Part::new(part_id, prepared.stored, stored_keys));
+            w.layers[0].push(Part::new(part_id, prepared.stored, prepared.stored_keys));
             self.written_total
                 .fetch_add(stored as u64, Ordering::Relaxed);
         }
@@ -465,9 +467,14 @@ impl Core {
         w.layers[layer].clear();
         let rows = merged.num_rows();
         if rows > 0 {
+            // Every merged row is live, so its key is indexed already: move
+            // the entry, allocating nothing.
             for row in 0..rows {
-                w.index
-                    .insert(merged_keys.row(row).owned(), Loc { part: id, row });
+                let indexed = w.index.get_mut(merged_keys.row(row).as_ref());
+                debug_assert!(indexed.is_some(), "a live row was not indexed");
+                if let Some(loc) = indexed {
+                    *loc = Loc { part: id, row };
+                }
             }
             self.written_total.fetch_add(rows as u64, Ordering::Relaxed);
             w.layers[layer + 1].push(Part::new(id, merged, merged_keys));
@@ -494,7 +501,7 @@ impl Core {
             }
             let rows = part.oldest_live_rows(excess);
             for &row in &rows {
-                index.remove(&part.key(row).owned());
+                index.remove(part.key(row).as_ref());
             }
             excess -= rows.len();
             dead.insert(part.id, rows);
@@ -513,7 +520,7 @@ impl Core {
     fn publish(&self, w: &Writer) {
         let parts: Vec<Part> = w.layers.iter().rev().flatten().cloned().collect();
         self.snapshot.store(Arc::new(Snapshot {
-            live_rows: parts.iter().map(|p| p.live_rows).sum(),
+            live_rows: parts.iter().map(Part::live_rows).sum(),
             held_rows: parts.iter().map(Part::rows).sum(),
             layer_parts: w.layers.iter().map(Vec::len).collect(),
             schema: w.schema.clone(),
@@ -561,10 +568,15 @@ impl StreamStore for LsmStore {
             });
         }
         let picks = read::ordered_live(&snap.parts, limit);
-        let batches: Vec<&RecordBatch> = snap.parts.iter().map(|p| &p.batch).collect();
-        let page = interleave_record_batch(&batches, &picks)?;
+        // Project first, so the interleave copies only the columns served.
+        let data = snap
+            .parts
+            .iter()
+            .map(|p| drop_columns(&p.batch, &[ORDER_COLUMN]))
+            .collect::<Result<Vec<_>, _>>()?;
+        let batches: Vec<&RecordBatch> = data.iter().collect();
         Ok(QueryResult {
-            rows: Some(drop_columns(&page, &[ORDER_COLUMN, OP_COLUMN])?),
+            rows: Some(interleave_record_batch(&batches, &picks)?),
             total: snap.live_rows,
         })
     }

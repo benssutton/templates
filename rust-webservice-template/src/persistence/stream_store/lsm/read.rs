@@ -17,8 +17,9 @@ pub(super) fn ordered_live(parts: &[Part], limit: usize) -> Vec<(usize, usize)> 
             heads.push(Reverse((part.key(row), i, row)));
         }
     }
-    let wanted = if limit == 0 { usize::MAX } else { limit };
-    let mut picks = Vec::new();
+    let live: usize = parts.iter().map(Part::live_rows).sum();
+    let wanted = if limit == 0 { live } else { limit.min(live) };
+    let mut picks = Vec::with_capacity(wanted);
     while picks.len() < wanted {
         let Some(Reverse((_, part, row))) = heads.pop() else {
             break;

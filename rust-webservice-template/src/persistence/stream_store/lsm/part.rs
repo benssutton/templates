@@ -16,14 +16,16 @@ pub const LIVE_COLUMN: &str = "_live";
 pub(super) struct Part {
     /// Unique per store; the index locates rows by it.
     pub(super) id: u64,
-    /// Data columns plus `seqno`, sorted by key. Never changes.
+    /// Data columns (no `op`: every stored row is an upsert) plus `seqno`,
+    /// sorted by key. Never changes.
     pub(super) batch: RecordBatch,
     /// Every row's key in the writer's row format: ordered reads compare
     /// them, merges re-index with them.
     keys: Arc<Rows>,
     /// Bit `i` is set while row `i` is the live version of its key.
-    pub(super) live: BooleanBuffer,
-    pub(super) live_rows: usize,
+    live: BooleanBuffer,
+    /// The popcount of `live`, maintained by `kill`.
+    live_rows: usize,
 }
 
 impl Part {
@@ -51,8 +53,17 @@ impl Part {
         self.live.value(row)
     }
 
-    /// Clear the bits of `rows`. The bitmap is rebuilt rather than changed in
-    /// place, so a published snapshot keeps seeing the old one.
+    pub(super) fn live(&self) -> &BooleanBuffer {
+        &self.live
+    }
+
+    pub(super) fn live_rows(&self) -> usize {
+        self.live_rows
+    }
+
+    /// Clear the bits of `rows`, which must be distinct live rows. The bitmap
+    /// is rebuilt rather than changed in place, so a published snapshot keeps
+    /// seeing the old one.
     pub(super) fn kill(&mut self, rows: &[usize]) {
         let mut bits = BooleanBufferBuilder::new(self.rows());
         bits.append_buffer(&self.live);
@@ -60,7 +71,12 @@ impl Part {
             bits.set_bit(row, false);
         }
         self.live = bits.finish();
-        self.live_rows = self.live.count_set_bits();
+        self.live_rows -= rows.len();
+        debug_assert_eq!(
+            self.live_rows,
+            self.live.count_set_bits(),
+            "killed a dead or repeated row"
+        );
     }
 
     /// Up to `n` live rows with the lowest seqno, i.e. the oldest writes.
