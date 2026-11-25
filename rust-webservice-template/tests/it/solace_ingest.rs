@@ -14,7 +14,7 @@ use crate::support::solace::{
 use rust_template::core::shutdown::Shutdown;
 use rust_template::ingestion;
 use rust_template::persistence::stream_store::StreamStore;
-use rust_template::persistence::stream_store::lsm::LsmStore;
+use rust_template::persistence::stream_store::lsm::{LsmConfig, LsmStore};
 use rust_template::services::stream_ingest::StreamIngestService;
 use rust_template::settings::Settings;
 use std::collections::HashSet;
@@ -23,10 +23,11 @@ use std::time::{Duration, Instant};
 
 const CACHE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// lsm_flush_rows=2, lsm_compaction_runs=2 (solace_settings):
-///   BATCH_1: 2 rows -> flush -> run1
-///   BATCH_2: 2 rows -> flush -> run2 -> compaction: id 1 gets v2
-///   BATCH_3: 1 row  -> a memtable tombstone beats id 2 in the compacted run
+/// lsm_layers=2, lsm_parts_per_layer=2 (solace_settings):
+///   BATCH_1: 2 rows -> layer-0 part 1
+///   BATCH_2: 2 rows -> part 2 supersedes id 1 (v2); parts 1 and 2 merge
+///            into one top-layer part
+///   BATCH_3: 1 row  -> a delete kills id 2 in the merged part
 /// Published ONCE each: the durable queue guarantees delivery.
 #[tokio::test]
 async fn three_batches_merge_newest_wins_with_a_tombstone() {
@@ -57,11 +58,11 @@ async fn three_batches_merge_newest_wins_with_a_tombstone() {
     assert_eq!(
         v.get(&1).map(String::as_str),
         Some("v2"),
-        "newest wins across compaction"
+        "newest wins across a merge"
     );
     assert!(
         !v.contains_key(&2),
-        "the memtable tombstone beats the compacted run"
+        "the delete kills the row in the merged part"
     );
     assert_eq!(
         v.get(&3).map(String::as_str),
@@ -91,7 +92,7 @@ async fn message_acked_only_after_lsm_write() {
     let consumer = ingestion::connect(&settings)
         .await
         .expect("Solace consumer");
-    let store = Arc::new(GatedStore::new(LsmStore::new(100, 4, vec!["id".into()])));
+    let store = Arc::new(GatedStore::new(LsmStore::new(LsmConfig::default())));
     let svc = StreamIngestService::start(settings, consumer, store.clone(), Shutdown::new(), None);
     wait_for_bound(&semp, &names.queue).await;
 

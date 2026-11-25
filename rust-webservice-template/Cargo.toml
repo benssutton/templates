@@ -95,7 +95,7 @@ utoipa-swagger-ui = { version = "10.0.2", features = ["axum"] }
 uuid = { version = "1.29.2", features = ["v4"] }
 
 [dev-dependencies]
-# LSM merge/compaction benchmark (benches/lsm.rs). No plotters, no rayon.
+# LSM ingest and query benchmark (benches/lsm.rs). No plotters, no rayon.
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 # Removes the shared test containers when the test binary exits (statics are never dropped).
 dtor = "1.0.7"

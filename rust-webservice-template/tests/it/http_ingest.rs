@@ -40,11 +40,12 @@ fn value_of(body: &Value, id: u64) -> Option<String> {
         .map(|r| r["value"].as_str().unwrap().to_owned())
 }
 
-/// Small flush and compaction thresholds so a few rows exercise both.
+/// Two layers of two parts, so a few batches exercise a merge and the top
+/// layer's overflow.
 async fn settings() -> Settings {
     Settings {
-        lsm_flush_rows: 2,
-        lsm_compaction_runs: 2,
+        lsm_layers: 2,
+        lsm_parts_per_layer: 2,
         ..app_settings().await
     }
 }

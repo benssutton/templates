@@ -13,7 +13,7 @@ use rust_template::core::shutdown::Shutdown;
 use rust_template::health::registry::ProbeRegistry;
 use rust_template::ingestion::ipc::batch_bytes;
 use rust_template::ingestion::{BatchConsumer, ConnectionState, Delivery, Settle};
-use rust_template::persistence::stream_store::lsm::LsmStore;
+use rust_template::persistence::stream_store::lsm::{LsmConfig, LsmStore};
 use rust_template::persistence::stream_store::{QueryResult, StoreError, StreamStore};
 use rust_template::schemas::health::Status;
 use rust_template::services::health::HealthService;
@@ -220,7 +220,7 @@ fn settings() -> Settings {
 }
 
 fn lsm() -> Arc<LsmStore> {
-    Arc::new(LsmStore::new(100, 4, vec!["id".into()]))
+    Arc::new(LsmStore::new(LsmConfig::default()))
 }
 
 fn start(
@@ -589,7 +589,7 @@ async fn close_during_a_transport_backoff_is_prompt() {
 /// the bookkeeping of a write that commits anyway.
 #[tokio::test]
 async fn a_dropped_http_ingest_still_records_the_committed_rows() {
-    let store = Arc::new(GatedStore::new(LsmStore::new(100, 4, vec!["id".into()])));
+    let store = Arc::new(GatedStore::new(LsmStore::new(LsmConfig::default())));
     let metrics = Arc::new(MetricsService::new(&Settings::default()).unwrap());
     let svc = StreamIngestService::start(
         Arc::new(settings()),
