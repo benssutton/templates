@@ -898,35 +898,35 @@ async fn random_writes_match_a_model() {
 }
 
 /// A failed merge leaves the parts where they are (nothing is lost), is
-/// counted, and is retried only once its layer has gained a part: a
-/// deterministic failure must not re-copy the whole layer on every write.
+/// counted, and is retried only once its layer's part count has doubled
+/// since the failure. A permanent failure then costs a logarithmic number
+/// of whole-layer copies, not one per write.
 #[tokio::test]
-async fn a_failed_merge_is_retried_only_after_its_layer_grows() {
+async fn a_failed_merge_is_retried_only_once_its_layer_has_doubled() {
     let s = store(3, 2);
     s.core.fail_merges.store(true, Ordering::Relaxed);
     write(&s, upserts(0..2, "a")).await;
     write(&s, upserts(2..4, "a")).await;
     assert_eq!(s.layer_parts(), [2, 0, 0]);
     assert_eq!(s.stats().merge_failures_total, 1);
-    // No new part: no retry.
-    write(&s, batch(&[(9, "n", "", "delete")])).await;
-    assert_eq!(s.stats().merge_failures_total, 1);
-    // A new part: retried, and it fails again.
+    // No new part, then 3 parts (< 2 x 2): no retry.
+    write(&s, batch(&[(99, "n", "", "delete")])).await;
     write(&s, upserts(4..6, "a")).await;
     assert_eq!(s.layer_parts(), [3, 0, 0]);
-    assert_eq!(s.stats().merge_failures_total, 2);
-    assert_eq!(ids(&s), (0..6).collect::<Vec<_>>());
-    s.core.fail_merges.store(false, Ordering::Relaxed);
-    write(&s, batch(&[(9, "n", "", "delete")])).await;
-    assert_eq!(
-        s.layer_parts(),
-        [3, 0, 0],
-        "still no retry without a new part"
-    );
+    assert_eq!(s.stats().merge_failures_total, 1);
+    // 4 parts: retried, and it fails again; the next retry waits for 8.
     write(&s, upserts(6..8, "a")).await;
+    assert_eq!(s.stats().merge_failures_total, 2);
+    s.core.fail_merges.store(false, Ordering::Relaxed);
+    for n in 4..7_i64 {
+        write(&s, upserts(n * 2..n * 2 + 2, "a")).await;
+    }
+    assert_eq!(s.layer_parts(), [7, 0, 0], "still waiting for 8 parts");
+    assert_eq!(ids(&s), (0..14).collect::<Vec<_>>());
+    write(&s, upserts(14..16, "a")).await;
     assert_eq!(s.layer_parts(), [0, 1, 0]);
     assert_eq!(s.stats().merge_failures_total, 2);
-    assert_eq!(ids(&s), (0..8).collect::<Vec<_>>());
+    assert_eq!(ids(&s), (0..16).collect::<Vec<_>>());
 }
 
 /// The writer mutex does not poison, so a panic after the index changed

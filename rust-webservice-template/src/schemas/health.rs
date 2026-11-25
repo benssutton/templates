@@ -57,7 +57,8 @@ pub struct StreamStoreStats {
     pub max_rows: u64,
     /// Live rows evicted (oldest first) to keep under `max_rows`.
     pub evicted_rows_total: u64,
-    /// Merges that failed; each is retried once its layer gains a part.
+    /// Merges that failed; each is retried once its layer's part count has
+    /// doubled.
     pub merge_failures_total: u64,
     /// A write panicked, so the store refuses every later write; readiness
     /// fails until the instance is restarted.

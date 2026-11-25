@@ -19,7 +19,7 @@
 //! Coverage and the top-layer count are exact until a batch stores nothing
 //! (all deletes) or a part is dropped because all its rows died: either way
 //! that layer fills more slowly. A failed merge is retried only once its
-//! layer has gained a part, so the lower-layer bound waits for it.
+//! layer's part count has doubled, so the lower-layer bound waits for it.
 //!
 //! Parts do not store `op`: every stored row is an upsert, since a delete
 //! only clears a bit.
@@ -137,7 +137,7 @@ struct Writer {
     /// evicted. Looked up by `Row` bytes, so only a new key allocates.
     index: HashMap<Box<[u8]>, Loc>,
     /// Per layer: the part count at which its merge last failed. The merge
-    /// is retried only once the layer holds more parts than that.
+    /// is retried only once the layer holds twice that many parts.
     merge_failed_at: Vec<Option<usize>>,
 }
 
@@ -418,9 +418,10 @@ impl Core {
 
     /// Merge every lower layer that holds `P` parts into the next one up.
     /// A failed merge loses nothing (the parts stay where they are) and is
-    /// counted. It is retried only once the layer has gained a part since:
-    /// a deterministic failure (an offset overflow in a huge layer, say)
-    /// would otherwise re-copy the whole layer on every write.
+    /// counted. It is retried only once the layer's part count has doubled
+    /// since. A deterministic failure (an offset overflow in a huge layer,
+    /// say) then costs a logarithmic number of whole-layer copies instead of
+    /// one per write.
     fn cascade(&self, w: &mut Writer) {
         let top = w.layers.len() - 1;
         for layer in 0..top {
@@ -429,7 +430,7 @@ impl Core {
                 w.merge_failed_at[layer] = None;
                 continue;
             }
-            if w.merge_failed_at[layer].is_some_and(|failed| parts <= failed) {
+            if w.merge_failed_at[layer].is_some_and(|failed| parts < 2 * failed) {
                 continue;
             }
             match self.merge_layer(w, layer) {
@@ -441,7 +442,7 @@ impl Core {
                         error = %err,
                         layer,
                         parts,
-                        "LSM merge failed; retried once the layer gains a part"
+                        "LSM merge failed; retried once the layer's part count doubles"
                     );
                 }
             }
