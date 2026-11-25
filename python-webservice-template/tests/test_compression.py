@@ -1,7 +1,8 @@
-"""CompressionMiddleware on a minimal app: real HTTP through ASGITransport, raw
+"""The content-coding middlewares on a minimal app: real HTTP through ASGITransport, raw
 (undecoded) bodies, so each test sees exactly what a client receives."""
 
 import gzip
+import json
 import os
 from typing import Any
 
@@ -14,7 +15,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 from starlette.types import Message, Receive, Scope, Send
 
-from core._compression_old import CompressionMiddleware
+from core.compression import ResponseCompressionMiddleware, add_content_coding
 from core.compression.negotiation import ContentNegotiationMiddleware
 from core.request_limits import MaxBodySizeMiddleware
 from core.zstd_compat import zstd
@@ -144,7 +145,7 @@ def make_app(**options: Any) -> Starlette:
         ]
     )
     app.add_middleware(MaxBodySizeMiddleware, max_bytes=LIMIT)
-    app.add_middleware(CompressionMiddleware, max_body_bytes=LIMIT, **options)
+    add_content_coding(app, max_body_bytes=LIMIT, **options)
     return app
 
 
@@ -285,7 +286,7 @@ async def call_raw(messages: list[Message]) -> list[Message]:
         "path": "/file",
         "headers": [(b"accept-encoding", b"zstd")],
     }
-    await CompressionMiddleware(app, max_body_bytes=LIMIT)(scope, receive, record)
+    await ResponseCompressionMiddleware(app)(scope, receive, record)
     return sent
 
 
@@ -539,3 +540,22 @@ async def test_the_app_sees_only_the_winning_coding() -> None:
         for accept in ("gzip;q=0.5, zstd", "gzip, zstd;q=0.1", "*", "identity"):
             await c.get("/x", headers={"accept-encoding": accept})
     assert seen == ["zstd", "gzip", "zstd", None]
+
+
+async def test_strict_mode_compresses_request_decoding_errors_like_any_response() -> None:
+    """Request decoding sits inside the response layer, so its JSON errors
+    are compressed in strict mode like any other response."""
+    r, raw = await send(
+        make_app(require_zstd=True),
+        "/echo",
+        method="POST",
+        accept="zstd",
+        headers={"content-encoding": "zstd"},
+        content=b"not zstd",
+    )
+    assert r.status_code == 400
+    assert r.headers["content-encoding"] == "zstd"
+    assert vary(r) == ["accept-encoding"]
+    assert json.loads(zstd.decompress(raw)) == {
+        "detail": "Malformed compressed request body"
+    }
