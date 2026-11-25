@@ -8,7 +8,7 @@ Inside, it is written the way an axum service is written: one Tower
 error type, and traits only at real seams.
 
 Rust is the repo's choice for CPU-heavy or highly concurrent work (root
-README, "Languages"). Here that is the LSM stream store: merge and compaction
+README, "Languages"). Here that is the LSM stream store: ingest and part merges
 run on arrow-rs compute kernels on tokio's blocking pool, and readers never
 block the single writer.
 
@@ -110,12 +110,19 @@ with the first batch) and against the read model `GET /data/cache` serves
 before any batch is written. Over HTTP that is 413 or 422 with nothing
 written; on the stream, a reject. Arrow IPC is decoded on the blocking pool.
 
-The store holds at most `LSM_MAX_ROWS` rows: over it, it first compacts
-(dropping shadowed versions and tombstones, which loses nothing) and only
-then evicts the oldest rows, counted in `lsm_evicted_rows_total` and
-`/health/status` (`ingest.store`). A read builds the merged view of the
-current snapshot once and caches it on the snapshot, so repeated reads cost
-a slice.
+The store is layered and supersedes on write. A writer-private index maps
+every key to its live row. A newer version, or a delete, clears the old
+row's bit in that part's `live` bitmap, and deletes are never stored, so
+reads never deduplicate. Each incoming batch becomes one part in layer 0,
+sorted by key. When a layer below the top holds `LSM_PARTS_PER_LAYER` (P = 8)
+parts, they merge (live rows only) into one part a layer up; the top layer
+(`LSM_LAYERS`, L = 4) is never merged. So at most 21 parts sit below the top
+layer, a top-layer part covers 512 batches, and every row is written at most
+4 times. `GET /data/cache` k-way merges the sorted parts and stops at
+`limit`; `LsmStore::live_batches` gives query engines each part with a
+zero-copy `_live` column. Over `LSM_MAX_ROWS` live rows the oldest are
+marked dead down to 90%, counted in `lsm_evicted_rows_total` and
+`/health/status` (`ingest.store`, which also reports `parts`).
 
 ## Choosing a broker (the `solace` feature)
 The default build has no broker: `INGEST_TRANSPORT=noop`, and

@@ -21,7 +21,7 @@ src/extract.rs     ValidJson / ValidQuery (garde) / ArrowStream: rejections are 
 src/error.rs       AppError -> {"detail"}; From<store errors> splits outage (503) from bug (500)
 src/core/          request_id, json_errors, compression, auth, telemetry, boundary_timing, cors, retry, shutdown, ...
 src/services/      config, data, cache, health (cached probes), metrics, stream_ingest
-src/persistence/   stores (connect + smoke test + probe + migrate); stream_store/lsm/ (mod, kernels, tests)
+src/persistence/   stores (connect + smoke test + probe + migrate); stream_store/lsm/ (mod: store + layers, part, read, kernels, tests)
 src/ingestion/     BatchConsumer / Settle seam, noop, ipc; solace/ behind the `solace` feature
 src/mcp/           rmcp service + tools mirroring the REST reads
 migrations/        postgres/ (sqlx, embedded) and clickhouse/ (applied by the app)
@@ -52,8 +52,8 @@ tests/it/          THE integration-test binary (main.rs + one module per feature
   on decompressed bytes) and inside `ensure_json`. `extract.rs` reports decoder
   errors on a `CompressedRequest` as 400 "Malformed compressed request body".
 - **Settle after write; CPU off the async workers.** Arrow decoding, LSM
-  merge/compaction and sysinfo run on the blocking pool; each LSM write is a
-  detached task, so a dropped request still records its rows.
+  writes and merges, and sysinfo run on the blocking pool; each LSM write is
+  a detached task, so a dropped request still records its rows.
 - **Helpers added before their first user** get
   `#[expect(dead_code, reason = "...")]`; remove it with the first use.
 
