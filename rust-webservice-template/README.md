@@ -117,12 +117,16 @@ reads never deduplicate. Each incoming batch becomes one part in layer 0,
 sorted by key. When a layer below the top holds `LSM_PARTS_PER_LAYER` (P = 8)
 parts, they merge (live rows only) into one part a layer up; the top layer
 (`LSM_LAYERS`, L = 4) is never merged. So at most 21 parts sit below the top
-layer, a top-layer part covers 512 batches, and every row is written at most
-4 times. `GET /data/cache` k-way merges the sorted parts and stops at
-`limit`; `LsmStore::live_batches` gives query engines each part with a
-zero-copy `_live` column. Over `LSM_MAX_ROWS` live rows the oldest are
+layer, a top-layer part covers at least 512 batches, and every row is
+written at most 4 times. `GET /data/cache` k-way merges the sorted parts and
+stops at `limit`; `LsmStore::live_batches` gives query engines each part with
+a zero-copy `_live` column. Over `LSM_MAX_ROWS` live rows the oldest are
 marked dead down to 90%, counted in `lsm_evicted_rows_total` and
 `/health/status` (`ingest.store`, which also reports `parts`).
+`LSM_MAX_ROWS` caps live rows, not memory: a top-layer part is never
+rewritten, so its dead rows stay held (`ingest.store.rows`, `lsm_rows`) until
+every row in it is dead. Size `L` and `P` so that `P^L` batches (4,096 by
+default) cover the volume expected between restarts.
 
 ## Choosing a broker (the `solace` feature)
 The default build has no broker: `INGEST_TRANSPORT=noop`, and

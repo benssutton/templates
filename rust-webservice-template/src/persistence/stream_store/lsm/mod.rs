@@ -10,10 +10,12 @@
 //! When layer `i < L-1` holds `P` parts they are merged (live rows only)
 //! into one part appended to layer `i+1`. The top layer is never merged: it
 //! keeps accepting parts, so overflow happens only there. With batches
-//! counted as they arrive, a layer-`i` part covers `P^i` batches, at most
-//! `(L-1)(P-1)` parts sit below the top layer, the top layer holds
-//! `floor(n / P^(L-1))` parts after `n` batches, and every row is written at
-//! most `L` times.
+//! counted as they arrive, a layer-`i` part covers at least `P^i` batches,
+//! at most `(L-1)(P-1)` parts sit below the top layer, the top layer holds
+//! at most `floor(n / P^(L-1))` parts after `n` batches, and every row is
+//! written at most `L` times. The first and third are exact until a batch
+//! stores nothing (all deletes) or a part is dropped because all its rows
+//! died: either way that layer fills more slowly.
 //!
 //! Retention: over `max_rows` live rows, the oldest rows (lowest seqno) are
 //! marked dead down to 90% of the cap. A part with no live rows is dropped.
