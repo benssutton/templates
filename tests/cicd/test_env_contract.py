@@ -28,16 +28,22 @@ CLICKHOUSE_HOST CLICKHOUSE_PORT CLICKHOUSE_DATABASE CLICKHOUSE_USER CLICKHOUSE_P
 INGEST_TRANSPORT INGEST_MAX_DISCONNECT_SECONDS INGEST_MAX_CONSECUTIVE_FAILURES
 INGEST_RETRY_BASE_DELAY INGEST_RETRY_MAX_DELAY
 INGEST_STALENESS_THRESHOLD_SECONDS INGEST_STALE_FAILS_READINESS
-LSM_KEY_COLUMNS
+LSM_LAYERS LSM_PARTS_PER_LAYER LSM_KEY_COLUMNS
 SOLACE_HOST SOLACE_PORT SOLACE_VPN SOLACE_USERNAME SOLACE_PASSWORD SOLACE_TOPIC SOLACE_QUEUE
 SSL_CERTFILE SSL_KEYFILE
 """.split())
 
 # Shared names a service cannot honour, each with the reason.
 EXCEPTIONS = {
+    "python": {
+        "LSM_LAYERS": "pending the layered-store port",
+        "LSM_PARTS_PER_LAYER": "pending the layered-store port",
+    },
     "java": {
         "SSL_CERTFILE": "Micronaut serves TLS from a PKCS12 keystore (application-docker.yml)",
         "SSL_KEYFILE": "Micronaut serves TLS from a PKCS12 keystore (application-docker.yml)",
+        "LSM_LAYERS": "pending the layered-store port",
+        "LSM_PARTS_PER_LAYER": "pending the layered-store port",
     },
 }
 
