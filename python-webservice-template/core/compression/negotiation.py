@@ -5,8 +5,8 @@ except on the probe, metrics and MCP routes (orchestrators, scrapers and MCP
 SDKs call them without zstd support) and on CORS preflight. A request body in
 a coding other than zstd or gzip is refused with 415. Every other request goes
 on with its Accept-Encoding rewritten to the single coding the client prefers
-(zstd wins ties), or removed when it accepts neither, so the response layer
-only has to read that header.
+(zstd wins ties), or removed when it accepts neither, so the app sees only the
+winning coding. With compression disabled the header is left as sent.
 """
 
 from starlette.datastructures import Headers
@@ -64,4 +64,6 @@ class ContentNegotiationMiddleware:
                 [(b"accept-encoding", b"zstd, gzip"), *vary],
             )
             return
-        await self.app(_with_accept_encoding(scope, choose(accept)), receive, send)
+        if self.enabled:
+            scope = _with_accept_encoding(scope, choose(accept))
+        await self.app(scope, receive, send)

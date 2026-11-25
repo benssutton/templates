@@ -7,8 +7,9 @@ first, each with one job:
 2. ResponseCompressionMiddleware (response.py): compresses text-based
    responses with that coding and adds Vary: Accept-Encoding.
 3. RequestDecompressionMiddleware (request.py): decodes zstd/gzip request
-   bodies; MaxBodySizeMiddleware sits inside it, so the body limit counts
-   decompressed bytes.
+   bodies and answers 413 itself when the decoded body passes the limit, so
+   the limit counts decompressed bytes. MaxBodySizeMiddleware still sits
+   inside it, for bodies sent without a Content-Encoding.
 
 The 406 and 415 answered here sit outside the correlation-id, CORS and
 Server-Timing layers, so they carry none of those headers.
@@ -39,7 +40,7 @@ def add_content_coding(
 ) -> None:
     """Install the three layers. Starlette makes the last middleware added the
     outermost, so they are added innermost first. Add MaxBodySizeMiddleware
-    before calling this: it must sit inside request decompression."""
+    before calling this so it sits inside request decompression."""
     app.add_middleware(RequestDecompressionMiddleware, max_body_bytes=max_body_bytes)
     if enabled:
         # Strict mode compresses every eligible response, however small.

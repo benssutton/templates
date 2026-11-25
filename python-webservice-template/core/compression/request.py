@@ -1,9 +1,10 @@
 """Decodes zstd and gzip request bodies before the app reads them.
 
-At most limit + 1 bytes are expanded: one byte over is enough for
-MaxBodySizeMiddleware, which sits inside this layer, to answer 413 from the
-rewritten Content-Length. So a decompression bomb is never fully expanded and
-the body limit counts decompressed bytes. A body that does not decode is 400.
+At most limit + 1 bytes are expanded: one byte over proves the body is too
+large, and this layer answers 413 itself, so a decompression bomb is never
+fully expanded and the limit counts decompressed bytes. MaxBodySizeMiddleware
+still belongs inside this layer, for bodies sent without a Content-Encoding.
+A body that does not decode is 400.
 Only one zstd frame or gzip member is accepted: trailing data is malformed.
 ContentNegotiationMiddleware has already refused every other coding.
 """
@@ -25,7 +26,10 @@ def _decompress(coding: str, data: bytes, limit: int) -> bytes:
     """At most limit + 1 bytes; a single frame/member only."""
     try:
         if coding == "zstd":
-            d = zstd.ZstdDecompressor()
+            # Bounds the decoder's memory: a frame may ask for a window up to 2 GiB.
+            d = zstd.ZstdDecompressor(
+                options={zstd.DecompressionParameter.window_log_max: 23}
+            )
             out = d.decompress(data, max_length=limit + 1)
             done, rest = d.eof, d.unused_data
         else:
@@ -102,5 +106,8 @@ class RequestDecompressionMiddleware:
             body = _decompress(coding, compressed, self.max_body_bytes)
         except _MalformedBody:
             await send_json_error(send, 400, "Malformed compressed request body")
+            return
+        if len(body) > self.max_body_bytes:
+            await send_json_error(send, 413, "Payload Too Large")
             return
         await self.app(_decoded_scope(scope, len(body)), _replay(body, receive), send)
