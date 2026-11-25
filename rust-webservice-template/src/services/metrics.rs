@@ -152,6 +152,7 @@ impl MetricsService {
                 .set(ingest.seconds_since_last_batch.unwrap_or(f64::NAN));
             gauge!("lsm_rows").set(ingest.store.rows as f64);
             gauge!("lsm_parts").set(ingest.store.parts as f64);
+            counter!("lsm_merge_failures_total").absolute(ingest.store.merge_failures_total);
             gauge!("lsm_max_rows").set(ingest.store.max_rows as f64);
 
             let (process, host) = (&status.system.process, &status.system.host);

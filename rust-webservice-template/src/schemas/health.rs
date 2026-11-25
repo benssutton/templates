@@ -55,6 +55,8 @@ pub struct StreamStoreStats {
     pub max_rows: u64,
     /// Live rows evicted (oldest first) to keep under `max_rows`.
     pub evicted_rows_total: u64,
+    /// Merges that failed; each is retried once its layer gains a part.
+    pub merge_failures_total: u64,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

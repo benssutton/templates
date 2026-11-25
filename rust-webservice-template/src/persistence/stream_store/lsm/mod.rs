@@ -127,12 +127,16 @@ struct Writer {
     layers: Vec<Vec<Part>>,
     /// Every live key -> its row. Absent once deleted or evicted.
     index: HashMap<OwnedRow, Loc>,
+    /// Per layer: the part count at which its merge last failed. The merge
+    /// is retried only once the layer holds more parts than that.
+    merge_failed_at: Vec<Option<usize>>,
 }
 
 impl Writer {
     fn new(layers: usize) -> Self {
         Self {
             layers: vec![Vec::new(); layers],
+            merge_failed_at: vec![None; layers],
             ..Self::default()
         }
     }
@@ -179,6 +183,10 @@ struct Core {
     /// Rows written into parts, merges included. Over the rows writes stored,
     /// this is the write amplification.
     written_total: AtomicU64,
+    merge_failures_total: AtomicU64,
+    /// Makes every merge fail, to test the retry rule.
+    #[cfg(test)]
+    fail_merges: std::sync::atomic::AtomicBool,
 }
 
 impl LsmStore {
@@ -205,6 +213,9 @@ impl LsmStore {
                 }),
                 evicted_total: AtomicU64::new(0),
                 written_total: AtomicU64::new(0),
+                merge_failures_total: AtomicU64::new(0),
+                #[cfg(test)]
+                fail_merges: std::sync::atomic::AtomicBool::new(false),
             }),
             writer: Arc::new(tokio::sync::Mutex::new(Writer::new(layers))),
         }
@@ -370,23 +381,43 @@ impl Core {
         Ok(evicted)
     }
 
-    /// Merge every lower layer that holds `P` parts into the next one up. A
-    /// failed merge is logged and retried by a later write: the data is
-    /// already stored, the layer just holds more than `P` parts until then.
+    /// Merge every lower layer that holds `P` parts into the next one up.
+    /// A failed merge loses nothing (the parts stay where they are) and is
+    /// counted. It is retried only once the layer has gained a part since:
+    /// a deterministic failure (an offset overflow in a huge layer, say)
+    /// would otherwise re-copy the whole layer on every write.
     fn cascade(&self, w: &mut Writer) {
         let top = w.layers.len() - 1;
         for layer in 0..top {
-            if w.layers[layer].len() < self.config.parts_per_layer {
+            let parts = w.layers[layer].len();
+            if parts < self.config.parts_per_layer {
+                w.merge_failed_at[layer] = None;
                 continue;
             }
-            if let Err(err) = self.merge_layer(w, layer) {
-                tracing::error!(error = %err, layer, "LSM merge failed; a later write retries it");
-                return;
+            if w.merge_failed_at[layer].is_some_and(|failed| parts <= failed) {
+                continue;
+            }
+            match self.merge_layer(w, layer) {
+                Ok(()) => w.merge_failed_at[layer] = None,
+                Err(err) => {
+                    w.merge_failed_at[layer] = Some(parts);
+                    self.merge_failures_total.fetch_add(1, Ordering::Relaxed);
+                    tracing::error!(
+                        error = %err,
+                        layer,
+                        parts,
+                        "LSM merge failed; retried once the layer gains a part"
+                    );
+                }
             }
         }
     }
 
     fn merge_layer(&self, w: &mut Writer, layer: usize) -> Result<(), StoreError> {
+        #[cfg(test)]
+        if self.fail_merges.load(Ordering::Relaxed) {
+            return Err(StoreError::Internal("injected merge failure".into()));
+        }
         let keys = &self.config.key_columns;
         let merged = merge_parts(&w.layers[layer], keys)?;
         let merged_keys = match &w.converter {
@@ -512,6 +543,7 @@ impl StreamStore for LsmStore {
             parts: snap.parts.len() as u64,
             max_rows: self.core.config.max_rows as u64,
             evicted_rows_total: self.core.evicted_total.load(Ordering::Relaxed),
+            merge_failures_total: self.core.merge_failures_total.load(Ordering::Relaxed),
         }
     }
 }

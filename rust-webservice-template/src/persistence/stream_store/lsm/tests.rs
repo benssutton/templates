@@ -709,8 +709,8 @@ fn check(s: &LsmStore) {
     let top = w.layers.len() - 1;
     for (i, layer) in w.layers[..top].iter().enumerate() {
         assert!(
-            layer.len() < s.core.config.parts_per_layer,
-            "layer {i} holds {} parts",
+            layer.len() < s.core.config.parts_per_layer || w.merge_failed_at[i].is_some(),
+            "layer {i} holds {} parts with no failed merge",
             layer.len()
         );
     }
@@ -889,4 +889,36 @@ async fn random_writes_match_a_model() {
         s.layer_parts()[2] > 0,
         "the run never merged into the top layer"
     );
+}
+
+/// A failed merge leaves the parts where they are (nothing is lost), is
+/// counted, and is retried only once its layer has gained a part: a
+/// deterministic failure must not re-copy the whole layer on every write.
+#[tokio::test]
+async fn a_failed_merge_is_retried_only_after_its_layer_grows() {
+    let s = store(3, 2);
+    s.core.fail_merges.store(true, Ordering::Relaxed);
+    write(&s, upserts(0..2, "a")).await;
+    write(&s, upserts(2..4, "a")).await;
+    assert_eq!(s.layer_parts(), [2, 0, 0]);
+    assert_eq!(s.stats().merge_failures_total, 1);
+    // No new part: no retry.
+    write(&s, batch(&[(9, "n", "", "delete")])).await;
+    assert_eq!(s.stats().merge_failures_total, 1);
+    // A new part: retried, and it fails again.
+    write(&s, upserts(4..6, "a")).await;
+    assert_eq!(s.layer_parts(), [3, 0, 0]);
+    assert_eq!(s.stats().merge_failures_total, 2);
+    assert_eq!(ids(&s), (0..6).collect::<Vec<_>>());
+    s.core.fail_merges.store(false, Ordering::Relaxed);
+    write(&s, batch(&[(9, "n", "", "delete")])).await;
+    assert_eq!(
+        s.layer_parts(),
+        [3, 0, 0],
+        "still no retry without a new part"
+    );
+    write(&s, upserts(6..8, "a")).await;
+    assert_eq!(s.layer_parts(), [0, 1, 0]);
+    assert_eq!(s.stats().merge_failures_total, 2);
+    assert_eq!(ids(&s), (0..8).collect::<Vec<_>>());
 }
