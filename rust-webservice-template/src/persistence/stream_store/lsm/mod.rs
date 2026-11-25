@@ -268,6 +268,14 @@ impl Core {
         // Validate up front: an un-keyed frame would only fail later, inside
         // a merge, poisoning every subsequent write.
         self.check_required(&batch.schema())?;
+        // `live_batches` appends `_live`; a data column of that name would
+        // shadow the store's bitmap in every query engine.
+        if batch.schema().column_with_name(LIVE_COLUMN).is_some() {
+            return Err(StoreError::InvalidBatch(format!(
+                "batch uses reserved column names: {}",
+                quoted_list(&[LIVE_COLUMN])
+            )));
+        }
         let (schema, columns) = conform(batch, fixed)?;
         let rows = batch.num_rows();
         if fixed.is_none() && rows > 0 {

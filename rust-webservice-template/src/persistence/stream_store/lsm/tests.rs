@@ -623,3 +623,51 @@ async fn live_batches_share_the_stores_buffers() {
     let live = first[0].column_by_name(LIVE_COLUMN).unwrap().as_boolean();
     assert_eq!(live.true_count(), 4);
 }
+
+/// `_live` is the column `live_batches` appends, so a data column of that
+/// name would shadow the store's bitmap: it is refused.
+#[tokio::test]
+async fn a_batch_with_a_live_column_is_invalid() {
+    let s = store(4, 8);
+    let b = batch(&[(1, "a", "v", "upsert")]);
+    let mut fields: Vec<Field> = b
+        .schema()
+        .fields()
+        .iter()
+        .map(|f| f.as_ref().clone())
+        .collect();
+    fields.push(Field::new(LIVE_COLUMN, DataType::Boolean, true));
+    let mut columns = b.columns().to_vec();
+    columns.push(Arc::new(arrow::array::BooleanArray::from(vec![true])));
+    let reserved = RecordBatch::try_new(Arc::new(Schema::new(fields)), columns).unwrap();
+    let err = s.ingest(reserved.clone()).await.unwrap_err();
+    assert!(
+        matches!(&err, StoreError::InvalidBatch(m) if m == "batch uses reserved column names: ['_live']"),
+        "{err}"
+    );
+    assert!(matches!(
+        s.validate(&[reserved]),
+        Err(StoreError::InvalidBatch(_))
+    ));
+    assert_eq!(s.query(0).unwrap().total, 0);
+}
+
+/// Copy-on-write: what a reader took before a write still reads the same
+/// rows after it, although the write cleared bits in the same part.
+#[tokio::test]
+async fn a_view_taken_before_a_write_is_unchanged_by_it() {
+    let s = store(4, 8);
+    s.ingest(upserts(0..4, "old")).await.unwrap();
+    let before = s.live_batches().unwrap();
+    s.ingest(upserts(0..2, "new")).await.unwrap();
+    let live = |b: &RecordBatch| -> Vec<bool> {
+        b.column_by_name(LIVE_COLUMN)
+            .unwrap()
+            .as_boolean()
+            .iter()
+            .map(Option::unwrap)
+            .collect()
+    };
+    assert_eq!(live(&before[0]), [true, true, true, true]);
+    assert_eq!(live_bits(&s)[0], [false, false, true, true]);
+}
