@@ -1,6 +1,7 @@
 use super::*;
 use arrow::array::{Array, ArrayRef, AsArray, Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Int64Type};
+use std::collections::BTreeMap;
 
 /// Rows of (id, name, value, op).
 fn batch(rows: &[(i64, &str, &str, &str)]) -> RecordBatch {
@@ -670,4 +671,222 @@ async fn a_view_taken_before_a_write_is_unchanged_by_it() {
     };
     assert_eq!(live(&before[0]), [true, true, true, true]);
     assert_eq!(live_bits(&s)[0], [false, false, true, true]);
+}
+
+// ---- invariants ----
+
+/// Panics unless the writer's index, bitmaps, layers and published snapshot
+/// agree: one index entry per live row, each pointing at a set bit holding
+/// that key; each part's live count equal to its popcount and above zero; no
+/// layer below the top at `P` parts or more; the snapshot in step.
+fn check(s: &LsmStore) {
+    let Ok(w) = s.writer.try_lock() else {
+        panic!("a write is in progress");
+    };
+    let parts: HashMap<u64, &Part> = w.layers.iter().flatten().map(|p| (p.id, p)).collect();
+    let live: usize = parts.values().map(|p| p.live_rows).sum();
+    assert_eq!(w.index.len(), live, "index entries != live rows");
+    for (key, loc) in &w.index {
+        let Some(part) = parts.get(&loc.part) else {
+            panic!("{loc:?} names no part");
+        };
+        assert!(part.is_live(loc.row), "{loc:?} points at a dead row");
+        assert_eq!(
+            part.key(loc.row).as_ref(),
+            key.row().as_ref(),
+            "{loc:?} holds another key"
+        );
+    }
+    for part in parts.values() {
+        assert_eq!(
+            part.live_rows,
+            part.live.count_set_bits(),
+            "part {}",
+            part.id
+        );
+        assert!(part.live_rows > 0, "part {} has no live rows", part.id);
+    }
+    let top = w.layers.len() - 1;
+    for (i, layer) in w.layers[..top].iter().enumerate() {
+        assert!(
+            layer.len() < s.core.config.parts_per_layer,
+            "layer {i} holds {} parts",
+            layer.len()
+        );
+    }
+    let snap = s.core.snapshot.load();
+    assert_eq!(snap.live_rows, live, "snapshot live rows");
+    assert_eq!(snap.parts.len(), parts.len(), "snapshot parts");
+}
+
+/// `ingest`, then `check`.
+async fn write(s: &LsmStore, b: RecordBatch) -> u64 {
+    let evicted = s.ingest(b).await.unwrap();
+    check(s);
+    evicted
+}
+
+fn ids(s: &LsmStore) -> Vec<i64> {
+    values(s).into_iter().map(|(id, _)| id).collect()
+}
+
+/// After a merge the index points into the merged part: a newer version
+/// kills the merged row, not a row of the parts that were merged.
+#[tokio::test]
+async fn a_newer_version_after_a_merge_supersedes_the_merged_row() {
+    let s = store(3, 2);
+    write(&s, upserts(0..4, "a")).await;
+    write(&s, upserts(10..14, "a")).await;
+    assert_eq!(s.layer_parts(), [0, 1, 0]);
+    write(&s, upserts(2..3, "b")).await;
+    assert_eq!(values(&s)[2], (2, "b".to_owned()));
+    assert_eq!(
+        live_bits(&s),
+        [
+            vec![true, true, false, true, true, true, true, true],
+            vec![true]
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_delete_after_a_merge_kills_the_merged_row() {
+    let s = store(3, 2);
+    write(&s, upserts(0..4, "a")).await;
+    write(&s, upserts(10..14, "a")).await;
+    write(&s, batch(&[(3, "n", "", "delete")])).await;
+    assert_eq!(ids(&s), [0, 1, 2, 10, 11, 12, 13]);
+    assert_eq!(s.layer_parts(), [0, 1, 0], "the delete stored nothing");
+    assert_eq!(s.stats().rows, 8, "the dead row stays held in its part");
+}
+
+/// Eviction takes the oldest rows across layers (the top first) and drops a
+/// part it empties; an evicted key can be written again, and deleting one
+/// is a no-op.
+#[tokio::test]
+async fn eviction_crosses_layers_drops_emptied_parts_and_forgets_the_keys() {
+    let s = LsmStore::new(LsmConfig {
+        layers: 3,
+        parts_per_layer: 2,
+        max_rows: 10,
+        ..LsmConfig::default()
+    });
+    write(&s, upserts(0..4, "a")).await;
+    write(&s, upserts(4..8, "a")).await;
+    assert_eq!(s.layer_parts(), [0, 1, 0]);
+    // 18 live > 10: down to 9, so all 8 rows of the layer-1 part (dropped)
+    // and the oldest row of the new layer-0 part (id 100) go.
+    assert_eq!(write(&s, upserts(100..110, "b")).await, 9);
+    assert_eq!(s.layer_parts(), [1, 0, 0]);
+    assert_eq!(s.stats().parts, 1);
+    assert_eq!(ids(&s), (101..110).collect::<Vec<_>>());
+    write(&s, upserts(0..1, "again")).await;
+    assert_eq!(values(&s)[0], (0, "again".to_owned()));
+    write(
+        &s,
+        batch(&[(1, "n", "", "delete"), (100, "n", "", "delete")]),
+    )
+    .await;
+    assert_eq!(s.query(0).unwrap().total, 10);
+    assert_eq!(s.stats().evicted_rows_total, 9);
+}
+
+#[tokio::test]
+async fn an_empty_batch_adds_no_part_and_fixes_no_schema() {
+    let s = store(4, 8);
+    assert_eq!(write(&s, batch(&[])).await, 0);
+    assert_eq!((s.stats().parts, s.layer_parts()), (0, vec![0, 0, 0, 0]));
+    // A different schema is still accepted: the empty batch fixed nothing.
+    write(
+        &s,
+        batch(&[(1, "a", "v", "upsert")]).project(&[0, 3]).unwrap(),
+    )
+    .await;
+    assert_eq!(s.stats().parts, 1);
+}
+
+#[tokio::test]
+async fn an_all_delete_batch_adds_no_part() {
+    let s = store(4, 8);
+    write(&s, upserts(0..3, "v")).await;
+    write(&s, batch(&[(1, "n", "", "delete"), (7, "n", "", "delete")])).await;
+    assert_eq!((s.stats().parts, s.layer_parts()), (1, vec![1, 0, 0, 0]));
+    assert_eq!(ids(&s), [0, 2]);
+}
+
+/// A fixed-seed xorshift generator: deterministic, no dependency.
+struct Rng(u64);
+
+impl Rng {
+    fn below(&mut self, n: u64) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0 % n
+    }
+}
+
+/// Random upserts, deletes and in-batch duplicates over a small key range,
+/// with small layers and a small cap, against a `BTreeMap` model of the
+/// same rules (last write wins; over the cap, drop the oldest writes down to
+/// 90%). The invariants are checked after every write.
+#[tokio::test]
+async fn random_writes_match_a_model() {
+    let max_rows = 24;
+    let s = LsmStore::new(LsmConfig {
+        layers: 3,
+        parts_per_layer: 2,
+        max_rows,
+        ..LsmConfig::default()
+    });
+    let mut model: BTreeMap<i64, (String, u64)> = BTreeMap::new();
+    let mut seqno = 0_u64;
+    let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+    for step in 0..500 {
+        let rows: Vec<(i64, String, &str)> = (0..1 + rng.below(8))
+            .map(|i| {
+                let op = if rng.below(4) == 0 {
+                    "delete"
+                } else {
+                    "upsert"
+                };
+                (rng.below(40) as i64, format!("s{step}r{i}"), op)
+            })
+            .collect();
+        for (id, value, op) in &rows {
+            if *op == "delete" {
+                model.remove(id);
+            } else {
+                model.insert(*id, (value.clone(), seqno));
+            }
+            seqno += 1;
+        }
+        let mut expected_evicted = 0;
+        if model.len() > max_rows {
+            let mut by_age: Vec<(u64, i64)> = model.iter().map(|(k, (_, q))| (*q, *k)).collect();
+            by_age.sort_unstable();
+            let excess = model.len() - (max_rows - max_rows / 10);
+            for (_, key) in &by_age[..excess] {
+                model.remove(key);
+            }
+            expected_evicted = excess as u64;
+        }
+        let refs: Vec<(i64, &str, &str, &str)> = rows
+            .iter()
+            .map(|(id, value, op)| (*id, "n", value.as_str(), *op))
+            .collect();
+        assert_eq!(
+            write(&s, batch(&refs)).await,
+            expected_evicted,
+            "step {step}"
+        );
+        let want: Vec<(i64, String)> = model.iter().map(|(k, (v, _))| (*k, v.clone())).collect();
+        assert_eq!(values(&s), want, "step {step}");
+        assert_eq!(s.query(0).unwrap().total, model.len(), "step {step}");
+    }
+    assert!(s.stats().evicted_rows_total > 0, "the run never evicted");
+    assert!(
+        s.layer_parts()[2] > 0,
+        "the run never merged into the top layer"
+    );
 }
