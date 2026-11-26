@@ -55,10 +55,11 @@ tests/it/          THE integration-test binary (main.rs + one module per feature
   writes and merges, and sysinfo run on the blocking pool; each LSM write is
   a detached task, so a dropped request still records its rows.
 - **LSM capacity freezes, never evicts.** `LSM_MAX_ROWS` caps rows held
-  (dead rows in parts included). The first batch that would exceed it sets
-  the sticky `full` flag: it and every later non-empty batch are refused
-  (`StoreError::Full`: HTTP 507, stream reject, a `FATAL:` log line), while
-  reads and readiness carry on. Tests use a small `lsm_max_rows`.
+  (dead rows in parts included). `StreamStore::ingest` takes a whole
+  message and admits it once under the writer lock. The first message that
+  would exceed the cap sets the sticky `full` flag: it and every later valid
+  non-empty message are refused whole (`StoreError::Full`: HTTP 507, stream
+  reject, a `FATAL:` log line), while reads and readiness carry on. Tests use a small `lsm_max_rows`.
 - **Helpers added before their first user** get
   `#[expect(dead_code, reason = "...")]`; remove it with the first use.
 
