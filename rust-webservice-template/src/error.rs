@@ -34,6 +34,10 @@ pub enum AppError {
     /// 422: the body parsed but is not valid. The message is safe to return.
     #[error("{0}")]
     Unprocessable(String),
+    /// 507: the stream store is full and refuses every new batch until it is
+    /// rebuilt. Retrying cannot succeed. The message is safe to return.
+    #[error("{0}")]
+    InsufficientStorage(String),
     /// 503: a dependency is down or too slow. The detail is logged, never returned.
     #[error("service unavailable: {0}")]
     Unavailable(String),
@@ -51,6 +55,7 @@ impl AppError {
             Self::PayloadTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
             Self::UnsupportedMediaType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::Unprocessable(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::InsufficientStorage(_) => StatusCode::INSUFFICIENT_STORAGE,
             Self::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -63,7 +68,8 @@ impl AppError {
             Self::BadRequest(msg)
             | Self::PayloadTooLarge(msg)
             | Self::UnsupportedMediaType(msg)
-            | Self::Unprocessable(msg) => msg.clone(),
+            | Self::Unprocessable(msg)
+            | Self::InsufficientStorage(msg) => msg.clone(),
             Self::Unauthorized(_) => UNAUTHENTICATED_DETAIL.to_owned(),
             Self::Unavailable(_) => UNAVAILABLE_DETAIL.to_owned(),
             Self::Internal(_) => "Internal Server Error".to_owned(),
@@ -176,6 +182,10 @@ mod tests {
         assert_eq!(
             status_and_detail(AppError::Unprocessable("missing column op".into())).await,
             (StatusCode::UNPROCESSABLE_ENTITY, "missing column op".into())
+        );
+        assert_eq!(
+            status_and_detail(AppError::InsufficientStorage("store full".into())).await,
+            (StatusCode::INSUFFICIENT_STORAGE, "store full".into())
         );
     }
 

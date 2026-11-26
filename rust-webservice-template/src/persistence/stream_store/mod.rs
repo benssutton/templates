@@ -15,6 +15,11 @@ pub enum StoreError {
     /// transports reject it and never redeliver it; HTTP answers 422.
     #[error("{0}")]
     InvalidBatch(String),
+    /// The store holds `max_rows` rows, or this batch would take it over,
+    /// and it refuses every new batch until it is rebuilt. Redelivery cannot
+    /// succeed, so transports reject it; HTTP answers 507.
+    #[error("stream store full: {held} rows held, max_rows {max_rows}; batch discarded")]
+    Full { held: u64, max_rows: u64 },
     /// Anything else. It may be transient, so a transport fails the delivery
     /// for redelivery; HTTP answers 500.
     #[error("stream store failure: {0}")]
@@ -38,10 +43,9 @@ pub struct QueryResult {
 
 #[async_trait::async_trait]
 pub trait StreamStore: Send + Sync + 'static {
-    /// Write one batch; returns how many live rows a memory bound evicted to
-    /// make room. Implementations serialise concurrent callers: there is a
-    /// single logical writer.
-    async fn ingest(&self, batch: RecordBatch) -> Result<u64, StoreError>;
+    /// Write one batch. Implementations serialise concurrent callers: there
+    /// is a single logical writer.
+    async fn ingest(&self, batch: RecordBatch) -> Result<(), StoreError>;
 
     /// Check a whole message before writing any of it: every batch in order,
     /// by the rules `ingest` applies, against the store's fixed schema or, if
@@ -55,7 +59,7 @@ pub trait StreamStore: Send + Sync + 'static {
     /// callers run it with `spawn_blocking`.
     fn query(&self, limit: usize) -> Result<QueryResult, StoreError>;
 
-    /// Size and eviction counters, for health and metrics. Cheap, no I/O.
+    /// Size and capacity counters, for health and metrics. Cheap, no I/O.
     fn stats(&self) -> StreamStoreStats {
         StreamStoreStats::default()
     }

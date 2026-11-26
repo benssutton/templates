@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
 type Log = Arc<Mutex<Vec<(&'static str, Instant)>>>;
 
@@ -169,7 +170,7 @@ struct FailingStore;
 
 #[async_trait::async_trait]
 impl StreamStore for FailingStore {
-    async fn ingest(&self, _batch: RecordBatch) -> Result<u64, StoreError> {
+    async fn ingest(&self, _batch: RecordBatch) -> Result<(), StoreError> {
         Err(StoreError::Internal("simulated storage failure".into()))
     }
     fn validate(&self, _batches: &[RecordBatch]) -> Result<(), StoreError> {
@@ -908,5 +909,86 @@ async fn settlements_are_counted_in_metrics() {
         "{text}"
     );
     assert!(text.contains("ingest_rows_ingested_total 1"), "{text}");
+    svc.close().await;
+}
+
+fn capped_lsm(max_rows: usize) -> Arc<LsmStore> {
+    Arc::new(LsmStore::new(LsmConfig {
+        max_rows,
+        ..LsmConfig::default()
+    }))
+}
+
+/// A full store refuses every later message for good, so each is rejected
+/// (never failed for redelivery, never backed off) and none counts toward
+/// the consecutive-failure shutdown. Reads keep serving the rows held.
+#[tokio::test]
+async fn a_full_store_rejects_every_later_message_and_never_requests_shutdown() {
+    let log = Log::default();
+    let store = capped_lsm(2);
+    let script = vec![
+        delivery(
+            vec![make_batch(&[
+                (1, "a", "v1", "upsert"),
+                (2, "b", "v1", "upsert"),
+            ])],
+            &log,
+        ),
+        delivery(vec![make_batch(&[(3, "c", "v1", "upsert")])], &log),
+        delivery(vec![make_batch(&[(1, "a", "v1", "delete")])], &log),
+        delivery(vec![make_batch(&[(4, "d", "v1", "upsert")])], &log),
+    ];
+    let (svc, shutdown) = start(
+        ScriptedConsumer::new(script, ConnectionState::Connected),
+        store.clone(),
+        Settings {
+            ingest_max_consecutive_failures: 1,
+            ..settings()
+        },
+    );
+    assert_eq!(
+        wait_for_settlements(&log, 4).await,
+        ["accept", "reject", "reject", "reject"]
+    );
+    assert!(!shutdown.is_triggered());
+    assert!(svc.is_running());
+    assert_eq!(store.query(0).unwrap().total, 2);
+    let stats = svc.ingest_health().store;
+    assert!(stats.full);
+    assert_eq!(stats.refused_batches_total, 3);
+    svc.close().await;
+}
+
+/// The HTTP path sees the refusal as `IngestError::Full`, and each refused
+/// batch is logged as fatal with what was held, the cap and the batch size.
+#[tokio::test]
+async fn a_refused_batch_is_full_and_logged_as_fatal() {
+    crate::support::logs::ensure_installed();
+    let (svc, _) = start(
+        ScriptedConsumer::new(Vec::new(), ConnectionState::Connected),
+        capped_lsm(1),
+        settings(),
+    );
+    let id = uuid::Uuid::new_v4().to_string();
+    let span = tracing::info_span!("full_test", test_id = %id);
+    let refused = svc
+        .ingest(vec![make_batch(&[
+            (1, "a", "v1", "upsert"),
+            (2, "b", "v1", "upsert"),
+        ])])
+        .instrument(span)
+        .await;
+    assert!(
+        matches!(&refused, Err(IngestError::Full(m)) if m.contains("stream store full")),
+        "{refused:?}"
+    );
+    let lines = crate::support::logs::lines_containing(&id);
+    let fatal = lines
+        .iter()
+        .find(|l| l.contains("FATAL:"))
+        .unwrap_or_else(|| panic!("no FATAL line: {lines:?}"));
+    for field in ["ERROR", "fatal=true", "held=0", "max_rows=1", "rows=2"] {
+        assert!(fatal.contains(field), "{field} missing: {fatal}");
+    }
     svc.close().await;
 }

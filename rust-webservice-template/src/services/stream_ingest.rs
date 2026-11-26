@@ -6,6 +6,7 @@
 //! | every batch written                                    | accept     |
 //! | store error                                            | fail + jittered, doubling, capped backoff |
 //! | invalid batch, or decoded size > max_ingest_batch_bytes | reject    |
+//! | store full (it refuses every new batch)                | reject     |
 //! | payload not Arrow IPC                                  | rejected inside the consumer |
 //!
 //! `POST /data/ingest` goes through the same `ingest` call, so both paths
@@ -50,7 +51,9 @@ pub const JOIN_TIMEOUT: Duration = Duration::from_secs(10);
 fn outcome_of(result: &Result<(), IngestError>) -> Settlement {
     match result {
         Ok(()) => Settlement::Accept,
-        Err(IngestError::TooLarge(_) | IngestError::Invalid(_)) => Settlement::Reject,
+        Err(IngestError::TooLarge(_) | IngestError::Invalid(_) | IngestError::Full(_)) => {
+            Settlement::Reject
+        }
         Err(_) => Settlement::Fail,
     }
 }
@@ -64,6 +67,11 @@ pub enum IngestError {
     /// A batch can never be stored or served; nothing was written.
     #[error("{0}")]
     Invalid(String),
+    /// The store is full and refuses every new batch until it is rebuilt.
+    /// The refused batch was not written; earlier batches of the same
+    /// message may have been, if it was the one that filled the store.
+    #[error("{0}")]
+    Full(String),
     /// The write itself failed; may be transient.
     #[error(transparent)]
     Store(StoreError),
@@ -73,6 +81,7 @@ impl From<StoreError> for IngestError {
     fn from(err: StoreError) -> Self {
         match err {
             StoreError::InvalidBatch(msg) => Self::Invalid(msg),
+            full @ StoreError::Full { .. } => Self::Full(full.to_string()),
             other => Self::Store(other),
         }
     }
@@ -83,6 +92,7 @@ impl From<IngestError> for AppError {
         match err {
             IngestError::TooLarge(msg) => Self::PayloadTooLarge(msg),
             IngestError::Invalid(msg) => Self::Unprocessable(msg),
+            IngestError::Full(msg) => Self::InsufficientStorage(msg),
             IngestError::Store(err) => Self::Internal(err.into()),
         }
     }
@@ -269,12 +279,11 @@ impl StreamIngestService {
         let metrics = self.metrics.clone();
         let task = async move {
             let rows = batch.num_rows() as u64;
-            let evicted = store.ingest(batch).await?;
+            store.ingest(batch).await?;
             *lock(&progress.last_batch_at) = Some(Utc::now().trunc_subsecs(6));
             progress.rows_total.fetch_add(rows, Ordering::Relaxed);
             if let Some(m) = &metrics {
                 m.record_ingested_rows(rows);
-                m.record_evicted_rows(evicted);
             }
             tracing::debug!(rows, "ingested batch");
             Ok(())
