@@ -4,6 +4,7 @@
 
 use crate::probes::probe;
 use crate::support::{TestApp, app_settings, logs};
+use axum::http::HeaderName;
 use rust_template::app::{App, router};
 use rust_template::ingestion::noop::NoopBatchConsumer;
 use rust_template::persistence::Stores;
@@ -55,7 +56,7 @@ async fn a_32_hex_id_is_generated_when_absent() {
 #[tokio::test]
 async fn header_name_is_configurable() {
     let app = TestApp::spawn(Settings {
-        correlation_id_header: "X-Correlation-ID".into(),
+        correlation_id_header: HeaderName::from_static("x-correlation-id"),
         ..app_settings().await
     })
     .await;

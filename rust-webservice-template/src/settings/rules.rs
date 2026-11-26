@@ -2,7 +2,6 @@
 
 use super::IngestTransport;
 use crate::persistence::stream_store::lsm::{LIVE_COLUMN, OP_COLUMN, ORDER_COLUMN};
-use axum::http::HeaderName;
 use secrecy::{ExposeSecret, SecretString};
 
 pub(super) fn positive(value: &f64, _: &()) -> garde::Result {
@@ -37,12 +36,6 @@ pub(super) fn http_url(value: &str, _: &()) -> garde::Result {
     } else {
         Err(garde::Error::new("must start with http:// or https://"))
     }
-}
-
-pub(super) fn header_name(value: &str, _: &()) -> garde::Result {
-    HeaderName::from_bytes(value.as_bytes())
-        .map(|_| ())
-        .map_err(|_| garde::Error::new("must be a valid HTTP header name"))
 }
 
 pub(super) fn secret_when(enabled: bool) -> impl FnOnce(&SecretString, &()) -> garde::Result {

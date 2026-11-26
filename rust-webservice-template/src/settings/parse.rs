@@ -1,6 +1,7 @@
 //! Deserializers for env-var shapes serde cannot read as they are: lists
 //! (JSON or comma-separated) and optional values ("", "none" or "null").
 
+use axum::http::HeaderName;
 use serde::{Deserialize, Deserializer};
 
 /// `["a","b"]` (JSON) or `a,b`.
@@ -41,4 +42,15 @@ pub(super) fn optional_string<'de, D: Deserializer<'de>>(d: D) -> Result<Option<
     let raw = String::deserialize(d)?;
     let trimmed = raw.trim();
     Ok((!is_unset(trimmed)).then(|| trimmed.to_owned()))
+}
+
+/// The request-id header, parsed at load so an invalid name fails startup
+/// and nothing downstream needs a fallback.
+pub(super) fn request_id_header<'de, D: Deserializer<'de>>(d: D) -> Result<HeaderName, D::Error> {
+    let raw = String::deserialize(d)?;
+    HeaderName::from_bytes(raw.trim().as_bytes()).map_err(|_| {
+        serde::de::Error::custom(format!(
+            "correlation_id_header: {raw:?} is not a valid HTTP header name"
+        ))
+    })
 }

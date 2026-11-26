@@ -8,6 +8,7 @@
 //! `from_vars`; `Settings::validate` is the same check for settings built
 //! in code (tests), and `create_app` calls it for that reason.
 
+use axum::http::HeaderName;
 use garde::Validate;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
@@ -15,10 +16,10 @@ use serde::{Deserialize, Serialize};
 mod parse;
 mod rules;
 
-use parse::{optional_seconds, optional_string, string_list};
+use parse::{optional_seconds, optional_string, request_id_header, string_list};
 use rules::{
-    credentials_need_explicit_origins, header_name, http_url, needs_compression, no_store_columns,
-    non_negative, not_below, positive, secret_when, transport_compiled_in,
+    credentials_need_explicit_origins, http_url, needs_compression, no_store_columns, non_negative,
+    not_below, positive, secret_when, transport_compiled_in,
 };
 
 /// The streaming-ingest transport. `noop` (the default) consumes nothing;
@@ -228,8 +229,8 @@ pub struct Settings {
     pub compression_require_zstd: bool,
 
     /// Request-id header name (inbound adoption + response echo).
-    #[garde(custom(header_name))]
-    pub correlation_id_header: String,
+    #[serde(deserialize_with = "request_id_header")]
+    pub correlation_id_header: HeaderName,
 
     // CORS: permissive by default for local UI dev; tighten per deployment.
     #[serde(deserialize_with = "string_list")]
@@ -326,7 +327,7 @@ impl Default for Settings {
             compression_min_bytes: 1024,
             compression_zstd_level: 3,
             compression_require_zstd: false,
-            correlation_id_header: "X-Request-ID".into(),
+            correlation_id_header: HeaderName::from_static("x-request-id"),
             cors_allow_origins: vec!["*".into()],
             cors_allow_methods: vec!["*".into()],
             cors_allow_headers: vec!["*".into()],

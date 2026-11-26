@@ -52,7 +52,7 @@ fn defaults() {
     );
     assert_eq!(s.max_request_body_bytes, 16 * 1024 * 1024);
     assert_eq!(s.max_ingest_batch_bytes, 16 * 1024 * 1024);
-    assert_eq!(s.correlation_id_header, "X-Request-ID");
+    assert_eq!(s.correlation_id_header, "x-request-id");
     assert_eq!(s.cors_allow_origins, vec!["*".to_string()]);
     assert!(!s.cors_allow_credentials);
     // AMQP 1.0 plain text, not SMF (55555).
