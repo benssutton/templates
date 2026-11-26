@@ -83,7 +83,7 @@ broker's SEMP API uses 8080.
 
 Settings are immutable, validated records (`config/AppSettings`, `config/IngestSettings`,
 `auth/AuthSettings`); defaults live in `application.yml` and a value that breaks a
-constraint fails startup. The full list, with the names shared by all three templates, is
+constraint fails startup. The full list, with the names that form the repo-wide contract, is
 `.env.example` (pinned by `tests/cicd/test_env_contract.py`).
 
 | Env | Default | Meaning |

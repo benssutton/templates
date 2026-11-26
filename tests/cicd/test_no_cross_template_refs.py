@@ -17,7 +17,7 @@ OTHERS = {
     "rust": r"python|java|fastapi|pydantic|micronaut|maven|jvm|spring|sibling",
 }
 SUFFIXES = {".py", ".java", ".rs", ".yml", ".yaml", ".toml", ".xml", ".properties", ".sh", ".md"}
-NAMES = {"Dockerfile"}
+NAMES = {"Dockerfile", ".env.example"}
 SKIP_PARTS = {"target", "__pycache__", "performance", "node_modules", ".pytest_cache"}
 # The repo's own tooling, not a comparison: the pipeline command and the interpreter
 # the Rust SMF interop test runs.

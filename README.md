@@ -1,13 +1,13 @@
 ﻿# Templates
 
-This repo is intended to serve as a template for services in Python, Rust, Java and Typscript that serve as solid foundations for development with agentic AI.  The templates purposefully do not contain business logic, but do contain wiring to common technologies, implement fully automated tests with covage > 90% and aim to demonstrate simple and transparent patterns.  The objectives include:
+This repo is intended to serve as a template for services in Python, Rust, Java and TypeScript that serve as solid foundations for development with agentic AI.  The templates purposefully do not contain business logic, but do contain wiring to common technologies, implement fully automated tests with coverage > 90% and aim to demonstrate simple and transparent patterns.  The objectives include:
 
-1. Provide proven, re-useable boilerplate that covers common technologies.  There is little value spending time or tokens re-creating boilerplate for new applications.  
-2. Demonstrates best in class design for testability.  Faithful and comprehensive test coverage is a critical guardrail when using AI.
+1. Provide proven, reusable boilerplate that covers common technologies.  There is little value spending time or tokens re-creating boilerplate for new applications.  
+2. Demonstrate best-in-class design for testability.  Faithful and comprehensive test coverage is a critical guardrail when using AI.
 3. Demonstrate enterprise-level robustness and stability through self-recovery and exposure of observability data points.
 4. Serve as a reference for teams (and AI agents) to converge on.  Recognisable patterns facilitate understanding.
 5. Separate concerns between modules.  Decoupling infrastructure from domain logic, and further decoupling sub-domains delineates and improves understanding of scope.
-6. Use idomatic code wherever possible; and transparent reasoning where not.
+6. Use idiomatic code wherever possible; and transparent reasoning where not.
 7. Through all of the above assist code reviewers pattern-match against what good looks like.
 8. Serve as a light-weight educational/debugging tool that developers can easily step through.
 
@@ -15,7 +15,7 @@ This repo is intended to serve as a template for services in Python, Rust, Java 
 # Architectural Decisions
 
 Testing
-1. Testing should use real services/dependenices wherever possible.  Avoid mocks and patches.
+1. Testing should use real services/dependencies wherever possible.  Avoid mocks and patches.
 2. Testing should exercise real endpoints (HTTP, websockets)
 3. Tests should be async and run in parallel where possible to shorten the test cycle (Python: pytest-xdist, 2 workers; Java: JUnit class-level concurrency; Rust: cargo test's default).
 4. Tests should include performance benchmarks
@@ -88,6 +88,12 @@ tower-http layer stack, with sqlx migrations, OpenAPI generated from the routes
 (utoipa-axum) and cargo-deny. Its LSM stream store runs on arrow-rs compute
 kernels (with a criterion benchmark), and Solace is consumed over AMQP 1.0 behind
 the `solace` Cargo feature.
+
+Only the Rust service implements the "Stream store (LSM)" decision so far: layered,
+supersede on write, and frozen once `LSM_MAX_ROWS` is reached, admitting each
+message whole. The Python and Java services still use their earlier stores
+(a memtable with sorted runs and full compaction; Java evicts the oldest rows at
+its row cap) until they are ported.
 
 All three share the HTTP contract above, migrate their own Postgres and ClickHouse
 schemas at startup, log JSON with a configurable level, and export OpenTelemetry
