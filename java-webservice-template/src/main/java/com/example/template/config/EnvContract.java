@@ -4,6 +4,9 @@ import io.micronaut.context.ApplicationContextBuilder;
 import io.micronaut.context.ApplicationContextConfigurer;
 import io.micronaut.context.annotation.ContextConfigurer;
 import io.micronaut.context.env.PropertySource;
+import io.micronaut.json.JsonMapper;
+import io.micronaut.json.tree.JsonNode;
+import java.io.IOException;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -96,22 +99,27 @@ public final class EnvContract implements ApplicationContextConfigurer {
         return after.startsWith("\"") || after.equals("]");
     }
 
+    /**
+     * Read with Micronaut's own JSON mapper: the application context, and so its JsonMapper bean,
+     * does not exist yet while a ContextConfigurer runs.
+     */
     private static List<String> jsonStrings(String s) {
-        if (!s.endsWith("]")) {
-            throw new IllegalArgumentException("MCP_ALLOWED_HOSTS: unterminated JSON array");
+        JsonNode array;
+        try {
+            array = JsonMapper.createDefault().readValue(s, JsonNode.class);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("MCP_ALLOWED_HOSTS: not a JSON array: " + s, e);
         }
-        String body = s.substring(1, s.length() - 1).strip();
+        if (!array.isArray()) {
+            throw new IllegalArgumentException("MCP_ALLOWED_HOSTS: not a JSON array: " + s);
+        }
         List<String> out = new ArrayList<>();
-        if (body.isEmpty()) {
-            return out;
-        }
-        for (String item : body.split(",")) {
-            String t = item.strip();
-            if (t.length() < 2 || !t.startsWith("\"") || !t.endsWith("\"")) {
+        for (JsonNode item : array.values()) {
+            if (!item.isString()) {
                 throw new IllegalArgumentException(
-                        "MCP_ALLOWED_HOSTS: JSON array must hold strings, got " + t);
+                        "MCP_ALLOWED_HOSTS: JSON array must hold strings, got " + item);
             }
-            out.add(t.substring(1, t.length() - 1).strip());
+            out.add(item.getStringValue().strip());
         }
         return out;
     }
