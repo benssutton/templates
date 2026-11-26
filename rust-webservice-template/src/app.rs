@@ -208,8 +208,7 @@ pub fn router(state: AppState) -> Router {
     if let Some(m) = state.metrics.clone() {
         app = app.layer(from_fn_with_state(m, services::metrics::middleware));
     }
-    let request_id_header = HeaderName::from_bytes(settings.correlation_id_header.as_bytes())
-        .unwrap_or_else(|_| HeaderName::from_static("x-request-id"));
+    let request_id_header = settings.correlation_id_header.clone();
     if let Some(authenticator) = state.auth.clone() {
         app = app.layer(from_fn_with_state(authenticator, auth::middleware));
     }

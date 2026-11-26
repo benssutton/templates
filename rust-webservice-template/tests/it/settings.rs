@@ -52,7 +52,7 @@ fn defaults() {
     );
     assert_eq!(s.max_request_body_bytes, 16 * 1024 * 1024);
     assert_eq!(s.max_ingest_batch_bytes, 16 * 1024 * 1024);
-    assert_eq!(s.correlation_id_header, "X-Request-ID");
+    assert_eq!(s.correlation_id_header, "x-request-id");
     assert_eq!(s.cors_allow_origins, vec!["*".to_string()]);
     assert!(!s.cors_allow_credentials);
     // AMQP 1.0 plain text, not SMF (55555).
@@ -434,4 +434,15 @@ fn strict_mode_needs_compression_enabled() {
         err.to_string().contains("compression_require_zstd"),
         "{err}"
     );
+}
+
+#[test]
+fn correlation_id_header_is_parsed_at_load() {
+    let s = Settings::from_vars(vars(&[("CORRELATION_ID_HEADER", " X-Correlation-ID ")])).unwrap();
+    assert_eq!(s.correlation_id_header, "x-correlation-id");
+
+    let err = Settings::from_vars(vars(&[("CORRELATION_ID_HEADER", "bad header")])).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("not a valid HTTP header name"), "{msg}");
+    assert!(msg.contains("correlation_id_header"), "{msg}");
 }

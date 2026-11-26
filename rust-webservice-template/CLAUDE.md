@@ -17,6 +17,7 @@ Solace modules. Never point tests at a developer's running compose stack.
 ```
 src/main.rs        settings -> telemetry -> bind -> create_app -> signals -> serve; `healthcheck` subcommand
 src/app.rs         create_app; router(): routes (utoipa-axum) + the layer stack, outermost last
+src/settings/      mod (Settings + defaults), rules (garde validators), parse (env-var deserializers)
 src/extract.rs     ValidJson / ValidQuery (garde) / ArrowStream: rejections are AppError
 src/error.rs       AppError -> {"detail"}; From<store errors> splits outage (503) from bug (500)
 src/core/          request_id, json_errors, compression, auth, telemetry, boundary_timing, cors, retry, shutdown, ...

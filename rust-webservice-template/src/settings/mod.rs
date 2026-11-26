@@ -8,11 +8,19 @@
 //! `from_vars`; `Settings::validate` is the same check for settings built
 //! in code (tests), and `create_app` calls it for that reason.
 
-use crate::persistence::stream_store::lsm::{LIVE_COLUMN, OP_COLUMN, ORDER_COLUMN};
 use axum::http::HeaderName;
 use garde::Validate;
-use secrecy::{ExposeSecret, SecretString};
-use serde::{Deserialize, Deserializer, Serialize};
+use secrecy::SecretString;
+use serde::{Deserialize, Serialize};
+
+mod parse;
+mod rules;
+
+use parse::{optional_seconds, optional_string, request_id_header, string_list};
+use rules::{
+    credentials_need_explicit_origins, http_url, needs_compression, no_store_columns, non_negative,
+    not_below, positive, secret_when, transport_compiled_in,
+};
 
 /// The streaming-ingest transport. `noop` (the default) consumes nothing;
 /// `/data/ingest` over HTTP still feeds the store.
@@ -221,8 +229,8 @@ pub struct Settings {
     pub compression_require_zstd: bool,
 
     /// Request-id header name (inbound adoption + response echo).
-    #[garde(custom(header_name))]
-    pub correlation_id_header: String,
+    #[serde(deserialize_with = "request_id_header")]
+    pub correlation_id_header: HeaderName,
 
     // CORS: permissive by default for local UI dev; tighten per deployment.
     #[serde(deserialize_with = "string_list")]
@@ -319,7 +327,7 @@ impl Default for Settings {
             compression_min_bytes: 1024,
             compression_zstd_level: 3,
             compression_require_zstd: false,
-            correlation_id_header: "X-Request-ID".into(),
+            correlation_id_header: HeaderName::from_static("x-request-id"),
             cors_allow_origins: vec!["*".into()],
             cors_allow_methods: vec!["*".into()],
             cors_allow_headers: vec!["*".into()],
@@ -377,147 +385,4 @@ impl Settings {
         self.validate()
             .map_err(|report| SettingsError::Invalid(report.to_string().replace('\n', "; ")))
     }
-}
-
-fn positive(value: &f64, _: &()) -> garde::Result {
-    if value.is_finite() && *value > 0.0 {
-        Ok(())
-    } else {
-        Err(garde::Error::new("must be a finite number > 0"))
-    }
-}
-
-fn not_below(floor: f64) -> impl FnOnce(&f64, &()) -> garde::Result {
-    move |value, _| {
-        if *value >= floor {
-            Ok(())
-        } else {
-            Err(garde::Error::new("must be >= ingest_retry_base_delay"))
-        }
-    }
-}
-
-fn non_negative(value: &f64, _: &()) -> garde::Result {
-    if value.is_finite() && *value >= 0.0 {
-        Ok(())
-    } else {
-        Err(garde::Error::new("must be a finite number >= 0"))
-    }
-}
-
-fn http_url(value: &str, _: &()) -> garde::Result {
-    if value.starts_with("http://") || value.starts_with("https://") {
-        Ok(())
-    } else {
-        Err(garde::Error::new("must start with http:// or https://"))
-    }
-}
-
-fn header_name(value: &str, _: &()) -> garde::Result {
-    HeaderName::from_bytes(value.as_bytes())
-        .map(|_| ())
-        .map_err(|_| garde::Error::new("must be a valid HTTP header name"))
-}
-
-fn secret_when(enabled: bool) -> impl FnOnce(&SecretString, &()) -> garde::Result {
-    move |secret, _| {
-        if enabled && secret.expose_secret().is_empty() {
-            Err(garde::Error::new("must be set when auth_enabled is true"))
-        } else {
-            Ok(())
-        }
-    }
-}
-
-fn needs_compression(enabled: bool) -> impl FnOnce(&bool, &()) -> garde::Result {
-    move |require, _| {
-        if *require && !enabled {
-            Err(garde::Error::new("true requires compression_enabled"))
-        } else {
-            Ok(())
-        }
-    }
-}
-
-fn credentials_need_explicit_origins(
-    origins: &[String],
-) -> impl FnOnce(&bool, &()) -> garde::Result + '_ {
-    move |credentials, _| {
-        if *credentials && origins.iter().any(|o| o == "*") {
-            Err(garde::Error::new(
-                "true is incompatible with cors_allow_origins=[\"*\"]; list explicit origins",
-            ))
-        } else {
-            Ok(())
-        }
-    }
-}
-
-/// The store drops `op` from what it stores, replaces `seqno` with its own
-/// write order and refuses a `_live` column, so a key on any of them would
-/// fail every merge or every batch.
-fn no_store_columns(keys: &[String], _: &()) -> garde::Result {
-    let reserved: Vec<&str> = keys
-        .iter()
-        .map(String::as_str)
-        .filter(|k| [OP_COLUMN, ORDER_COLUMN, LIVE_COLUMN].contains(k))
-        .collect();
-    if reserved.is_empty() {
-        Ok(())
-    } else {
-        Err(garde::Error::new(format!(
-            "reserved by the stream store: {}",
-            reserved.join(", ")
-        )))
-    }
-}
-
-fn transport_compiled_in(transport: &IngestTransport, _: &()) -> garde::Result {
-    if *transport == IngestTransport::Solace && !cfg!(feature = "solace") {
-        Err(garde::Error::new(
-            "solace needs a build with the `solace` Cargo feature",
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-/// `["a","b"]` (JSON) or `a,b`.
-fn string_list<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
-    let raw = String::deserialize(d)?;
-    let trimmed = raw.trim();
-    if trimmed.starts_with('[') {
-        return serde_json::from_str(trimmed)
-            .map_err(|e| serde::de::Error::custom(format!("invalid list value {raw:?}: {e}")));
-    }
-    Ok(trimmed
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .collect())
-}
-
-fn is_unset(raw: &str) -> bool {
-    raw.is_empty() || raw.eq_ignore_ascii_case("none") || raw.eq_ignore_ascii_case("null")
-}
-
-/// Seconds, or "" / "none" / "null" (any case) for unset.
-fn optional_seconds<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    let raw = String::deserialize(d)?;
-    let trimmed = raw.trim();
-    if is_unset(trimmed) {
-        return Ok(None);
-    }
-    trimmed
-        .parse::<f64>()
-        .map(Some)
-        .map_err(|e| serde::de::Error::custom(format!("invalid seconds value {raw:?}: {e}")))
-}
-
-/// A string, or "" / "none" / "null" (any case) for unset.
-fn optional_string<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
-    let raw = String::deserialize(d)?;
-    let trimmed = raw.trim();
-    Ok((!is_unset(trimmed)).then(|| trimmed.to_owned()))
 }

@@ -58,7 +58,7 @@ def _read_by(service: str) -> set[str]:
     if service == "python":
         fields = re.findall(r"^    ([a-z][a-z0-9_]*)\s*:", (d / "settings.py").read_text(), re.M)
     elif service == "rust":
-        fields = re.findall(r"^    pub ([a-z][a-z0-9_]*):", (d / "src/settings.rs").read_text(), re.M)
+        fields = re.findall(r"^    pub ([a-z][a-z0-9_]*):", (d / "src/settings/mod.rs").read_text(), re.M)
     else:
         yml = "".join(p.read_text() for p in (d / "src/main/resources").glob("application*.yml"))
         java = (d / "src/main/java/com/example/template/config/EnvContract.java").read_text()
