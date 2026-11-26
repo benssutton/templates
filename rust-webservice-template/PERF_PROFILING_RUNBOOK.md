@@ -126,7 +126,7 @@ path and k6 fails with `moduleSpecifier ... couldn't be found`.
 | Layer 1 says | perf shows | Verdict | Investigate |
 |---|---|---|---|
 | Large share in `clickhouse.*`, `postgres.*` or `lsm.query` | low `CPUs utilized` (well under 1); flamegraph dominated by tokio park/epoll and socket frames | **I/O-bound** on that store | pool sizes, query shape, indexing, network |
-| Large `ingest.decode`, `ingest.lsm_write` or `app_residual` | `CPUs utilized` near the worker-thread count; towers in `arrow_*`, `rust_template::persistence::stream_store` or serde frames | **CPU-bound** in-process | batch sizes, merge/compaction thresholds (`LSM_FLUSH_ROWS`, `LSM_COMPACTION_RUNS`), the `benches/lsm.rs` benchmark |
+| Large `ingest.decode`, `ingest.lsm_write` or `app_residual` | `CPUs utilized` near the worker-thread count; towers in `arrow_*`, `rust_template::persistence::stream_store` or serde frames | **CPU-bound** in-process | batch sizes, the store's shape (`LSM_LAYERS`, `LSM_PARTS_PER_LAYER`), the `benches/lsm.rs` benchmark |
 
 There is no GIL: one tokio worker thread per core runs handlers in parallel,
 while the LSM keeps a single writer behind a mutex. Under ingest load,
@@ -141,5 +141,5 @@ the single writer is the limit, not the core count.
   single-writer, so measuring write contention is a separate exercise.
 - k6 reads `Server-Timing` straight from the response, so no CORS exposure
   configuration is needed.
-- For the merge/compaction kernels alone, without HTTP, use the criterion
+- For the LSM store alone (ingest and ordered reads), without HTTP, use the criterion
   benchmark: `cargo bench --bench lsm`.

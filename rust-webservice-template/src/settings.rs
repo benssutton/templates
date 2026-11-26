@@ -8,6 +8,7 @@
 //! `from_vars`; `Settings::validate` is the same check for settings built
 //! in code (tests), and `create_app` calls it for that reason.
 
+use crate::persistence::stream_store::lsm::{LIVE_COLUMN, OP_COLUMN, ORDER_COLUMN};
 use axum::http::HeaderName;
 use garde::Validate;
 use secrecy::{ExposeSecret, SecretString};
@@ -127,19 +128,19 @@ pub struct Settings {
     #[garde(custom(positive))]
     pub redis_response_timeout_seconds: f64,
 
-    /// memtable -> run threshold
+    /// `L`: layers of the stream store; the top layer is never merged.
+    #[garde(range(min = 2))]
+    pub lsm_layers: usize,
+    /// `P`: parts a lower layer holds before they merge into the next one.
+    #[garde(range(min = 2))]
+    pub lsm_parts_per_layer: usize,
+    /// Live rows held; over it the oldest are evicted down to 90%.
     #[garde(range(min = 1))]
-    pub lsm_flush_rows: usize,
-    /// run count -> compaction threshold
-    #[garde(range(min = 1))]
-    pub lsm_compaction_runs: usize,
-    /// Memory bound: rows held across memtable and runs. Over it, the store
-    /// compacts first and only then evicts the oldest rows.
-    #[garde(range(min = self.lsm_flush_rows))]
     pub lsm_max_rows: usize,
     /// Merge partition key: the single extension point for a composite key.
+    /// Never a column the store owns (`op`, `seqno`, `_live`).
     #[serde(deserialize_with = "string_list")]
-    #[garde(length(min = 1))]
+    #[garde(length(min = 1), custom(no_store_columns))]
     pub lsm_key_columns: Vec<String>,
 
     #[garde(custom(transport_compiled_in))]
@@ -290,8 +291,8 @@ impl Default for Settings {
             redis_url: SecretString::from("redis://localhost:6379/0"),
             redis_connection_timeout_seconds: 2.0,
             redis_response_timeout_seconds: 5.0,
-            lsm_flush_rows: 1000,
-            lsm_compaction_runs: 4,
+            lsm_layers: 4,
+            lsm_parts_per_layer: 8,
             lsm_max_rows: 1_000_000,
             lsm_key_columns: vec!["id".into()],
             ingest_transport: IngestTransport::Noop,
@@ -447,6 +448,25 @@ fn credentials_need_explicit_origins(
         } else {
             Ok(())
         }
+    }
+}
+
+/// The store drops `op` from what it stores, replaces `seqno` with its own
+/// write order and refuses a `_live` column, so a key on any of them would
+/// fail every merge or every batch.
+fn no_store_columns(keys: &[String], _: &()) -> garde::Result {
+    let reserved: Vec<&str> = keys
+        .iter()
+        .map(String::as_str)
+        .filter(|k| [OP_COLUMN, ORDER_COLUMN, LIVE_COLUMN].contains(k))
+        .collect();
+    if reserved.is_empty() {
+        Ok(())
+    } else {
+        Err(garde::Error::new(format!(
+            "reserved by the stream store: {}",
+            reserved.join(", ")
+        )))
     }
 }
 

@@ -45,15 +45,24 @@ pub struct ProbeResult {
     pub error: Option<ProbeFailure>,
 }
 
-/// The in-memory stream store's size and what its memory bound evicted.
+/// The in-memory stream store's size and what its retention evicted.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, ToSchema)]
 pub struct StreamStoreStats {
-    /// Rows physically held (memtable and runs, shadowed versions included).
+    /// Rows physically held across every part, dead rows included.
     pub rows: u64,
+    /// Live rows: what `GET /data/cache` serves and `max_rows` caps.
+    pub live_rows: u64,
+    /// Parts held across every layer.
+    pub parts: u64,
     pub max_rows: u64,
-    /// Live rows evicted (oldest first) because compaction alone could not
-    /// bring the store under `max_rows`.
+    /// Live rows evicted (oldest first) to keep under `max_rows`.
     pub evicted_rows_total: u64,
+    /// Merges that failed; each is retried once its layer's part count has
+    /// doubled.
+    pub merge_failures_total: u64,
+    /// A write panicked, so the store refuses every later write; readiness
+    /// fails until the instance is restarted.
+    pub poisoned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

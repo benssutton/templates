@@ -31,7 +31,7 @@ fn defaults() {
         ("localhost", 8123)
     );
     assert_eq!(s.redis_url.expose_secret(), "redis://localhost:6379/0");
-    assert_eq!((s.lsm_flush_rows, s.lsm_compaction_runs), (1000, 4));
+    assert_eq!((s.lsm_layers, s.lsm_parts_per_layer), (4, 8));
     assert_eq!(s.lsm_key_columns, vec!["id".to_string()]);
     assert_eq!(s.ingest_transport, IngestTransport::Noop);
     assert!(!s.auth_enabled);
@@ -142,7 +142,7 @@ fn numeric_bounds_are_enforced() {
             "health_check_timeout_seconds",
         ),
         ("POSTGRES_POOL_MIN_SIZE", "11", "postgres_pool_min_size"),
-        ("LSM_FLUSH_ROWS", "0", "lsm_flush_rows"),
+        ("LSM_PARTS_PER_LAYER", "1", "lsm_parts_per_layer"),
         ("MAX_REQUEST_BODY_BYTES", "0", "max_request_body_bytes"),
         (
             "CORRELATION_ID_HEADER",
@@ -247,7 +247,7 @@ fn secrets_stay_out_of_errors() {
 fn remaining_bounds_are_enforced() {
     let mut cases: Vec<(&str, &str, &str)> = vec![
         ("POSTGRES_POOL_MAX_SIZE", "0", "postgres_pool_max_size"),
-        ("LSM_COMPACTION_RUNS", "0", "lsm_compaction_runs"),
+        ("LSM_LAYERS", "1", "lsm_layers"),
         ("MAX_INGEST_BATCH_BYTES", "0", "max_ingest_batch_bytes"),
         ("LSM_KEY_COLUMNS", "", "lsm_key_columns"),
     ];
@@ -265,6 +265,18 @@ fn remaining_bounds_are_enforced() {
             err.to_string().contains(&needle.to_lowercase()),
             "{key}={value}: {err}"
         );
+    }
+}
+
+/// `op` is not stored in the store's parts and `seqno` is replaced by the
+/// write order, so a key on either would break every merge: refused.
+#[test]
+fn lsm_key_columns_refuse_the_store_columns() {
+    for value in [r#"["id", "op"]"#, "seqno"] {
+        let err = Settings::from_vars(vars(&[("LSM_KEY_COLUMNS", value)])).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("lsm_key_columns"), "{value}: {msg}");
+        assert!(msg.contains("reserved"), "{value}: {msg}");
     }
 }
 
@@ -289,12 +301,12 @@ fn ingest_retry_max_delay_below_base_delay_is_rejected() {
 fn multiple_problems_are_all_reported() {
     let err = Settings::from_vars(vars(&[
         ("CONNECT_MAX_ATTEMPTS", "0"),
-        ("LSM_FLUSH_ROWS", "0"),
+        ("LSM_PARTS_PER_LAYER", "0"),
     ]))
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("connect_max_attempts"), "{msg}");
-    assert!(msg.contains("lsm_flush_rows"), "{msg}");
+    assert!(msg.contains("lsm_parts_per_layer"), "{msg}");
 }
 
 #[test]

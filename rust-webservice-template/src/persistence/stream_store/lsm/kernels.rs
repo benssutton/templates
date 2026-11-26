@@ -1,114 +1,123 @@
-//! Arrow compute kernels for the LSM store: merge, tombstone removal, compaction, schema checks.
+//! Arrow compute kernels for the layered LSM store: schema checks, preparing
+//! an incoming frame, key encoding and part merges.
 
+use super::part::Part;
 use super::{DELETE_OP, OP_COLUMN, ORDER_COLUMN, StoreError};
-use arrow::array::{Array, ArrayRef, BooleanArray, RecordBatch, StringArray};
+use arrow::array::{Array, ArrayRef, BooleanArray, BooleanBufferBuilder, RecordBatch, StringArray};
 use arrow::compute::kernels::cmp::neq;
 use arrow::compute::{
     SortColumn, SortOptions, cast, concat_batches, filter_record_batch, lexsort_to_indices,
-    sort_to_indices, take_record_batch,
+    take_record_batch,
 };
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use arrow::row::{RowConverter, SortField};
+use arrow::row::{Row, RowConverter, Rows, SortField};
 use std::sync::Arc;
 
-/// `run` (compacted: one row per key, sorted by key) cut down to its
-/// `max_rows` most recently written rows, still sorted by key; and how many
-/// rows were dropped.
-pub(super) fn keep_newest(
-    run: &RecordBatch,
-    max_rows: usize,
-    key_columns: &[String],
-) -> Result<(RecordBatch, usize), StoreError> {
-    let rows = run.num_rows();
-    if rows <= max_rows {
-        return Ok((run.clone(), 0));
+/// One stamped incoming frame, ready to write.
+pub(super) struct Prepared {
+    /// The keys of the frame sorted on (key asc, seqno desc).
+    sorted_keys: Rows,
+    /// The newest row of every key (the last one written), in key order:
+    /// its row in `sorted_keys` and whether it deletes the key. A null `op`
+    /// counts as a delete.
+    pub newest: Vec<(usize, bool)>,
+    /// The rows that are stored: the newest row of every key that is not a
+    /// delete, in key order, without `op` (it would only ever say upsert).
+    pub stored: RecordBatch,
+    pub stored_keys: Rows,
+}
+
+impl Prepared {
+    pub fn key(&self, sorted_row: usize) -> Row<'_> {
+        self.sorted_keys.row(sorted_row)
     }
-    let newest_first = sort_to_indices(
-        &column(run, ORDER_COLUMN)?,
-        Some(SortOptions {
-            descending: true,
-            nulls_first: false,
-        }),
-        Some(max_rows),
-    )?;
-    let kept = take_record_batch(run, &newest_first)?;
-    Ok((
-        sort_by_key_newest_first(&kept, key_columns)?,
-        rows - max_rows,
-    ))
 }
 
-/// Newest version of every key across `frames`, tombstones included, sorted
-/// by key ascending: `lexsort_to_indices` sorts on (key asc, seqno desc)
-/// and the first row of each run of equal keys is kept.
-pub fn merge(
-    frames: &[RecordBatch],
-    key_columns: &[String],
-) -> Result<Option<RecordBatch>, StoreError> {
-    let Some(first) = frames.first() else {
-        return Ok(None);
-    };
-    let combined = concat_batches(&first.schema(), frames)?;
-    let sorted = sort_by_key_newest_first(&combined, key_columns)?;
-    if sorted.num_rows() == 0 {
-        return Ok(Some(sorted));
-    }
-    let keys = key_columns
-        .iter()
-        .map(|k| column(&sorted, k))
-        .collect::<Result<Vec<_>, _>>()?;
-    let converter = RowConverter::new(
-        keys.iter()
-            .map(|a| SortField::new(a.data_type().clone()))
-            .collect(),
-    )?;
-    let rows = converter.convert_columns(&keys)?;
-    let first_of_key: BooleanArray = (0..sorted.num_rows())
-        .map(|i| Some(i == 0 || rows.row(i) != rows.row(i - 1)))
-        .collect();
-    Ok(Some(filter_record_batch(&sorted, &first_of_key)?))
-}
-
-/// Drop tombstones (`op == "delete"`). A null `op` compares as null and is
-/// dropped as well.
-pub fn live(batch: &RecordBatch) -> Result<RecordBatch, StoreError> {
-    let op = cast(&column(batch, OP_COLUMN)?, &DataType::Utf8)?;
-    let keep = neq(&op, &StringArray::new_scalar(DELETE_OP))?;
-    Ok(filter_record_batch(batch, &keep)?)
-}
-
-/// Full compaction: every run merged into one, with
-/// tombstones reclaimed. No run at all when nothing is live.
-pub fn compact(
-    runs: &[RecordBatch],
-    key_columns: &[String],
-) -> Result<Vec<RecordBatch>, StoreError> {
-    match merge(runs, key_columns)? {
-        None => Ok(Vec::new()),
-        Some(merged) => {
-            let kept = live(&merged)?;
-            Ok(if kept.num_rows() > 0 {
-                vec![kept]
-            } else {
-                Vec::new()
-            })
+/// Sort the frame on (key asc, seqno desc) and encode its keys once with
+/// the store's `converter`; the first row of each run of equal keys is the
+/// newest.
+pub(super) fn prepare(
+    frame: &RecordBatch,
+    keys: &[String],
+    converter: &RowConverter,
+) -> Result<Prepared, StoreError> {
+    let sorted = sort(frame, keys, true)?;
+    let sorted_keys = key_rows(converter, &sorted, keys)?;
+    let op = cast(&column(&sorted, OP_COLUMN)?, &DataType::Utf8)?;
+    let upsert = neq(&op, &StringArray::new_scalar(DELETE_OP))?;
+    let rows = sorted.num_rows();
+    let mut newest = Vec::new();
+    let mut keep = BooleanBufferBuilder::new(rows);
+    let mut stored_keys = converter.empty_rows(rows, 0);
+    for i in 0..rows {
+        let first_of_key = i == 0 || sorted_keys.row(i) != sorted_keys.row(i - 1);
+        let is_delete = !(upsert.is_valid(i) && upsert.value(i));
+        let stored = first_of_key && !is_delete;
+        keep.append(stored);
+        if first_of_key {
+            newest.push((i, is_delete));
+        }
+        if stored {
+            stored_keys.push(sorted_keys.row(i));
         }
     }
+    let stored = filter_record_batch(&sorted, &BooleanArray::new(keep.finish(), None))?;
+    Ok(Prepared {
+        sorted_keys,
+        newest,
+        stored: drop_columns(&stored, &[OP_COLUMN])?,
+        stored_keys,
+    })
 }
 
-/// The memtable as one run, sorted by (key asc, seqno desc).
-pub(super) fn sorted_run(
-    schema: &SchemaRef,
-    memtable: &[RecordBatch],
-    keys: &[String],
-) -> Result<RecordBatch, StoreError> {
-    let run = concat_batches(schema, memtable)?;
-    sort_by_key_newest_first(&run, keys)
+/// The row-format encoder for the key columns. Encoded keys compare in the
+/// order the sort uses (ascending, nulls first), and equal keys encode equal.
+pub(super) fn key_converter(schema: &Schema, keys: &[String]) -> Result<RowConverter, StoreError> {
+    let fields = keys
+        .iter()
+        .map(|k| {
+            let (_, field) = schema
+                .column_with_name(k)
+                .ok_or_else(|| StoreError::Internal(format!("frame has no `{k}` column")))?;
+            Ok(SortField::new(field.data_type().clone()))
+        })
+        .collect::<Result<Vec<_>, StoreError>>()?;
+    Ok(RowConverter::new(fields)?)
 }
 
-fn sort_by_key_newest_first(
+pub(super) fn key_rows(
+    converter: &RowConverter,
     batch: &RecordBatch,
     keys: &[String],
+) -> Result<Rows, StoreError> {
+    let columns = keys
+        .iter()
+        .map(|k| column(batch, k))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(converter.convert_columns(&columns)?)
+}
+
+/// The live rows of `parts` as one contiguous batch sorted by key. Live keys
+/// are unique across parts (superseded rows are already dead), so a merge is
+/// filter, concatenate and sort: nothing is deduplicated.
+pub(super) fn merge_parts(parts: &[Part], keys: &[String]) -> Result<RecordBatch, StoreError> {
+    let Some(first) = parts.first() else {
+        return Err(StoreError::Internal("merge of no parts".into()));
+    };
+    let live = parts
+        .iter()
+        .map(|p| filter_record_batch(&p.batch, &BooleanArray::new(p.live().clone(), None)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let combined = concat_batches(&first.batch.schema(), &live)?;
+    sort(&combined, keys, false)
+}
+
+/// Sort by key ascending, nulls first; with `newest_first`, equal keys are
+/// ordered by seqno descending.
+fn sort(
+    batch: &RecordBatch,
+    keys: &[String],
+    newest_first: bool,
 ) -> Result<RecordBatch, StoreError> {
     if batch.num_rows() == 0 {
         return Ok(batch.clone());
@@ -125,13 +134,15 @@ fn sort_by_key_newest_first(
             })
         })
         .collect::<Result<Vec<_>, StoreError>>()?;
-    columns.push(SortColumn {
-        values: column(batch, ORDER_COLUMN)?,
-        options: Some(SortOptions {
-            descending: true,
-            nulls_first: false,
-        }),
-    });
+    if newest_first {
+        columns.push(SortColumn {
+            values: column(batch, ORDER_COLUMN)?,
+            options: Some(SortOptions {
+                descending: true,
+                nulls_first: false,
+            }),
+        });
+    }
     let indices = lexsort_to_indices(&columns, None)?;
     Ok(take_record_batch(batch, &indices)?)
 }

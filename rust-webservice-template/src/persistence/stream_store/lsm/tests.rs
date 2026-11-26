@@ -1,8 +1,7 @@
 use super::*;
-use arrow::array::{Array, StringArray};
-use arrow::array::{AsArray, Int64Array};
-use arrow::datatypes::Int64Type;
-use arrow::datatypes::{DataType, Field};
+use arrow::array::{Array, ArrayRef, AsArray, Int64Array, StringArray};
+use arrow::datatypes::{DataType, Field, Int64Type};
+use std::collections::BTreeMap;
 
 /// Rows of (id, name, value, op).
 fn batch(rows: &[(i64, &str, &str, &str)]) -> RecordBatch {
@@ -24,8 +23,34 @@ fn batch(rows: &[(i64, &str, &str, &str)]) -> RecordBatch {
     .unwrap()
 }
 
-fn store(flush_rows: usize, compaction_runs: usize) -> LsmStore {
-    LsmStore::new(flush_rows, compaction_runs, vec!["id".into()])
+fn store(layers: usize, parts_per_layer: usize) -> LsmStore {
+    LsmStore::new(LsmConfig {
+        layers,
+        parts_per_layer,
+        ..LsmConfig::default()
+    })
+}
+
+/// One upsert per id, every row with value `v`.
+fn upserts(ids: std::ops::Range<i64>, v: &str) -> RecordBatch {
+    let rows: Vec<(i64, &str, &str, &str)> = ids.map(|i| (i, "n", v, "upsert")).collect();
+    batch(&rows)
+}
+
+/// `_live` of every part, oldest data first.
+fn live_bits(s: &LsmStore) -> Vec<Vec<bool>> {
+    s.live_batches()
+        .unwrap()
+        .iter()
+        .map(|b| {
+            b.column_by_name(LIVE_COLUMN)
+                .unwrap()
+                .as_boolean()
+                .iter()
+                .map(Option::unwrap)
+                .collect()
+        })
+        .collect()
 }
 
 /// (id, value) of every live row, in query order.
@@ -44,215 +69,9 @@ fn values(store: &LsmStore) -> Vec<(i64, String)> {
         .collect()
 }
 
-/// Over the bound, shadowed versions and tombstones go first: rewriting
-/// the same keys never evicts anything.
-#[tokio::test]
-async fn the_memory_bound_compacts_before_it_evicts() {
-    let s = store(100, 100).with_max_rows(4);
-    for round in 0..5 {
-        let value = format!("v{round}");
-        let evicted = s
-            .ingest(batch(&[
-                (1, "a", &value, "upsert"),
-                (2, "b", &value, "upsert"),
-            ]))
-            .await
-            .unwrap();
-        assert_eq!(evicted, 0, "round {round}");
-    }
-    assert!(s.stats().rows <= 4, "{:?}", s.stats());
-    assert_eq!(values(&s), [(1, "v4".to_owned()), (2, "v4".to_owned())]);
-    assert_eq!(s.stats().evicted_rows_total, 0);
-}
-
-/// Distinct live keys beyond the bound: the oldest writes are evicted
-/// and counted; the newest survive.
-#[tokio::test]
-async fn the_memory_bound_evicts_the_oldest_live_rows_and_counts_them() {
-    let s = store(100, 100).with_max_rows(3);
-    let mut evicted = 0;
-    for id in 1..=5 {
-        evicted += s.ingest(batch(&[(id, "n", "v", "upsert")])).await.unwrap();
-    }
-    assert_eq!(evicted, 2);
-    assert_eq!(s.stats().evicted_rows_total, 2);
-    assert_eq!(s.stats().max_rows, 3);
-    let ids: Vec<i64> = values(&s).into_iter().map(|(id, _)| id).collect();
-    assert_eq!(ids, [3, 4, 5]);
-}
-
-/// The merged view is computed once per published snapshot and reused.
-#[tokio::test]
-async fn repeated_queries_on_one_snapshot_reuse_the_merged_view() {
-    let s = store(100, 4);
-    s.ingest(batch(&[(1, "a", "v", "upsert")])).await.unwrap();
-    let first = s.query(0).unwrap().rows.unwrap();
-    let second = s.query(0).unwrap().rows.unwrap();
-    assert!(
-        first
-            .column(0)
-            .to_data()
-            .ptr_eq(&second.column(0).to_data())
-    );
-    s.ingest(batch(&[(2, "b", "v", "upsert")])).await.unwrap();
-    assert_eq!(
-        s.query(0).unwrap().total,
-        2,
-        "a new snapshot is merged again"
-    );
-}
-
-#[tokio::test]
-async fn newest_version_wins_within_the_memtable() {
-    let s = store(100, 4);
-    s.ingest(batch(&[(1, "a", "v1", "upsert"), (1, "a", "v2", "upsert")]))
-        .await
-        .unwrap();
-    s.ingest(batch(&[(1, "a", "v3", "upsert")])).await.unwrap();
-    assert_eq!(values(&s), [(1, "v3".to_owned())]);
-    assert_eq!(s.query(0).unwrap().total, 1);
-}
-
-/// Three batches with flush_rows=2,
-/// compaction_runs=2: run1, run2 -> compaction (id 1 = v2), then a
-/// memtable tombstone beats id 2 in the compacted run.
-#[tokio::test]
-async fn newest_wins_across_compaction_and_a_memtable_tombstone_shadows_a_run() {
-    let s = store(2, 2);
-    s.ingest(batch(&[
-        (1, "alpha", "v1", "upsert"),
-        (2, "beta", "v1", "upsert"),
-    ]))
-    .await
-    .unwrap();
-    assert_eq!((s.run_count(), s.memtable_rows()), (1, 0));
-    s.ingest(batch(&[
-        (1, "alpha", "v2", "upsert"),
-        (3, "gamma", "v1", "upsert"),
-    ]))
-    .await
-    .unwrap();
-    assert_eq!(s.run_count(), 1, "two runs compacted into one");
-    s.ingest(batch(&[(2, "beta", "v1", "delete")]))
-        .await
-        .unwrap();
-    assert_eq!(s.memtable_rows(), 1);
-    assert_eq!(values(&s), [(1, "v2".to_owned()), (3, "v1".to_owned())]);
-}
-
-#[tokio::test]
-async fn compaction_drops_tombstones() {
-    let s = store(1, 2);
-    s.ingest(batch(&[(1, "a", "v1", "upsert"), (2, "b", "v1", "upsert")]))
-        .await
-        .unwrap();
-    s.ingest(batch(&[(2, "b", "v1", "delete")])).await.unwrap();
-    assert_eq!(s.query(100).unwrap().total, 1);
-    assert_eq!(values(&s), [(1, "v1".to_owned())]);
-    assert_eq!(
-        s.run_rows(),
-        1,
-        "the tombstone for id 2 is physically reclaimed"
-    );
-}
-
-#[tokio::test]
-async fn a_tombstone_in_an_uncompacted_run_shadows_older_runs() {
-    let s = store(1, 10);
-    s.ingest(batch(&[(5, "x", "v1", "upsert")])).await.unwrap();
-    s.ingest(batch(&[(5, "x", "v1", "delete")])).await.unwrap();
-    assert_eq!(s.query(0).unwrap().total, 0);
-    assert_eq!(
-        (s.run_count(), s.run_rows()),
-        (2, 2),
-        "not reclaimed before compaction"
-    );
-}
-
-#[tokio::test]
-async fn reinsert_after_delete_wins_even_after_compaction() {
-    let s = store(1, 2);
-    for (value, op) in [("v1", "upsert"), ("v1", "delete"), ("v2", "upsert")] {
-        s.ingest(batch(&[(500, "rk", value, op)])).await.unwrap();
-    }
-    assert_eq!(values(&s), [(500, "v2".to_owned())]);
-}
-
-#[tokio::test]
-async fn flush_and_compaction_happen_at_their_thresholds() {
-    let s = store(3, 2);
-    s.ingest(batch(&[(1, "a", "v", "upsert"), (2, "b", "v", "upsert")]))
-        .await
-        .unwrap();
-    assert_eq!(
-        (s.run_count(), s.memtable_rows()),
-        (0, 2),
-        "below flush_rows"
-    );
-    s.ingest(batch(&[(3, "c", "v", "upsert")])).await.unwrap();
-    assert_eq!(
-        (s.run_count(), s.memtable_rows()),
-        (1, 0),
-        "flushed at flush_rows"
-    );
-    s.ingest(batch(&[
-        (4, "d", "v", "upsert"),
-        (5, "e", "v", "upsert"),
-        (6, "f", "v", "upsert"),
-    ]))
-    .await
-    .unwrap();
-    assert_eq!(s.run_count(), 1, "compacted at compaction_runs");
-    assert_eq!(s.query(0).unwrap().total, 6);
-}
-
-/// Limit 0 returns every row; a limit pages: rows come back sorted by key whatever the write order.
-#[tokio::test]
-async fn limit_zero_returns_every_row_and_a_limit_pages_in_key_order() {
-    let s = store(100, 4);
-    s.ingest(batch(&[
-        (3, "c", "v", "upsert"),
-        (1, "a", "v", "upsert"),
-        (2, "b", "v", "upsert"),
-    ]))
-    .await
-    .unwrap();
-    let all = s.query(0).unwrap();
-    assert_eq!((all.total, all.rows.unwrap().num_rows()), (3, 3));
-    let page = s.query(2).unwrap();
-    assert_eq!(page.total, 3);
-    let rows = page.rows.unwrap();
-    let ids = rows
-        .column_by_name("id")
-        .unwrap()
-        .as_primitive::<Int64Type>();
-    assert_eq!(ids.values().to_vec(), [1, 2]);
-}
-
-#[tokio::test]
-async fn query_drops_the_order_and_op_columns() {
-    let s = store(100, 4);
-    s.ingest(batch(&[(1, "a", "v", "upsert")])).await.unwrap();
-    let rows = s.query(0).unwrap().rows.unwrap();
-    let names: Vec<String> = rows
-        .schema()
-        .fields()
-        .iter()
-        .map(|f| f.name().clone())
-        .collect();
-    assert_eq!(names, ["id", "name", "value"]);
-}
-
-#[tokio::test]
-async fn an_empty_store_has_no_rows() {
-    let result = store(100, 4).query(10).unwrap();
-    assert!(result.rows.is_none());
-    assert_eq!(result.total, 0);
-}
-
 #[tokio::test]
 async fn a_batch_without_the_key_column_is_invalid_and_writes_nothing() {
-    let s = store(100, 4);
+    let s = store(4, 8);
     let no_id = batch(&[(1, "x", "v", "upsert")])
         .project(&[1, 2, 3])
         .unwrap();
@@ -266,7 +85,7 @@ async fn a_batch_without_the_key_column_is_invalid_and_writes_nothing() {
 
 #[tokio::test]
 async fn a_batch_without_op_is_invalid() {
-    let s = store(100, 4);
+    let s = store(4, 8);
     let no_op = batch(&[(1, "x", "v", "upsert")])
         .project(&[0, 1, 2])
         .unwrap();
@@ -281,7 +100,7 @@ async fn a_batch_without_op_is_invalid() {
 /// is rejected up front instead of poisoning every later merge.
 #[tokio::test]
 async fn a_batch_with_a_conflicting_schema_is_invalid() {
-    let s = store(100, 4);
+    let s = store(4, 8);
     s.ingest(batch(&[(1, "a", "v", "upsert")])).await.unwrap();
     let b = batch(&[(2, "b", "v", "upsert")]);
     let text_ids = arrow::compute::cast(b.column(0), &DataType::Utf8).unwrap();
@@ -321,7 +140,7 @@ async fn a_batch_with_a_conflicting_schema_is_invalid() {
 async fn a_first_batch_the_kernels_cannot_merge_is_invalid_and_fixes_nothing() {
     use arrow::array::{ListArray, StructArray};
     use arrow::datatypes::Int32Type;
-    let s = store(1, 2);
+    let s = store(4, 8);
     let base = batch(&[(1, "a", "v", "upsert")]);
     let op = Arc::new(StructArray::from(vec![(
         Arc::new(Field::new(
@@ -354,7 +173,7 @@ async fn a_first_batch_the_kernels_cannot_merge_is_invalid_and_fixes_nothing() {
 /// write order decides, not the publisher's.
 #[tokio::test]
 async fn an_incoming_seqno_column_is_replaced_by_the_write_order() {
-    let s = store(100, 4);
+    let s = store(4, 8);
     s.ingest(batch(&[(1, "a", "v1", "upsert")])).await.unwrap();
     let b = batch(&[(1, "a", "v2", "upsert")]);
     let mut fields: Vec<Field> = b
@@ -375,7 +194,7 @@ async fn an_incoming_seqno_column_is_replaced_by_the_write_order() {
 /// batch is unmergeable is refused before anything is written.
 #[tokio::test]
 async fn validate_rejects_a_slice_whose_second_batch_lacks_op_and_writes_nothing() {
-    let s = store(1, 2);
+    let s = store(4, 8);
     let good = batch(&[(1, "a", "v", "upsert")]);
     let no_op = batch(&[(2, "b", "v", "upsert")])
         .project(&[0, 1, 2])
@@ -386,14 +205,14 @@ async fn validate_rejects_a_slice_whose_second_batch_lacks_op_and_writes_nothing
         "{err}"
     );
     assert_eq!(s.query(0).unwrap().total, 0);
-    assert_eq!((s.run_count(), s.memtable_rows()), (0, 0));
+    assert_eq!((s.stats().rows, s.stats().parts), (0, 0));
 }
 
 /// On an empty store the slice's first batch sets the schema the rest
 /// must match, so batches that disagree with each other are refused.
 #[tokio::test]
 async fn validate_rejects_a_slice_whose_batches_disagree_on_an_empty_store() {
-    let s = store(100, 4);
+    let s = store(4, 8);
     let first = batch(&[(1, "a", "v", "upsert")]);
     let fewer = batch(&[(2, "b", "v", "upsert")])
         .project(&[0, 1, 3])
@@ -408,7 +227,7 @@ async fn validate_rejects_a_slice_whose_batches_disagree_on_an_empty_store() {
 
 #[tokio::test]
 async fn validate_checks_against_the_schema_the_store_already_fixed() {
-    let s = store(100, 4);
+    let s = store(4, 8);
     s.ingest(batch(&[(1, "a", "v", "upsert")])).await.unwrap();
     let fewer = batch(&[(2, "b", "v", "upsert")])
         .project(&[0, 1, 3])
@@ -421,7 +240,7 @@ async fn validate_checks_against_the_schema_the_store_already_fixed() {
 
 #[tokio::test]
 async fn validate_accepts_a_valid_slice_and_writes_nothing() {
-    let s = store(1, 2);
+    let s = store(4, 8);
     let slice = [
         batch(&[(1, "a", "v1", "upsert")]),
         batch(&[(1, "a", "v1", "delete")])
@@ -430,7 +249,7 @@ async fn validate_accepts_a_valid_slice_and_writes_nothing() {
     ];
     s.validate(&slice).unwrap();
     assert_eq!(s.query(0).unwrap().total, 0);
-    assert_eq!((s.run_count(), s.memtable_rows()), (0, 0));
+    assert_eq!((s.stats().rows, s.stats().parts), (0, 0));
     // Nothing was fixed either: a different schema is still accepted.
     s.ingest(batch(&[(1, "a", "v", "upsert")]).project(&[0, 3]).unwrap())
         .await
@@ -442,7 +261,10 @@ async fn validate_accepts_a_valid_slice_and_writes_nothing() {
 /// key is the pair, so a newer (1, 1) does not shadow (1, 2).
 #[tokio::test]
 async fn a_multi_column_key_partitions_by_every_key_column() {
-    let s = LsmStore::new(100, 4, vec!["id".into(), "version".into()]);
+    let s = LsmStore::new(LsmConfig {
+        key_columns: vec!["id".into(), "version".into()],
+        ..LsmConfig::default()
+    });
     let rows = |r: &[(i64, i64, &str)]| {
         RecordBatch::try_new(
             Arc::new(Schema::new(vec![
@@ -480,7 +302,7 @@ async fn a_multi_column_key_partitions_by_every_key_column() {
 /// first.
 #[tokio::test]
 async fn null_keys_are_one_key_and_sort_first() {
-    let s = store(100, 4);
+    let s = store(4, 8);
     let rows = |r: &[(Option<i64>, &str)]| {
         RecordBatch::try_new(
             batch(&[]).schema(),
@@ -511,7 +333,7 @@ async fn null_keys_are_one_key_and_sort_first() {
 
 #[tokio::test]
 async fn a_batch_with_duplicate_column_names_is_invalid() {
-    let s = store(100, 4);
+    let s = store(4, 8);
     let b = batch(&[(1, "a", "v", "upsert")]);
     let dup = RecordBatch::try_new(
         Arc::new(Schema::new(vec![
@@ -542,7 +364,7 @@ async fn a_batch_with_duplicate_column_names_is_invalid() {
 
 #[tokio::test]
 async fn column_order_may_differ_between_batches() {
-    let s = store(1, 2);
+    let s = store(4, 8);
     s.ingest(batch(&[(1, "a", "v1", "upsert")])).await.unwrap();
     let reordered = batch(&[(1, "a", "v2", "upsert")])
         .project(&[3, 2, 1, 0])
@@ -553,10 +375,10 @@ async fn column_order_may_differ_between_batches() {
 
 /// Snapshot isolation under a concurrent write: every read sees
 /// exactly the rows of some prefix of the writes, never a half-applied
-/// flush or compaction.
+/// supersede or merge.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn readers_see_a_consistent_snapshot_while_the_writer_flushes_and_compacts() {
-    let s = Arc::new(store(7, 3));
+async fn readers_see_a_consistent_snapshot_while_the_writer_merges() {
+    let s = Arc::new(store(3, 2));
     // The writer starts only after the reader's first query, so the
     // reader sees the empty store and then at least one more snapshot.
     let (started, start) = tokio::sync::oneshot::channel::<()>();
@@ -602,5 +424,530 @@ async fn readers_see_a_consistent_snapshot_while_the_writer_flushes_and_compacts
     writer.await.unwrap();
     let reads = reader.await.unwrap();
     assert!(reads > 1, "the first read precedes every write");
-    assert!(s.run_count() <= 3);
+    // 300 batches with P = 2, L = 3: layer digits 0, 0 and 300 / 4 top parts.
+    assert_eq!(s.layer_parts(), [0, 0, 75]);
+}
+
+/// A newer version kills the old row at write time: the old part's bit is
+/// cleared, so no read has to deduplicate.
+#[tokio::test]
+async fn a_newer_version_supersedes_the_old_row_on_write() {
+    let s = store(4, 8);
+    s.ingest(batch(&[(1, "a", "v1", "upsert"), (2, "b", "v1", "upsert")]))
+        .await
+        .unwrap();
+    s.ingest(batch(&[(1, "a", "v2", "upsert")])).await.unwrap();
+    assert_eq!(values(&s), [(1, "v2".to_owned()), (2, "v1".to_owned())]);
+    assert_eq!(live_bits(&s), [vec![false, true], vec![true]]);
+}
+
+/// A delete kills the live version and is not stored itself.
+#[tokio::test]
+async fn a_delete_hides_the_key_and_is_not_stored() {
+    let s = store(4, 8);
+    s.ingest(batch(&[(1, "a", "v1", "upsert"), (2, "b", "v1", "upsert")]))
+        .await
+        .unwrap();
+    s.ingest(batch(&[(1, "a", "", "delete"), (3, "c", "", "delete")]))
+        .await
+        .unwrap();
+    assert_eq!(values(&s), [(2, "v1".to_owned())]);
+    assert_eq!(s.stats().rows, 2, "the deletes were not stored");
+    assert_eq!(s.query(0).unwrap().total, 1);
+}
+
+#[tokio::test]
+async fn reinsert_after_delete_wins() {
+    let s = store(2, 2);
+    s.ingest(batch(&[(1, "a", "v1", "upsert")])).await.unwrap();
+    s.ingest(batch(&[(1, "a", "", "delete")])).await.unwrap();
+    s.ingest(batch(&[(1, "a", "v3", "upsert")])).await.unwrap();
+    assert_eq!(values(&s), [(1, "v3".to_owned())]);
+}
+
+/// Within one batch the last row for a key wins; the others are never stored.
+#[tokio::test]
+async fn the_last_row_for_a_key_within_a_batch_wins() {
+    let s = store(4, 8);
+    s.ingest(batch(&[
+        (1, "a", "first", "upsert"),
+        (1, "a", "second", "upsert"),
+        (2, "b", "x", "upsert"),
+    ]))
+    .await
+    .unwrap();
+    assert_eq!(values(&s), [(1, "second".to_owned()), (2, "x".to_owned())]);
+    assert_eq!(s.stats().rows, 2);
+}
+
+/// Parts per layer follow a base-P counter of the batches received, except
+/// that the top layer is never merged: with P = 3, L = 3, after `n` batches
+/// of new keys the layers hold (n % 3, n / 3 % 3, n / 9) parts.
+#[tokio::test]
+async fn layers_count_batches_in_base_p_and_only_the_top_layer_overflows() {
+    let s = store(3, 3);
+    for n in 1..=40_i64 {
+        s.ingest(upserts(n * 10..n * 10 + 5, "v")).await.unwrap();
+        let n = n as usize;
+        assert_eq!(
+            s.layer_parts(),
+            [n % 3, n / 3 % 3, n / 9],
+            "after {n} batches"
+        );
+    }
+    assert_eq!(
+        s.layer_parts()[2],
+        4,
+        "the top layer holds more than P parts"
+    );
+    assert_eq!(s.query(0).unwrap().total, 200);
+}
+
+/// Each row is written once on arrival and once per merge into layers 1 to
+/// L-1, so write amplification never exceeds L.
+#[tokio::test]
+async fn write_amplification_is_at_most_the_layer_count() {
+    let s = store(3, 4);
+    // 128 = 8 x 4^2 batches: every row has crossed both merges.
+    for n in 0..128_i64 {
+        s.ingest(upserts(n * 10..n * 10 + 10, "v")).await.unwrap();
+    }
+    let ingested = 128 * 10;
+    assert_eq!(s.rows_written(), ingested * 3);
+    assert_eq!(s.layer_parts(), [0, 0, 8]);
+}
+
+/// A merge keeps only live rows: superseded versions are not rewritten.
+#[tokio::test]
+async fn a_merge_drops_dead_rows() {
+    let s = store(3, 2);
+    s.ingest(upserts(0..10, "old")).await.unwrap();
+    s.ingest(upserts(5..15, "new")).await.unwrap();
+    assert_eq!(s.layer_parts(), [0, 1, 0]);
+    assert_eq!(
+        s.stats().rows,
+        15,
+        "the 5 superseded rows were not rewritten"
+    );
+    let rows = values(&s);
+    assert_eq!(rows.len(), 15);
+    assert_eq!(rows[4], (4, "old".to_owned()));
+    assert_eq!(rows[5], (5, "new".to_owned()));
+}
+
+/// A part whose rows are all superseded is dropped at once.
+#[tokio::test]
+async fn a_part_with_no_live_rows_is_dropped() {
+    let s = store(4, 8);
+    s.ingest(upserts(0..3, "old")).await.unwrap();
+    s.ingest(upserts(0..3, "new")).await.unwrap();
+    assert_eq!(s.layer_parts(), [1, 0, 0, 0]);
+    assert_eq!(s.stats().rows, 3);
+}
+
+/// Over `max_rows` live rows the oldest writes are marked dead down to 90%
+/// of the cap, counted and no longer read; the newest survive.
+#[tokio::test]
+async fn over_the_cap_the_oldest_rows_are_evicted_to_ninety_percent() {
+    let s = LsmStore::new(LsmConfig {
+        max_rows: 20,
+        ..LsmConfig::default()
+    });
+    assert_eq!(s.ingest(upserts(0..15, "a")).await.unwrap(), 0);
+    // 25 live > 20: down to 18, so the 7 oldest (ids 0..7) go.
+    assert_eq!(s.ingest(upserts(100..110, "b")).await.unwrap(), 7);
+    assert_eq!(s.query(0).unwrap().total, 18);
+    assert_eq!(values(&s).first().map(|r| r.0), Some(7));
+    assert_eq!(s.stats().evicted_rows_total, 7);
+}
+
+/// Rows come back in key order across parts, whatever the write order; a
+/// limit pages, 0 returns every row, and total counts every live row.
+#[tokio::test]
+async fn reads_merge_parts_in_key_order_and_page() {
+    let s = store(4, 8);
+    s.ingest(batch(&[(5, "e", "v", "upsert"), (1, "a", "v", "upsert")]))
+        .await
+        .unwrap();
+    s.ingest(batch(&[(3, "c", "v", "upsert"), (4, "d", "v", "upsert")]))
+        .await
+        .unwrap();
+    s.ingest(batch(&[(2, "b", "v", "upsert")])).await.unwrap();
+    let ids = |limit: usize| -> Vec<i64> {
+        let result = s.query(limit).unwrap();
+        assert_eq!(result.total, 5);
+        result
+            .rows
+            .unwrap()
+            .column_by_name("id")
+            .unwrap()
+            .as_primitive::<Int64Type>()
+            .values()
+            .to_vec()
+    };
+    assert_eq!(ids(0), [1, 2, 3, 4, 5]);
+    assert_eq!(ids(2), [1, 2]);
+}
+
+#[tokio::test]
+async fn query_drops_the_order_and_op_columns() {
+    let s = store(4, 8);
+    s.ingest(batch(&[(1, "a", "v", "upsert")])).await.unwrap();
+    let rows = s.query(0).unwrap().rows.unwrap();
+    let names: Vec<&str> = rows
+        .schema_ref()
+        .fields()
+        .iter()
+        .map(|f| f.name().as_str())
+        .collect();
+    assert_eq!(names, ["id", "name", "value"]);
+}
+
+#[tokio::test]
+async fn an_empty_store_has_no_rows() {
+    let result = store(4, 8).query(10).unwrap();
+    assert!(result.rows.is_none());
+    assert_eq!(result.total, 0);
+}
+
+/// Query engines get each part with a `_live` column; the data columns are
+/// the store's own buffers, not copies.
+#[tokio::test]
+async fn live_batches_share_the_stores_buffers() {
+    let s = store(4, 8);
+    s.ingest(upserts(0..4, "v")).await.unwrap();
+    let first = s.live_batches().unwrap();
+    let second = s.live_batches().unwrap();
+    let id_buffer =
+        |b: &RecordBatch| b.column_by_name("id").unwrap().to_data().buffers()[0].as_ptr();
+    assert_eq!(id_buffer(&first[0]), id_buffer(&second[0]));
+    let live = first[0].column_by_name(LIVE_COLUMN).unwrap().as_boolean();
+    assert_eq!(live.true_count(), 4);
+}
+
+/// `_live` is the column `live_batches` appends, so a data column of that
+/// name would shadow the store's bitmap: it is refused.
+#[tokio::test]
+async fn a_batch_with_a_live_column_is_invalid() {
+    let s = store(4, 8);
+    let b = batch(&[(1, "a", "v", "upsert")]);
+    let mut fields: Vec<Field> = b
+        .schema()
+        .fields()
+        .iter()
+        .map(|f| f.as_ref().clone())
+        .collect();
+    fields.push(Field::new(LIVE_COLUMN, DataType::Boolean, true));
+    let mut columns = b.columns().to_vec();
+    columns.push(Arc::new(arrow::array::BooleanArray::from(vec![true])));
+    let reserved = RecordBatch::try_new(Arc::new(Schema::new(fields)), columns).unwrap();
+    let err = s.ingest(reserved.clone()).await.unwrap_err();
+    assert!(
+        matches!(&err, StoreError::InvalidBatch(m) if m == "batch uses reserved column names: ['_live']"),
+        "{err}"
+    );
+    assert!(matches!(
+        s.validate(&[reserved]),
+        Err(StoreError::InvalidBatch(_))
+    ));
+    assert_eq!(s.query(0).unwrap().total, 0);
+}
+
+/// Copy-on-write: what a reader took before a write still reads the same
+/// rows after it, although the write cleared bits in the same part.
+#[tokio::test]
+async fn a_view_taken_before_a_write_is_unchanged_by_it() {
+    let s = store(4, 8);
+    s.ingest(upserts(0..4, "old")).await.unwrap();
+    let before = s.live_batches().unwrap();
+    s.ingest(upserts(0..2, "new")).await.unwrap();
+    let live = |b: &RecordBatch| -> Vec<bool> {
+        b.column_by_name(LIVE_COLUMN)
+            .unwrap()
+            .as_boolean()
+            .iter()
+            .map(Option::unwrap)
+            .collect()
+    };
+    assert_eq!(live(&before[0]), [true, true, true, true]);
+    assert_eq!(live_bits(&s)[0], [false, false, true, true]);
+}
+
+// ---- invariants ----
+
+/// Panics unless the writer's index, bitmaps, layers and published snapshot
+/// agree: one index entry per live row, each pointing at a set bit holding
+/// that key; each part's live count equal to its popcount and above zero; no
+/// layer below the top at `P` parts or more; the snapshot in step.
+fn check(s: &LsmStore) {
+    let Ok(w) = s.writer.try_lock() else {
+        panic!("a write is in progress");
+    };
+    let parts: HashMap<u64, &Part> = w.layers.iter().flatten().map(|p| (p.id, p)).collect();
+    let live: usize = parts.values().map(|p| p.live_rows()).sum();
+    assert_eq!(w.index.len(), live, "index entries != live rows");
+    for (key, loc) in &w.index {
+        let Some(part) = parts.get(&loc.part) else {
+            panic!("{loc:?} names no part");
+        };
+        assert!(part.is_live(loc.row), "{loc:?} points at a dead row");
+        assert_eq!(
+            part.key(loc.row).as_ref(),
+            &**key,
+            "{loc:?} holds another key"
+        );
+    }
+    for part in parts.values() {
+        assert_eq!(
+            part.live_rows(),
+            part.live().count_set_bits(),
+            "part {}",
+            part.id
+        );
+        assert!(part.live_rows() > 0, "part {} has no live rows", part.id);
+    }
+    let top = w.layers.len() - 1;
+    for (i, layer) in w.layers[..top].iter().enumerate() {
+        assert!(
+            layer.len() < s.core.config.parts_per_layer || w.merge_failed_at[i].is_some(),
+            "layer {i} holds {} parts with no failed merge",
+            layer.len()
+        );
+    }
+    let snap = s.core.snapshot.load();
+    assert_eq!(snap.live_rows, live, "snapshot live rows");
+    assert_eq!(snap.parts.len(), parts.len(), "snapshot parts");
+}
+
+/// `ingest`, then `check`.
+async fn write(s: &LsmStore, b: RecordBatch) -> u64 {
+    let evicted = s.ingest(b).await.unwrap();
+    check(s);
+    evicted
+}
+
+fn ids(s: &LsmStore) -> Vec<i64> {
+    values(s).into_iter().map(|(id, _)| id).collect()
+}
+
+/// After a merge the index points into the merged part: a newer version
+/// kills the merged row, not a row of the parts that were merged.
+#[tokio::test]
+async fn a_newer_version_after_a_merge_supersedes_the_merged_row() {
+    let s = store(3, 2);
+    write(&s, upserts(0..4, "a")).await;
+    write(&s, upserts(10..14, "a")).await;
+    assert_eq!(s.layer_parts(), [0, 1, 0]);
+    write(&s, upserts(2..3, "b")).await;
+    assert_eq!(values(&s)[2], (2, "b".to_owned()));
+    assert_eq!(
+        live_bits(&s),
+        [
+            vec![true, true, false, true, true, true, true, true],
+            vec![true]
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_delete_after_a_merge_kills_the_merged_row() {
+    let s = store(3, 2);
+    write(&s, upserts(0..4, "a")).await;
+    write(&s, upserts(10..14, "a")).await;
+    write(&s, batch(&[(3, "n", "", "delete")])).await;
+    assert_eq!(ids(&s), [0, 1, 2, 10, 11, 12, 13]);
+    assert_eq!(s.layer_parts(), [0, 1, 0], "the delete stored nothing");
+    assert_eq!(s.stats().rows, 8, "the dead row stays held in its part");
+    assert_eq!(
+        s.stats().live_rows,
+        7,
+        "rows counts held rows, live_rows the live ones"
+    );
+}
+
+/// Eviction takes the oldest rows across layers (the top first) and drops a
+/// part it empties; an evicted key can be written again, and deleting one
+/// is a no-op.
+#[tokio::test]
+async fn eviction_crosses_layers_drops_emptied_parts_and_forgets_the_keys() {
+    let s = LsmStore::new(LsmConfig {
+        layers: 3,
+        parts_per_layer: 2,
+        max_rows: 10,
+        ..LsmConfig::default()
+    });
+    write(&s, upserts(0..4, "a")).await;
+    write(&s, upserts(4..8, "a")).await;
+    assert_eq!(s.layer_parts(), [0, 1, 0]);
+    // 18 live > 10: down to 9, so all 8 rows of the layer-1 part (dropped)
+    // and the oldest row of the new layer-0 part (id 100) go.
+    assert_eq!(write(&s, upserts(100..110, "b")).await, 9);
+    assert_eq!(s.layer_parts(), [1, 0, 0]);
+    assert_eq!(s.stats().parts, 1);
+    assert_eq!(ids(&s), (101..110).collect::<Vec<_>>());
+    write(&s, upserts(0..1, "again")).await;
+    assert_eq!(values(&s)[0], (0, "again".to_owned()));
+    write(
+        &s,
+        batch(&[(1, "n", "", "delete"), (100, "n", "", "delete")]),
+    )
+    .await;
+    assert_eq!(s.query(0).unwrap().total, 10);
+    assert_eq!(s.stats().evicted_rows_total, 9);
+}
+
+#[tokio::test]
+async fn an_empty_batch_adds_no_part_and_fixes_no_schema() {
+    let s = store(4, 8);
+    assert_eq!(write(&s, batch(&[])).await, 0);
+    assert_eq!((s.stats().parts, s.layer_parts()), (0, vec![0, 0, 0, 0]));
+    // A different schema is still accepted: the empty batch fixed nothing.
+    write(
+        &s,
+        batch(&[(1, "a", "v", "upsert")]).project(&[0, 3]).unwrap(),
+    )
+    .await;
+    assert_eq!(s.stats().parts, 1);
+}
+
+#[tokio::test]
+async fn an_all_delete_batch_adds_no_part() {
+    let s = store(4, 8);
+    write(&s, upserts(0..3, "v")).await;
+    write(&s, batch(&[(1, "n", "", "delete"), (7, "n", "", "delete")])).await;
+    assert_eq!((s.stats().parts, s.layer_parts()), (1, vec![1, 0, 0, 0]));
+    assert_eq!(ids(&s), [0, 2]);
+}
+
+/// A fixed-seed xorshift generator: deterministic, no dependency.
+struct Rng(u64);
+
+impl Rng {
+    fn below(&mut self, n: u64) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0 % n
+    }
+}
+
+/// Random upserts, deletes and in-batch duplicates over a small key range,
+/// with small layers and a small cap, against a `BTreeMap` model of the
+/// same rules (last write wins; over the cap, drop the oldest writes down to
+/// 90%). The invariants are checked after every write.
+#[tokio::test]
+async fn random_writes_match_a_model() {
+    let max_rows = 24;
+    let s = LsmStore::new(LsmConfig {
+        layers: 3,
+        parts_per_layer: 2,
+        max_rows,
+        ..LsmConfig::default()
+    });
+    let mut model: BTreeMap<i64, (String, u64)> = BTreeMap::new();
+    let mut seqno = 0_u64;
+    let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+    for step in 0..500 {
+        let rows: Vec<(i64, String, &str)> = (0..1 + rng.below(8))
+            .map(|i| {
+                let op = if rng.below(4) == 0 {
+                    "delete"
+                } else {
+                    "upsert"
+                };
+                (rng.below(40) as i64, format!("s{step}r{i}"), op)
+            })
+            .collect();
+        for (id, value, op) in &rows {
+            if *op == "delete" {
+                model.remove(id);
+            } else {
+                model.insert(*id, (value.clone(), seqno));
+            }
+            seqno += 1;
+        }
+        let mut expected_evicted = 0;
+        if model.len() > max_rows {
+            let mut by_age: Vec<(u64, i64)> = model.iter().map(|(k, (_, q))| (*q, *k)).collect();
+            by_age.sort_unstable();
+            let excess = model.len() - (max_rows - max_rows / 10);
+            for (_, key) in &by_age[..excess] {
+                model.remove(key);
+            }
+            expected_evicted = excess as u64;
+        }
+        let refs: Vec<(i64, &str, &str, &str)> = rows
+            .iter()
+            .map(|(id, value, op)| (*id, "n", value.as_str(), *op))
+            .collect();
+        assert_eq!(
+            write(&s, batch(&refs)).await,
+            expected_evicted,
+            "step {step}"
+        );
+        let want: Vec<(i64, String)> = model.iter().map(|(k, (v, _))| (*k, v.clone())).collect();
+        assert_eq!(values(&s), want, "step {step}");
+        assert_eq!(s.query(0).unwrap().total, model.len(), "step {step}");
+        assert_eq!(s.stats().live_rows, model.len() as u64, "step {step}");
+    }
+    assert!(s.stats().evicted_rows_total > 0, "the run never evicted");
+    assert!(
+        s.layer_parts()[2] > 0,
+        "the run never merged into the top layer"
+    );
+}
+
+/// A failed merge leaves the parts where they are (nothing is lost), is
+/// counted, and is retried only once its layer's part count has doubled
+/// since the failure. A permanent failure then costs a logarithmic number
+/// of whole-layer copies, not one per write.
+#[tokio::test]
+async fn a_failed_merge_is_retried_only_once_its_layer_has_doubled() {
+    let s = store(3, 2);
+    s.core.fail_merges.store(true, Ordering::Relaxed);
+    write(&s, upserts(0..2, "a")).await;
+    write(&s, upserts(2..4, "a")).await;
+    assert_eq!(s.layer_parts(), [2, 0, 0]);
+    assert_eq!(s.stats().merge_failures_total, 1);
+    // No new part, then 3 parts (< 2 x 2): no retry.
+    write(&s, batch(&[(99, "n", "", "delete")])).await;
+    write(&s, upserts(4..6, "a")).await;
+    assert_eq!(s.layer_parts(), [3, 0, 0]);
+    assert_eq!(s.stats().merge_failures_total, 1);
+    // 4 parts: retried, and it fails again; the next retry waits for 8.
+    write(&s, upserts(6..8, "a")).await;
+    assert_eq!(s.stats().merge_failures_total, 2);
+    s.core.fail_merges.store(false, Ordering::Relaxed);
+    for n in 4..7_i64 {
+        write(&s, upserts(n * 2..n * 2 + 2, "a")).await;
+    }
+    assert_eq!(s.layer_parts(), [7, 0, 0], "still waiting for 8 parts");
+    assert_eq!(ids(&s), (0..14).collect::<Vec<_>>());
+    write(&s, upserts(14..16, "a")).await;
+    assert_eq!(s.layer_parts(), [0, 1, 0]);
+    assert_eq!(s.stats().merge_failures_total, 2);
+    assert_eq!(ids(&s), (0..16).collect::<Vec<_>>());
+}
+
+/// The writer mutex does not poison, so a panic after the index changed
+/// would leave later writes running on corrupt state. The store poisons
+/// itself instead: every later write is refused, readers keep the last
+/// published snapshot, and `stats` reports it for readiness.
+#[tokio::test]
+async fn a_panicked_write_poisons_the_store() {
+    let s = store(4, 8);
+    write(&s, upserts(0..2, "a")).await;
+    s.core.panic_next_write.store(true, Ordering::Relaxed);
+    let err = s.ingest(upserts(0..1, "b")).await.unwrap_err();
+    assert!(
+        matches!(&err, StoreError::Internal(m) if m.contains("panicked")),
+        "{err}"
+    );
+    assert!(s.stats().poisoned);
+    let err = s.ingest(upserts(5..6, "c")).await.unwrap_err();
+    assert!(
+        matches!(&err, StoreError::Internal(m) if m == "LSM store poisoned by a panicked write"),
+        "{err}"
+    );
+    assert_eq!(values(&s), [(0, "a".to_owned()), (1, "a".to_owned())]);
 }

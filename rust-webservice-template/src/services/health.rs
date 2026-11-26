@@ -81,6 +81,7 @@ impl HealthService {
 
     fn ingest_status(&self, ingest: &IngestHealth) -> Status {
         if ingest.connection_state != ConnectionState::Connected
+            || ingest.store.poisoned
             || (ingest.stale && self.settings.ingest_stale_fails_readiness)
         {
             Status::Down

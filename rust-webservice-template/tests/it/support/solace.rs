@@ -47,12 +47,12 @@ pub fn solace_overrides(broker: &SolaceEndpoints, names: &SolaceNames, base: Set
     }
 }
 
-/// An app wired to the shared stores and the broker, with small LSM
-/// thresholds (flush 2 rows, compact at 2 runs).
+/// An app wired to the shared stores and the broker, with a small LSM
+/// store (2 layers of 2 parts), so a few batches exercise a merge.
 pub async fn solace_settings(broker: &SolaceEndpoints, names: &SolaceNames) -> Settings {
     let base = Settings {
-        lsm_flush_rows: 2,
-        lsm_compaction_runs: 2,
+        lsm_layers: 2,
+        lsm_parts_per_layer: 2,
         ..app_settings().await
     };
     solace_overrides(broker, names, base)

@@ -5,7 +5,9 @@ use rust_template::health::ingest::IngestHealthProvider;
 use rust_template::health::probe::{HealthProbe, ProbeError};
 use rust_template::health::registry::ProbeRegistry;
 use rust_template::ingestion::ConnectionState;
-use rust_template::schemas::health::{IngestHealth, Liveness, ProbeFailure, Readiness, Status};
+use rust_template::schemas::health::{
+    IngestHealth, Liveness, ProbeFailure, Readiness, Status, StreamStoreStats,
+};
 use rust_template::services::health::HealthService;
 use rust_template::settings::IngestTransport;
 use rust_template::settings::Settings;
@@ -17,6 +19,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 struct FixedIngest {
     state: ConnectionState,
     stale: bool,
+    store: StreamStoreStats,
 }
 
 impl IngestHealthProvider for FixedIngest {
@@ -29,7 +32,7 @@ impl IngestHealthProvider for FixedIngest {
             seconds_since_last_batch: None,
             rows_ingested_total: 0,
             stale: self.stale,
-            store: Default::default(),
+            store: self.store,
         }
     }
 }
@@ -105,6 +108,7 @@ async fn reconnecting_ingest_is_down() {
     let ingest = Arc::new(FixedIngest {
         state: ConnectionState::Reconnecting,
         stale: false,
+        store: StreamStoreStats::default(),
     });
     let (svc, _) = service(testing(), ProbeRegistry::default(), ingest);
     let ready = svc.readiness().await;
@@ -116,12 +120,31 @@ async fn reconnecting_ingest_is_down() {
     );
 }
 
+/// A store that refused writes after a panicked write cannot ingest, so the
+/// instance must leave the load balancer.
+#[tokio::test]
+async fn a_poisoned_store_fails_readiness() {
+    let ingest = Arc::new(FixedIngest {
+        state: ConnectionState::Connected,
+        stale: false,
+        store: StreamStoreStats {
+            poisoned: true,
+            ..StreamStoreStats::default()
+        },
+    });
+    let (svc, _) = service(testing(), ProbeRegistry::default(), ingest);
+    let ready = svc.readiness().await;
+    assert_eq!(ready.status, Readiness::NotReady);
+    assert_eq!(ready.checks[0].status, Status::Down);
+}
+
 #[tokio::test]
 async fn stale_ingest_fails_readiness_only_when_configured() {
     let stale = || {
         Arc::new(FixedIngest {
             state: ConnectionState::Connected,
             stale: true,
+            store: StreamStoreStats::default(),
         })
     };
     let (lenient, _) = service(testing(), ProbeRegistry::default(), stale());
