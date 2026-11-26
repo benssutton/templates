@@ -28,6 +28,25 @@ APIs
 1. All services should be accessed through REST endpoints: application management, configuration, observability and functional services should all be accessible via REST.
 2. MCPs are optional.  MCP Tools should simply mirror REST endpoints.  
 
+Compression
+1. Responses are compressed by default.  Uncompressed responses are available via Accept-Encoding (identity).  COMPRESSION_ENABLED=false turns off compression.
+2. ZSTD is the byte compression codec of choice as this gives the best balance of CPU/latency on compression (microseconds) and for payloads above ~1 KiB over a network it is quicker and requires less CPU for a client to receive a ZSTD payload and decompress it versus reading uncompressed data from the i/o.
+3. GZip is not a speed-efficient compression codec and has been included only to support Prometheus via the /metrics endpoint.
+
+Stream store (LSM)
+1. Purpose: an in-memory cache of streamed rows, held as columnar Arrow so query engines (Polars, DataFusion) read it zero-copy, in as few contiguous parts as write amplification allows.
+2. Supersede on write, not on read. A writer-private index maps each key to its live `(part, row)`. When a newer version arrives, the old row's bit in its part's `live` bitmap is cleared; a `delete` clears the bit and is not stored. Reads therefore never deduplicate, and merges never handle tombstones: they only filter out dead rows.
+3. Parts are immutable Arrow `RecordBatch`es sorted by key, each with a copy-on-write `live` bitmap and a live-row count. Each incoming batch, whatever its size, becomes one L0 part.
+4. Layers: `L` layers with `P` parts per layer (`LSM_LAYERS=4`, `LSM_PARTS_PER_LAYER=8`). When layer `i < L-1` holds `P` parts, they are merged (live rows only, sorted by key) into one part appended to layer `i+1`. The top layer is never merged: once it holds `P` parts it keeps accepting more, so overflow happens only there.
+5. Reads: engines get each part plus a `_live` column built from its bitmap (zero-copy) and filter on it. `GET /data/cache` k-way merges the sorted parts, skipping dead rows and stopping at `limit`; `total` is the maintained live count.
+6. Retention: over `LSM_MAX_ROWS` live rows, the oldest rows (lowest seqno) are marked dead down to 90% of the cap. A part with no live rows left is dropped.
+7. Bounds, with batches counted as they arrive (`b̄` = mean rows per batch):
+   - A part in layer `i` covers at least `P^i` consecutive batches, more when an all-delete batch adds no part or a dead part is dropped (about `P^i·b̄` rows, fewer once dead rows are dropped), so with P=8, L=4 a top-layer part covers at least 512 batches.
+   - Parts below the top layer: at most `(L-1)(P-1)` = 21.
+   - Top-layer parts after `n` batches: at most `floor(n / P^(L-1))`; it reaches `P` at `n = P^L` = 4,096 batches and then grows by at most one part every 512 batches. Total parts are at most `(L-1)(P-1) + floor(n / P^(L-1))`, which is 28 until the top layer overflows.
+   - Write amplification: at most `L` = 4 (the initial write plus one rewrite per merge into layers 1 to L-1); top-layer parts are never rewritten.
+8. Consequence of an unmerged top layer: dead rows in a top-layer part (superseded or evicted) stay in memory until every row of that part is dead. Size `L` and `P` so that `P^L` batches covers the expected volume between restarts, or accept more top-layer parts beyond it.
+
 Resilience
 1. Critical dependencies should be eagerly loaded and smoke-tested on application start (Fail Fast).  Disconnects should be re-tried with exponential back-off.  After a specified number of re-try failures, the application should shut down.
 
