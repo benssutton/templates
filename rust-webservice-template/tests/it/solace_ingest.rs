@@ -221,6 +221,42 @@ async fn an_unmergeable_message_is_rejected() {
     p.close().await;
 }
 
+/// A message that would take the store over `LSM_MAX_ROWS` is refused for
+/// good: it is rejected, so the broker discards it (or dead-letters it, per
+/// the queue's config) instead of redelivering it.
+#[tokio::test]
+async fn a_message_to_a_full_store_is_rejected() {
+    let (logs, _guard) = logs::capture();
+    let lease = containers::solace().await;
+    let semp = Semp::new(&lease.endpoints.semp_url());
+    let names = SolaceNames::new();
+    let settings = Settings {
+        lsm_max_rows: 1,
+        ..solace_settings(&lease.endpoints, &names).await
+    };
+    let app = TestApp::spawn(settings).await;
+    wait_for_bound(&semp, &names.queue).await;
+    let mut p = publisher(&lease.endpoints, &names.topic).await;
+    p.publish_batch(&make_batch(&[
+        (1, "alpha", "v1", "upsert"),
+        (2, "beta", "v1", "upsert"),
+    ]))
+    .await
+    .unwrap();
+    wait_for_depth(&semp, &names.queue, 0).await;
+    assert_settled_without_redelivery(&semp, &names.queue).await;
+    assert_eq!(app.get_json("/data/cache?limit=100").await.1["total"], 0);
+    let (_, status) = app.get_json("/health/status").await;
+    assert_eq!(status["ingest"]["store"]["full"], true, "{status}");
+    assert!(
+        logs.line_with(&["ERROR", "rejecting message", "stream store full"])
+            .is_some(),
+        "{}",
+        logs.text()
+    );
+    p.close().await;
+}
+
 /// Spec §6 oversized_batch_is_rejected.
 #[tokio::test]
 async fn an_oversized_message_is_rejected() {

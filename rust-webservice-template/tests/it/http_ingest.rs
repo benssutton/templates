@@ -359,3 +359,67 @@ async fn cache_limit_is_validated_like_data() {
         assert_eq!(status, 422, "limit={bad}");
     }
 }
+
+/// Once a batch would take the rows held over `LSM_MAX_ROWS`, every new
+/// batch is 507 with the usual `{"detail"}` body and a FATAL log line, while
+/// reads, readiness and the status page carry on; `/health/status` and the
+/// metrics report the store as full.
+#[tokio::test]
+async fn a_full_store_answers_507_and_keeps_serving() {
+    let app = TestApp::spawn(Settings {
+        lsm_max_rows: 2,
+        ..settings().await
+    })
+    .await;
+    let body = serialize_batch(&make_batch(&[
+        (1, "a", "v1", "upsert"),
+        (2, "b", "v1", "upsert"),
+    ]));
+    assert_eq!(post_ipc(&app, body, None).await.status(), 202);
+    let request_id = format!("full-{}", uuid::Uuid::new_v4());
+    for (n, rows) in [
+        &[(3, "c", "v1", "upsert")][..],
+        &[(1, "a", "", "delete")][..],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let r = post_ipc(&app, serialize_batch(&make_batch(rows)), Some(&request_id)).await;
+        assert_eq!(r.status(), 507, "batch {n}");
+        let body: Value = r.json().await.unwrap();
+        let detail = body["detail"].as_str().unwrap();
+        assert!(detail.starts_with("stream store full"), "{body}");
+    }
+    let fatal: Vec<String> = logs::lines_containing(&request_id)
+        .into_iter()
+        .filter(|l| l.contains("FATAL:") && l.contains("fatal=true"))
+        .collect();
+    assert_eq!(
+        fatal.len(),
+        2,
+        "one fatal line per refused batch: {fatal:?}"
+    );
+    let body = cache(&app).await;
+    assert_eq!(body["total"], 2);
+    assert_eq!(
+        value_of(&body, 1).as_deref(),
+        Some("v1"),
+        "the delete was refused"
+    );
+    assert_eq!(app.get("/health/ready").await.status(), 200);
+    let (status, body) = app.get_json("/health/status").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["ingest"]["store"]["full"], true, "{body}");
+    assert_eq!(
+        body["ingest"]["store"]["refused_batches_total"], 2,
+        "{body}"
+    );
+    let text = app.get("/metrics").await.text().await.unwrap();
+    for line in [
+        "lsm_full 1",
+        "lsm_refused_batches_total 2",
+        r#"ingest_outcomes_total{outcome="rejected"} 2"#,
+    ] {
+        assert!(text.contains(line), "{line} missing: {text}");
+    }
+}
