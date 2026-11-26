@@ -6,6 +6,7 @@ import io.micronaut.json.tree.JsonNode;
 import jakarta.inject.Singleton;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Optional;
 import redis.clients.jedis.AbstractTransaction;
 import redis.clients.jedis.RedisClient;
 import redis.clients.jedis.Response;
@@ -53,9 +54,9 @@ public class CacheService {
 
     /**
      * Value and TTL are read in one transaction so they describe the same key state; a key that is
-     * gone (or expired) by then is not found, never "no expiry".
+     * gone (or expired) by then is empty, never "no expiry".
      */
-    public CacheEntry get(String key) {
+    public Optional<CacheEntry> get(String key) {
         Response<Object> value;
         Response<Long> ttl;
         try (AbstractTransaction tx = jedis.multi()) {
@@ -65,11 +66,11 @@ public class CacheService {
             tx.exec();
         }
         if (value.get() == null || ttl.get() == TTL_NO_KEY) {
-            return null;
+            return Optional.empty();
         }
         JsonNode matches = read(value.get().toString());
         Integer ttlSeconds = ttl.get() >= 0 ? ttl.get().intValue() : null;
-        return new CacheEntry(key, matches.get(0), ttlSeconds);
+        return Optional.of(new CacheEntry(key, matches.get(0), ttlSeconds));
     }
 
     private String write(JsonNode value) {

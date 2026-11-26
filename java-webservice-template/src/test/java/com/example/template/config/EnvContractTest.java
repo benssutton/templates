@@ -151,4 +151,25 @@ class EnvContractTest {
         assertThatThrownBy(() -> EnvContract.translate(Map.of("MCP_ALLOWED_HOSTS", "[\"a\"")))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    /** A real JSON parser: escapes decode, as in any JSON array. */
+    @Test
+    void jsonArrayHostsDecodeEscapes() {
+        assertThat(
+                        EnvContract.translate(
+                                Map.of("MCP_ALLOWED_HOSTS", "[\"caf\\u00e9.example\", \"app\"]")))
+                .containsEntry("template.mcp-allowed-hosts", "café.example,app");
+    }
+
+    /** The mapper stops after the first array; anything after it must be refused, not dropped. */
+    @Test
+    void jsonArrayHostsWithTrailingContentAreRejected() {
+        assertThatThrownBy(() -> EnvContract.translate(Map.of("MCP_ALLOWED_HOSTS", "[\"a\"] junk")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> EnvContract.translate(Map.of("MCP_ALLOWED_HOSTS", "[\"a\"]]")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() ->
+                        EnvContract.translate(Map.of("MCP_ALLOWED_HOSTS", "[\"a\"], [\"b\"]")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }
