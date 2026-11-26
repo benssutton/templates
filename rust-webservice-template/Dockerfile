@@ -37,7 +37,7 @@ RUN cargo chef cook --release --locked --features "${CARGO_FEATURES}" --recipe-p
 COPY . .
 RUN cargo build --release --locked --features "${CARGO_FEATURES}" --bins
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cb87acc574abe719b6e5c547384defa2f7b1f24af9605d3f618cf852495d8be2 AS runtime
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:29ee70762214fe8190cea04ef1c0a84a8365879e047ce8f911ae5a5ab2355fa2 AS runtime
 WORKDIR /app
 COPY --from=builder /build/target/release/rust-template /app/rust-template
 COPY --from=builder /build/target/release/demo-publisher /app/demo-publisher
