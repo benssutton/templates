@@ -129,8 +129,8 @@ public class SolaceBatchConsumer implements BatchConsumer {
             // Publish each resource (connect() publishes the service) before re-checking
             // `closed`: either close() sees it and terminates it, or we see `closed` and
             // the finally block does.
-            svc = connect(box); // lazy: the ingest loop's backoff wraps consume(), including
-            // connect
+            // Lazy: the ingest loop's backoff wraps consume(), the connect included.
+            svc = connect(box);
             if (closed) {
                 return;
             }
@@ -150,8 +150,8 @@ public class SolaceBatchConsumer implements BatchConsumer {
             if (closed) {
                 return;
             }
-            PersistentMessageReceiver bound =
-                    r; // the callback settles on this flow, never a later one
+            // The callback settles on this flow, never a later one.
+            PersistentMessageReceiver bound = r;
             bound.receiveAsync(m -> onMessage(bound, box, m));
             LOG.info("Solace: bound queue {} (subscription {})", s.queue(), s.topic());
             onBound.run(); // connect + bind succeeded: the transport is healthy
@@ -201,15 +201,17 @@ public class SolaceBatchConsumer implements BatchConsumer {
         if (r != null) {
             try {
                 r.terminate(0);
-            } catch (Exception ignored) {
-                // already terminated, or the connection is gone
+            } catch (Exception e) {
+                LOG.debug(
+                        "Solace: receiver terminate failed (already terminated, or the connection is gone)",
+                        e);
             }
         }
         if (svc != null) {
             try {
                 svc.disconnect();
-            } catch (Exception ignored) {
-                // already disconnected
+            } catch (Exception e) {
+                LOG.debug("Solace: disconnect failed (already disconnected)", e);
             }
         }
     }
