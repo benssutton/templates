@@ -38,10 +38,10 @@ public class CacheController {
     @Get("/{key}")
     @Operation(summary = "Read a cached value and its remaining TTL (404 when absent)")
     public CacheEntry get(@PathVariable String key) {
-        CacheEntry entry = cacheService.get(key);
-        if (entry == null) {
-            throw new HttpStatusException(HttpStatus.NOT_FOUND, "Key '" + key + "' not found");
-        }
-        return entry;
+        return cacheService
+                .get(key)
+                .orElseThrow(() ->
+                        new HttpStatusException(
+                                HttpStatus.NOT_FOUND, "Key '" + key + "' not found"));
     }
 }

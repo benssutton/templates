@@ -20,6 +20,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import java.io.IOException;
+import java.util.Optional;
 
 /**
  * MCP tools at {@code /mcp}, served by micronaut-mcp (the official MCP Java SDK's stateless
@@ -81,8 +82,8 @@ public class McpTools {
     public McpSchema.CallToolResult getCache(
             @ToolArg(name = "key", description = "Cache key") @NotBlank String key)
             throws IOException {
-        CacheEntry entry = cache.get(key);
-        if (entry == null) {
+        Optional<CacheEntry> entry = cache.get(key);
+        if (entry.isEmpty()) {
             return McpSchema.CallToolResult.builder()
                     .isError(true)
                     .addTextContent(
@@ -90,7 +91,7 @@ public class McpTools {
                     .build();
         }
         return McpSchema.CallToolResult.builder()
-                .addTextContent(json.writeValueAsString(entry))
+                .addTextContent(json.writeValueAsString(entry.get()))
                 .build();
     }
 
