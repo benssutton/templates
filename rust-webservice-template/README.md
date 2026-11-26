@@ -45,15 +45,15 @@ Pinned by the integration tests here and the shared k6 contract (`tests/performa
 | `POST /data/ingest`: every batch validated before any is written; a decoded batch over the limit is 413 | [src/services/stream_ingest.rs](src/services/stream_ingest.rs) |
 | `X-Request-ID` adopted only if 1-128 chars of `[A-Za-z0-9._-]` | [src/core/request_id.rs](src/core/request_id.rs) |
 | auth seam (`AUTH_ENABLED`, HS256), off by default | [src/core/auth.rs](src/core/auth.rs) |
-| `INGEST_TRANSPORT` defaults to `noop`; containers listen on 8443 | [src/settings.rs](src/settings.rs), [Dockerfile](Dockerfile) |
-| `MCP_ALLOWED_HOSTS` as JSON array or comma-separated | [src/settings.rs](src/settings.rs) |
+| `INGEST_TRANSPORT` defaults to `noop`; containers listen on 8443 | [src/settings/](src/settings/mod.rs), [Dockerfile](Dockerfile) |
+| `MCP_ALLOWED_HOSTS` as JSON array or comma-separated | [src/settings/](src/settings/mod.rs) |
 
 ## Feature map (entry points)
 
 | Feature | Entry point |
 |---|---|
 | Bootstrap, routes and the layer stack | [src/app.rs](src/app.rs), [src/main.rs](src/main.rs) |
-| Settings (one validation, garde rules on the fields) | [src/settings.rs](src/settings.rs) + [.env.example](.env.example) |
+| Settings (one validation, garde rules on the fields) | [src/settings/](src/settings/mod.rs) + [.env.example](.env.example) |
 | HTTPS / plain HTTP, graceful drain, container healthcheck | [src/server.rs](src/server.rs) |
 | Shared state (no DI container) | [src/state.rs](src/state.rs) |
 | Errors and extractors | [src/error.rs](src/error.rs), [src/extract.rs](src/extract.rs) |
