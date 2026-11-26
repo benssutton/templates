@@ -13,7 +13,12 @@ import com.example.template.ingestion.Delivery;
 import com.example.template.ingestion.MalformedBatchException;
 import com.example.template.persistence.streamstore.LsmRow;
 import com.example.template.persistence.streamstore.LsmStore;
+import io.micronaut.context.annotation.Context;
 import io.micronaut.core.propagation.PropagatedContext;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import jakarta.inject.Inject;
+import jakarta.inject.Singleton;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumMap;
@@ -45,6 +50,8 @@ import org.slf4j.LoggerFactory;
  *
  * Every backoff wait is cut short by {@link #close()}.
  */
+@Context
+@Singleton
 public class StreamIngestService implements IngestHealthProvider, AutoCloseable {
 
     private static final Logger LOG = LoggerFactory.getLogger(StreamIngestService.class);
@@ -90,6 +97,26 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
     // redeliver immediately, so a persistent store error would otherwise spin.
     private Duration settleDelay;
 
+    /**
+     * The container's constructor. On a fatal ingest failure the process exits non-zero, so an
+     * orchestrator restarts it (see {@link #exitProcess()}).
+     */
+    @Inject
+    public StreamIngestService(
+            BatchConsumer consumer, LsmStore store, ArrowDecoder decoder, IngestSettings settings) {
+        this(consumer, store, decoder, settings, StreamIngestService::exitProcess);
+    }
+
+    /**
+     * Exit from a separate thread: System.exit blocks its caller while shutdown hooks run, and the
+     * context's shutdown closes this service, which joins the ingest thread. Exiting on the ingest
+     * or watchdog thread would stall that join for its whole timeout and log a false "did not stop"
+     * error.
+     */
+    private static void exitProcess() {
+        Thread.ofPlatform().name("ingest-exit").start(() -> System.exit(3));
+    }
+
     public StreamIngestService(
             BatchConsumer consumer,
             LsmStore store,
@@ -108,6 +135,7 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
         }
     }
 
+    @PostConstruct
     public void start() {
         thread = Thread.ofPlatform().name("ingest-loop").daemon().start(this::ingestLoop);
         if (!settings.maxDisconnect().isZero()) {
@@ -337,6 +365,7 @@ public class StreamIngestService implements IngestHealthProvider, AutoCloseable 
     }
 
     @Override
+    @PreDestroy
     public void close() {
         stop.countDown();
         if (watchdog != null) {
