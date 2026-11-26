@@ -18,7 +18,7 @@ pub enum StoreError {
     /// The store holds `max_rows` rows, or this message would take it over,
     /// and it refuses every new message until it is rebuilt. Redelivery cannot
     /// succeed, so transports reject it; HTTP answers 507.
-    #[error("stream store full: {held} rows held, max_rows {max_rows}; batch discarded")]
+    #[error("stream store full: {held} rows held, max_rows {max_rows}; message discarded")]
     Full { held: u64, max_rows: u64 },
     /// Anything else. It may be transient, so a transport fails the delivery
     /// for redelivery; HTTP answers 500.
