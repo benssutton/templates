@@ -120,12 +120,29 @@ parts, they merge (live rows only) into one part a layer up; the top layer
 layer, a top-layer part covers at least 512 batches, and every row is
 written at most 4 times. `GET /data/cache` k-way merges the sorted parts and
 stops at `limit`; `LsmStore::live_batches` gives query engines each part with
-a zero-copy `_live` column. Over `LSM_MAX_ROWS` live rows the oldest are
-marked dead down to 90%, counted in `lsm_evicted_rows_total` and
-`/health/status` (`ingest.store`: `live_rows`, held `rows`, `parts`).
-`LSM_MAX_ROWS` caps live rows, not memory: a top-layer part is never
-rewritten, so its dead rows stay held (`ingest.store.rows`, `lsm_rows`) until
-every row in it is dead. A failed merge keeps its parts, is counted
+a zero-copy `_live` column. `/health/status` reports `ingest.store`
+(`live_rows`, held `rows`, `parts`, `max_rows`).
+
+`LSM_MAX_ROWS` caps the rows held, live plus dead: a top-layer part is never
+rewritten, so its superseded rows stay held (`ingest.store.rows`, `lsm_rows`)
+until every row in it is dead. A message is admitted whole, under one
+writer lock: if the rows it would store (its upserts after the
+newest-per-key dedup, counted before the rows it supersedes are freed) would
+take the rows held over the cap, none of its batches is written and the store
+freezes. Every later valid non-empty message is refused too, deletes
+included (an invalid batch is still 422, an oversized one 413), and each
+refusal is logged at ERROR with a `FATAL:` prefix and `fatal=true`. HTTP answers 507 `{"detail": ...}`; the stream rejects the
+message, so the broker discards or dead-letters it rather than redelivering
+it, and the consecutive-failure shutdown never sees it. Reads and
+`/health/ready` carry on; `ingest.store.full`, `refused_batches_total`,
+`lsm_full` and `lsm_refused_batches_total` report it. Only rebuilding the
+store (a restart, or a refresh from a persistent store, if the project adds
+one) unfreezes it. Size RAM for `LSM_MAX_ROWS` rows (Arrow data, encoded key
+and key-index entry each) plus merge headroom: a merge copies a full layer's live
+rows into a new part before freeing the old parts, and the largest (into the
+top layer) covers up to `P^(L-1)` = 512 batches.
+
+A failed merge keeps its parts, is counted
 (`merge_failures_total`) and is retried once its layer's part count has
 doubled. A write that panics poisons the store: later writes are refused
 and `/health/ready` fails (`ingest.store.poisoned`, `lsm_poisoned`). Size

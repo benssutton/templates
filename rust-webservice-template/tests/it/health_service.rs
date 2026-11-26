@@ -233,3 +233,22 @@ impl HealthProbe for CountingProbe {
         Ok(())
     }
 }
+
+/// A full store refuses new batches but still serves everything it holds,
+/// so the instance stays in the load balancer.
+#[tokio::test]
+async fn a_full_store_stays_ready() {
+    let ingest = Arc::new(FixedIngest {
+        state: ConnectionState::Connected,
+        stale: false,
+        store: StreamStoreStats {
+            full: true,
+            refused_batches_total: 3,
+            ..StreamStoreStats::default()
+        },
+    });
+    let (svc, _) = service(testing(), ProbeRegistry::default(), ingest);
+    let ready = svc.readiness().await;
+    assert_eq!(ready.status, Readiness::Ready);
+    assert_eq!(ready.checks[0].status, Status::Up);
+}

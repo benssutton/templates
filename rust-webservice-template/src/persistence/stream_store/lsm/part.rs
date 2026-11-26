@@ -1,10 +1,9 @@
 //! One part of the layered store: an immutable batch sorted by key, the
 //! encoded keys, and a copy-on-write bitmap of which rows are still live.
 
-use super::ORDER_COLUMN;
-use arrow::array::{AsArray, BooleanArray, BooleanBufferBuilder, RecordBatch};
+use arrow::array::{BooleanArray, BooleanBufferBuilder, RecordBatch};
 use arrow::buffer::BooleanBuffer;
-use arrow::datatypes::{DataType, Field, FieldRef, Schema, UInt64Type};
+use arrow::datatypes::{DataType, Field, FieldRef, Schema};
 use arrow::error::ArrowError;
 use arrow::row::{Row, Rows};
 use std::sync::Arc;
@@ -77,27 +76,6 @@ impl Part {
             self.live.count_set_bits(),
             "killed a dead or repeated row"
         );
-    }
-
-    /// Up to `n` live rows with the lowest seqno, i.e. the oldest writes.
-    pub(super) fn oldest_live_rows(&self, n: usize) -> Vec<usize> {
-        let Some(seqno) = self
-            .batch
-            .column_by_name(ORDER_COLUMN)
-            .and_then(|c| c.as_primitive_opt::<UInt64Type>())
-        else {
-            return Vec::new();
-        };
-        let mut live: Vec<(u64, usize)> = self
-            .live
-            .set_indices()
-            .map(|row| (seqno.value(row), row))
-            .collect();
-        if live.len() > n {
-            live.select_nth_unstable(n);
-            live.truncate(n);
-        }
-        live.into_iter().map(|(_, row)| row).collect()
     }
 
     /// The batch with `_live` appended. The data columns are the part's own

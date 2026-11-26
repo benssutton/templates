@@ -308,6 +308,22 @@ async fn a_stream_with_one_invalid_batch_writes_nothing() {
     assert_eq!(cache(&app).await["total"], 0);
 }
 
+/// A stream whose second batch would take the store over `LSM_MAX_ROWS` is
+/// 507 with none of its batches written.
+#[tokio::test]
+async fn a_stream_whose_second_batch_overflows_is_507_and_writes_nothing() {
+    let app = TestApp::spawn(Settings {
+        lsm_max_rows: 2,
+        ..settings().await
+    })
+    .await;
+    let first = make_batch(&[(420, "a", "v1", "upsert")]);
+    let second = make_batch(&[(421, "b", "v1", "upsert"), (422, "c", "v1", "upsert")]);
+    let response = post_ipc(&app, encode_stream(&[first, second]).unwrap(), None).await;
+    assert_eq!(response.status(), 507);
+    assert_eq!(cache(&app).await["total"], 0);
+}
+
 #[tokio::test]
 async fn the_request_id_is_on_the_store_write_log_line() {
     let (logs, _guard) = logs::capture();
@@ -357,5 +373,70 @@ async fn cache_limit_is_validated_like_data() {
     for bad in ["0", "101", "abc"] {
         let (status, _) = app.get_json(&format!("/data/cache?limit={bad}")).await;
         assert_eq!(status, 422, "limit={bad}");
+    }
+}
+
+/// Once a batch would take the rows held over `LSM_MAX_ROWS`, every new
+/// batch is 507 with the usual `{"detail"}` body and a FATAL log line, while
+/// reads, readiness and the status page carry on; `/health/status` and the
+/// metrics report the store as full.
+#[tokio::test]
+async fn a_full_store_answers_507_and_keeps_serving() {
+    logs::ensure_installed();
+    let app = TestApp::spawn(Settings {
+        lsm_max_rows: 2,
+        ..settings().await
+    })
+    .await;
+    let body = serialize_batch(&make_batch(&[
+        (1, "a", "v1", "upsert"),
+        (2, "b", "v1", "upsert"),
+    ]));
+    assert_eq!(post_ipc(&app, body, None).await.status(), 202);
+    let request_id = format!("full-{}", uuid::Uuid::new_v4());
+    for (n, rows) in [
+        &[(3, "c", "v1", "upsert")][..],
+        &[(1, "a", "", "delete")][..],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let r = post_ipc(&app, serialize_batch(&make_batch(rows)), Some(&request_id)).await;
+        assert_eq!(r.status(), 507, "batch {n}");
+        let body: Value = r.json().await.unwrap();
+        let detail = body["detail"].as_str().unwrap();
+        assert!(detail.starts_with("stream store full"), "{body}");
+    }
+    let fatal: Vec<String> = logs::lines_containing(&request_id)
+        .into_iter()
+        .filter(|l| l.contains("FATAL:") && l.contains("fatal=true"))
+        .collect();
+    assert_eq!(
+        fatal.len(),
+        2,
+        "one fatal line per refused batch: {fatal:?}"
+    );
+    let body = cache(&app).await;
+    assert_eq!(body["total"], 2);
+    assert_eq!(
+        value_of(&body, 1).as_deref(),
+        Some("v1"),
+        "the delete was refused"
+    );
+    assert_eq!(app.get("/health/ready").await.status(), 200);
+    let (status, body) = app.get_json("/health/status").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["ingest"]["store"]["full"], true, "{body}");
+    assert_eq!(
+        body["ingest"]["store"]["refused_batches_total"], 2,
+        "{body}"
+    );
+    let text = app.get("/metrics").await.text().await.unwrap();
+    for line in [
+        "lsm_full 1",
+        "lsm_refused_batches_total 2",
+        r#"ingest_outcomes_total{outcome="rejected"} 2"#,
+    ] {
+        assert!(text.contains(line), "{line} missing: {text}");
     }
 }

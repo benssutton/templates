@@ -108,13 +108,6 @@ impl MetricsService {
         self.with(|| counter!("ingest_rows_ingested_total").increment(rows));
     }
 
-    /// Live rows the LSM memory bound evicted.
-    pub fn record_evicted_rows(&self, rows: u64) {
-        if rows > 0 {
-            self.with(|| counter!("lsm_evicted_rows_total").increment(rows));
-        }
-    }
-
     pub fn record_sizes(&self, handler: &str, request_bytes: u64, response_bytes: u64) {
         let handler = handler.to_owned();
         self.with(|| {
@@ -155,6 +148,8 @@ impl MetricsService {
             gauge!("lsm_parts").set(ingest.store.parts as f64);
             counter!("lsm_merge_failures_total").absolute(ingest.store.merge_failures_total);
             gauge!("lsm_poisoned").set(f64::from(u8::from(ingest.store.poisoned)));
+            gauge!("lsm_full").set(f64::from(u8::from(ingest.store.full)));
+            counter!("lsm_refused_batches_total").absolute(ingest.store.refused_batches_total);
             gauge!("lsm_max_rows").set(ingest.store.max_rows as f64);
 
             let (process, host) = (&status.system.process, &status.system.host);

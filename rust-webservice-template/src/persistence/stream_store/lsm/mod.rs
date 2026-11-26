@@ -24,9 +24,20 @@
 //! Parts do not store `op`: every stored row is an upsert, since a delete
 //! only clears a bit.
 //!
-//! Retention: over `max_rows` live rows, the oldest rows (lowest seqno) are
-//! marked dead down to 90% of the cap. A part with no live rows is dropped.
-//! Dead rows in a part stay in memory until the part merges or dies.
+//! A part with no live rows is dropped. Dead rows in a part stay in memory
+//! until the part merges or dies; a top-layer part never merges.
+//!
+//! Capacity: `max_rows` caps the rows held (live rows plus the dead rows
+//! still inside parts). A message (one `ingest` call) is admitted whole:
+//! if its stored rows (its upserts after the newest-per-key dedup, counted
+//! before any rows it supersedes are freed) would take the rows held over
+//! the cap, the whole message is refused with `StoreError::Full`, and the
+//! store freezes: from then on every valid non-empty message is refused,
+//! deletes included, so the store goes stale rather than partly updated.
+//! An invalid batch is still refused as invalid. Every refusal is logged as
+//! a fatal error.
+//! Reads keep serving everything received to date; only rebuilding the
+//! store (a restart, or a refresh from a persistent store) unfreezes it.
 //!
 //! Reads: `query` k-way merges the sorted parts and stops at `limit`; the
 //! total is a maintained count. `live_batches` hands query engines every
@@ -50,7 +61,9 @@ use arrow::array::{ArrayRef, RecordBatch, UInt64Array};
 use arrow::compute::interleave_record_batch;
 use arrow::datatypes::{Schema, SchemaRef};
 use arrow::row::RowConverter;
-use kernels::{conform, drop_columns, key_converter, key_rows, merge_parts, prepare, quoted_list};
+use kernels::{
+    Prepared, conform, drop_columns, key_converter, key_rows, merge_parts, prepare, quoted_list,
+};
 pub use part::LIVE_COLUMN;
 use part::Part;
 use std::collections::HashMap;
@@ -71,7 +84,8 @@ pub struct LsmConfig {
     pub layers: usize,
     /// `P`, at least 2.
     pub parts_per_layer: usize,
-    /// Live rows held; over it the oldest are evicted down to 90%.
+    /// Rows held, dead ones included; a batch that would exceed it is
+    /// refused and freezes the store.
     pub max_rows: usize,
     /// The merge key: the single extension point for a composite key
     /// (`["id", "version"]`).
@@ -133,8 +147,8 @@ struct Writer {
     converter: Option<RowConverter>,
     /// `layers[0]` is layer 0; each layer's parts oldest first.
     layers: Vec<Vec<Part>>,
-    /// Every live key (row-format bytes) -> its row. Absent once deleted or
-    /// evicted. Looked up by `Row` bytes, so only a new key allocates.
+    /// Every live key (row-format bytes) -> its row. Absent once deleted.
+    /// Looked up by `Row` bytes, so only a new key allocates.
     index: HashMap<Box<[u8]>, Loc>,
     /// Per layer: the part count at which its merge last failed. The merge
     /// is retried only once the layer holds twice that many parts.
@@ -156,8 +170,8 @@ impl Writer {
         id
     }
 
-    fn live_rows(&self) -> usize {
-        self.layers.iter().flatten().map(Part::live_rows).sum()
+    fn held_rows(&self) -> usize {
+        self.layers.iter().flatten().map(Part::rows).sum()
     }
 
     /// Clear rows (part id -> rows), copying each touched bitmap once, then
@@ -188,7 +202,9 @@ pub struct LsmStore {
 struct Core {
     config: LsmConfig,
     snapshot: ArcSwap<Snapshot>,
-    evicted_total: AtomicU64,
+    /// Set, under the writer lock, by the first refused batch; never cleared.
+    full: AtomicBool,
+    refused_total: AtomicU64,
     /// Rows written into parts, merges included. Over the rows writes stored,
     /// this is the write amplification.
     written_total: AtomicU64,
@@ -227,7 +243,8 @@ impl LsmStore {
                     layer_parts: vec![0; layers],
                     ..Snapshot::default()
                 }),
-                evicted_total: AtomicU64::new(0),
+                full: AtomicBool::new(false),
+                refused_total: AtomicU64::new(0),
                 written_total: AtomicU64::new(0),
                 merge_failures_total: AtomicU64::new(0),
                 poisoned: AtomicBool::new(false),
@@ -259,6 +276,12 @@ impl LsmStore {
             .iter()
             .map(|p| p.with_live_column().map_err(StoreError::from))
             .collect()
+    }
+
+    /// A message of one batch.
+    #[cfg(test)]
+    async fn ingest_one(&self, batch: RecordBatch) -> Result<(), StoreError> {
+        self.ingest(vec![batch]).await
     }
 
     #[cfg(test)]
@@ -330,13 +353,13 @@ impl Core {
     /// `apply`, refused once poisoned. A panic in it poisons the store
     /// before the writer lock is released, so no queued write runs on the
     /// state it left behind.
-    fn write(&self, w: &mut Writer, batch: &RecordBatch) -> Result<u64, StoreError> {
+    fn write(&self, w: &mut Writer, batches: &[RecordBatch]) -> Result<(), StoreError> {
         if self.poisoned.load(Ordering::Acquire) {
             return Err(StoreError::Internal(
                 "LSM store poisoned by a panicked write".into(),
             ));
         }
-        std::panic::catch_unwind(AssertUnwindSafe(|| self.apply(w, batch))).unwrap_or_else(|_| {
+        std::panic::catch_unwind(AssertUnwindSafe(|| self.apply(w, batches))).unwrap_or_else(|_| {
             self.poisoned.store(true, Ordering::Release);
             tracing::error!("LSM write panicked; the store refuses every later write");
             Err(StoreError::Internal(
@@ -346,37 +369,73 @@ impl Core {
     }
 
     /// The CPU half of `ingest`, run on the blocking pool with the writer
-    /// lock held. Returns the number of live rows evicted by retention.
-    fn apply(&self, w: &mut Writer, batch: &RecordBatch) -> Result<u64, StoreError> {
+    /// lock held: one message, all its batches or none. Every fallible step
+    /// (check, prepare, admit) runs on every batch before the first change
+    /// to the writer, so a refused or failed message leaves the store as it
+    /// was; readers see the whole message at once.
+    fn apply(&self, w: &mut Writer, batches: &[RecordBatch]) -> Result<(), StoreError> {
         let keys = &self.config.key_columns;
         // Re-checked under the lock: the schema may have been fixed since a
-        // caller's `validate`.
-        let (schema, mut columns) = self.check(batch, w.schema.as_ref())?;
-        let rows = batch.num_rows();
-        if rows == 0 {
-            return Ok(0);
+        // caller's `validate`. On an empty store the message's first
+        // non-empty batch fixes the schema its later batches must match.
+        let mut schema = w.schema.clone();
+        let mut checked = Vec::new();
+        for batch in batches {
+            let (frame_schema, columns) = self.check(batch, schema.as_ref())?;
+            if batch.num_rows() > 0 {
+                schema.get_or_insert_with(|| frame_schema.clone());
+                checked.push((frame_schema, columns));
+            }
         }
-        let start = w.seqno;
-        columns
-            .push(Arc::new(UInt64Array::from_iter_values(start..start + rows as u64)) as ArrayRef);
-        let frame = RecordBatch::try_new(schema.clone(), columns)?;
-        // Every fallible step runs before the first change to the writer, so
-        // a refused or failed write leaves the store as it was. The first
-        // write's converter is kept only once the write has gone through.
+        let (Some(schema), false) = (schema, checked.is_empty()) else {
+            return Ok(());
+        };
+        let rows: usize = checked.iter().map(|(_, c)| c[0].len()).sum();
+        if self.full.load(Ordering::Acquire) {
+            // Frozen: skip the sort and key encoding of a batch refused anyway.
+            return Err(self.refuse(w, checked.len(), rows, None));
+        }
+        // The first write's converter is kept only once the write commits.
         let mut fresh = None;
         let converter = match &w.converter {
             Some(converter) => converter,
             None => fresh.insert(key_converter(&schema, keys)?),
         };
-        let prepared = prepare(&frame, keys, converter)?;
+        let mut seqno = w.seqno;
+        let mut prepared = Vec::with_capacity(checked.len());
+        for (frame_schema, mut columns) in checked {
+            let n = columns[0].len() as u64;
+            columns.push(Arc::new(UInt64Array::from_iter_values(seqno..seqno + n)) as ArrayRef);
+            seqno += n;
+            let frame = RecordBatch::try_new(frame_schema, columns)?;
+            prepared.push(prepare(&frame, keys, converter)?);
+        }
+        // Counted before any of the message's superseded rows are freed.
+        let stored: usize = prepared.iter().map(|p| p.stored.num_rows()).sum();
+        let held = w.held_rows();
+        if held
+            .checked_add(stored)
+            .is_none_or(|total| total > self.config.max_rows)
+        {
+            return Err(self.refuse(w, prepared.len(), rows, Some(stored)));
+        }
         if let Some(converter) = fresh {
             w.converter = Some(converter);
         }
         w.schema = Some(schema);
-        w.seqno += rows as u64;
+        w.seqno = seqno;
+        for batch in prepared {
+            self.commit(w, batch);
+        }
+        self.publish(w);
+        Ok(())
+    }
 
-        // Supersede: the previous version of every key written here dies; a
-        // delete is not stored.
+    /// Supersede, add the batch's part to layer 0, cascade. Infallible: the
+    /// message was admitted.
+    fn commit(&self, w: &mut Writer, prepared: Prepared) {
+        // The previous version of every key written here dies; a delete is
+        // not stored.
         let part_id = w.next_part_id();
         let mut dead: HashMap<u64, Vec<usize>> = HashMap::new();
         let mut stored_row = 0;
@@ -411,9 +470,32 @@ impl Core {
                 .fetch_add(stored as u64, Ordering::Relaxed);
         }
         self.cascade(w);
-        let evicted = self.evict(w);
-        self.publish(w);
-        Ok(evicted)
+    }
+
+    /// Refuse a message of `batches` non-empty batches (`rows` rows), and
+    /// freeze the store. `stored` is what it would have stored; unknown when
+    /// the store was already frozen.
+    fn refuse(&self, w: &Writer, batches: usize, rows: usize, stored: Option<usize>) -> StoreError {
+        let held = w.held_rows();
+        let max_rows = self.config.max_rows;
+        self.full.store(true, Ordering::Release);
+        self.refused_total
+            .fetch_add(batches as u64, Ordering::Relaxed);
+        // tracing has no FATAL level: the prefix and the field mark it.
+        tracing::error!(
+            fatal = true,
+            held,
+            max_rows,
+            batches,
+            rows,
+            stored,
+            "FATAL: LSM store full; message discarded. The store refuses every \
+             new batch until it is rebuilt"
+        );
+        StoreError::Full {
+            held: held as u64,
+            max_rows: max_rows as u64,
+        }
     }
 
     /// Merge every lower layer that holds `P` parts into the next one up.
@@ -483,41 +565,6 @@ impl Core {
         Ok(())
     }
 
-    /// Over `max_rows` live rows, mark the oldest dead down to 90% of the
-    /// cap. Parts are visited oldest data first (top layer down to layer 0,
-    /// each layer oldest part first); every part covers a contiguous run of
-    /// writes, so this takes the globally oldest rows.
-    fn evict(&self, w: &mut Writer) -> u64 {
-        let max = self.config.max_rows;
-        let live = w.live_rows();
-        if live <= max {
-            return 0;
-        }
-        let mut excess = live - (max - max / 10);
-        let mut dead: HashMap<u64, Vec<usize>> = HashMap::new();
-        let Writer { layers, index, .. } = &mut *w;
-        for part in layers.iter().rev().flatten() {
-            if excess == 0 {
-                break;
-            }
-            let rows = part.oldest_live_rows(excess);
-            for &row in &rows {
-                index.remove(part.key(row).as_ref());
-            }
-            excess -= rows.len();
-            dead.insert(part.id, rows);
-        }
-        let evicted = dead.values().map(Vec::len).sum::<usize>() as u64;
-        w.kill(&dead);
-        self.evicted_total.fetch_add(evicted, Ordering::Relaxed);
-        tracing::warn!(
-            evicted,
-            max_rows = max,
-            "LSM store over its live-row cap; evicted the oldest rows"
-        );
-        evicted
-    }
-
     fn publish(&self, w: &Writer) {
         let parts: Vec<Part> = w.layers.iter().rev().flatten().cloned().collect();
         self.snapshot.store(Arc::new(Snapshot {
@@ -537,11 +584,11 @@ impl StreamStore for LsmStore {
     /// by a merge. The owned guard moves into the task, so the commit stays
     /// atomic and writes stay serialised. The task cannot be cancelled: once
     /// started, a write commits even if this future is dropped.
-    async fn ingest(&self, batch: RecordBatch) -> Result<u64, StoreError> {
+    async fn ingest(&self, batches: Vec<RecordBatch>) -> Result<(), StoreError> {
         let mut guard = self.writer.clone().lock_owned().await;
         let core = self.core.clone();
         let span = tracing::Span::current();
-        tokio::task::spawn_blocking(move || span.in_scope(|| core.write(&mut guard, &batch)))
+        tokio::task::spawn_blocking(move || span.in_scope(|| core.write(&mut guard, &batches)))
             .await
             .map_err(|e| StoreError::Internal(format!("LSM write task failed: {e}")))?
     }
@@ -589,7 +636,8 @@ impl StreamStore for LsmStore {
             live_rows: snap.live_rows as u64,
             parts: snap.parts.len() as u64,
             max_rows: self.core.config.max_rows as u64,
-            evicted_rows_total: self.core.evicted_total.load(Ordering::Relaxed),
+            full: self.core.full.load(Ordering::Acquire),
+            refused_batches_total: self.core.refused_total.load(Ordering::Relaxed),
             merge_failures_total: self.core.merge_failures_total.load(Ordering::Relaxed),
             poisoned: self.core.poisoned.load(Ordering::Acquire),
         }
