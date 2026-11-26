@@ -435,3 +435,14 @@ fn strict_mode_needs_compression_enabled() {
         "{err}"
     );
 }
+
+#[test]
+fn correlation_id_header_is_parsed_at_load() {
+    let s = Settings::from_vars(vars(&[("CORRELATION_ID_HEADER", " X-Correlation-ID ")])).unwrap();
+    assert_eq!(s.correlation_id_header, "x-correlation-id");
+
+    let err = Settings::from_vars(vars(&[("CORRELATION_ID_HEADER", "bad header")])).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("not a valid HTTP header name"), "{msg}");
+    assert!(msg.contains("correlation_id_header"), "{msg}");
+}

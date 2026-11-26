@@ -50,7 +50,7 @@ pub(super) fn request_id_header<'de, D: Deserializer<'de>>(d: D) -> Result<Heade
     let raw = String::deserialize(d)?;
     HeaderName::from_bytes(raw.trim().as_bytes()).map_err(|_| {
         serde::de::Error::custom(format!(
-            "correlation_id_header: {raw:?} is not a valid HTTP header name"
+            "{raw:?} is not a valid HTTP header name; use letters, digits and '-' (e.g. X-Request-ID)"
         ))
     })
 }
