@@ -361,13 +361,12 @@ impl StreamIngestService {
         };
         // 0 disables the failure-count shutdown, independently of the watchdog.
         let max_failures = self.settings.ingest_max_consecutive_failures;
-        // Transport failures; also the transport backoff's attempt number.
-        let mut consecutive_failures = 0_u32;
+        // Transport failures in a row; also the transport backoff's attempt number.
+        let mut transport_failures = 0_u32;
         let mut last_epoch = self.consumer.bound_epoch();
-        // Settlement backoff, separate from the transport backoff: fail()
-        // makes the broker redeliver at once, so a persistent store error
-        // would otherwise spin.
-        let mut consecutive_fails = 0_u32;
+        // FAILED settlements in a row, with their own backoff: fail() makes the
+        // broker redeliver at once, so a persistent store error would otherwise spin.
+        let mut settle_failures = 0_u32;
         loop {
             let next = tokio::select! {
                 biased;
@@ -380,39 +379,39 @@ impl StreamIngestService {
             let epoch = self.consumer.bound_epoch();
             if epoch > last_epoch {
                 last_epoch = epoch;
-                consecutive_failures = 0;
+                transport_failures = 0;
             }
             match next {
                 Ok(None) => break, // the consumer was closed
                 Ok(Some(delivery)) => {
-                    consecutive_failures = 0;
+                    transport_failures = 0;
                     let span = tracing::info_span!("ingest", request_id = %new_id());
                     match self.settle(delivery).instrument(span).await {
                         Some(Settlement::Fail) => {
-                            consecutive_fails += 1;
-                            if !self.pause(backoff.jittered(consecutive_fails)).await {
+                            settle_failures += 1;
+                            if !self.pause(backoff.jittered(settle_failures)).await {
                                 break;
                             }
                         }
-                        Some(_) => consecutive_fails = 0,
+                        Some(_) => settle_failures = 0,
                         None => {}
                     }
                 }
                 Err(err) => {
-                    consecutive_failures += 1;
+                    transport_failures += 1;
                     tracing::error!(
                         error = %format!("{err:#}"),
-                        "consumer next_delivery() failed (failure {consecutive_failures}/{max_failures})"
+                        "consumer next_delivery() failed (failure {transport_failures}/{max_failures})"
                     );
-                    if max_failures > 0 && consecutive_failures >= max_failures {
+                    if max_failures > 0 && transport_failures >= max_failures {
                         tracing::error!(
-                            "ingest: {consecutive_failures} consecutive failures; requesting shutdown"
+                            "ingest: {transport_failures} consecutive failures; requesting shutdown"
                         );
                         self.shutdown
                             .trigger("ingest: consecutive consumer failures");
                         break;
                     }
-                    if !self.pause(backoff.jittered(consecutive_failures)).await {
+                    if !self.pause(backoff.jittered(transport_failures)).await {
                         break;
                     }
                 }
