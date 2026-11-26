@@ -135,8 +135,8 @@ pub struct Settings {
     #[garde(range(min = 2))]
     pub lsm_parts_per_layer: usize,
     /// Cap on rows held in memory, dead rows still inside parts included.
-    /// The store freezes once a batch would exceed it: that batch and every
-    /// later one are refused, and reads keep serving the rows held.
+    /// The store freezes once a message would exceed it: that message and
+    /// every later valid one are refused, and reads keep serving the rows held.
     #[garde(range(min = 1))]
     pub lsm_max_rows: usize,
     /// Merge partition key: the single extension point for a composite key.

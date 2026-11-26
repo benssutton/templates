@@ -75,7 +75,7 @@ async fn a_batch_without_the_key_column_is_invalid_and_writes_nothing() {
     let no_id = batch(&[(1, "x", "v", "upsert")])
         .project(&[1, 2, 3])
         .unwrap();
-    let err = s.ingest(no_id).await.unwrap_err();
+    let err = s.ingest_one(no_id).await.unwrap_err();
     assert!(
         matches!(&err, StoreError::InvalidBatch(m) if m == "batch missing required columns: ['id']"),
         "{err}"
@@ -89,7 +89,7 @@ async fn a_batch_without_op_is_invalid() {
     let no_op = batch(&[(1, "x", "v", "upsert")])
         .project(&[0, 1, 2])
         .unwrap();
-    let err = s.ingest(no_op).await.unwrap_err();
+    let err = s.ingest_one(no_op).await.unwrap_err();
     assert!(
         matches!(&err, StoreError::InvalidBatch(m) if m.contains("['op']")),
         "{err}"
@@ -101,7 +101,9 @@ async fn a_batch_without_op_is_invalid() {
 #[tokio::test]
 async fn a_batch_with_a_conflicting_schema_is_invalid() {
     let s = store(4, 8);
-    s.ingest(batch(&[(1, "a", "v", "upsert")])).await.unwrap();
+    s.ingest_one(batch(&[(1, "a", "v", "upsert")]))
+        .await
+        .unwrap();
     let b = batch(&[(2, "b", "v", "upsert")]);
     let text_ids = arrow::compute::cast(b.column(0), &DataType::Utf8).unwrap();
     let wrong_type = RecordBatch::try_new(
@@ -119,7 +121,7 @@ async fn a_batch_with_a_conflicting_schema_is_invalid() {
         ],
     )
     .unwrap();
-    let err = s.ingest(wrong_type).await.unwrap_err();
+    let err = s.ingest_one(wrong_type).await.unwrap_err();
     assert!(
         matches!(&err, StoreError::InvalidBatch(m) if m.contains("does not match")),
         "{err}"
@@ -128,7 +130,7 @@ async fn a_batch_with_a_conflicting_schema_is_invalid() {
         .project(&[0, 1, 3])
         .unwrap();
     assert!(matches!(
-        s.ingest(fewer).await,
+        s.ingest_one(fewer).await,
         Err(StoreError::InvalidBatch(_))
     ));
     assert_eq!(s.query(0).unwrap().total, 1);
@@ -160,12 +162,12 @@ async fn a_first_batch_the_kernels_cannot_merge_is_invalid_and_fixes_nothing() {
         vec![base.column(0).clone(), op],
     )
     .unwrap();
-    let err = s.ingest(bad).await.unwrap_err();
+    let err = s.ingest_one(bad).await.unwrap_err();
     assert!(
         matches!(&err, StoreError::InvalidBatch(m) if m.contains("cannot be merged")),
         "{err}"
     );
-    s.ingest(base).await.unwrap();
+    s.ingest_one(base).await.unwrap();
     assert_eq!(values(&s), [(1, "v".to_owned())]);
 }
 
@@ -174,7 +176,9 @@ async fn a_first_batch_the_kernels_cannot_merge_is_invalid_and_fixes_nothing() {
 #[tokio::test]
 async fn an_incoming_seqno_column_is_replaced_by_the_write_order() {
     let s = store(4, 8);
-    s.ingest(batch(&[(1, "a", "v1", "upsert")])).await.unwrap();
+    s.ingest_one(batch(&[(1, "a", "v1", "upsert")]))
+        .await
+        .unwrap();
     let b = batch(&[(1, "a", "v2", "upsert")]);
     let mut fields: Vec<Field> = b
         .schema()
@@ -186,7 +190,7 @@ async fn an_incoming_seqno_column_is_replaced_by_the_write_order() {
     let mut columns = b.columns().to_vec();
     columns.push(Arc::new(UInt64Array::from(vec![0_u64])));
     let stale = RecordBatch::try_new(Arc::new(Schema::new(fields)), columns).unwrap();
-    s.ingest(stale).await.unwrap();
+    s.ingest_one(stale).await.unwrap();
     assert_eq!(values(&s), [(1, "v2".to_owned())]);
 }
 
@@ -228,7 +232,9 @@ async fn validate_rejects_a_slice_whose_batches_disagree_on_an_empty_store() {
 #[tokio::test]
 async fn validate_checks_against_the_schema_the_store_already_fixed() {
     let s = store(4, 8);
-    s.ingest(batch(&[(1, "a", "v", "upsert")])).await.unwrap();
+    s.ingest_one(batch(&[(1, "a", "v", "upsert")]))
+        .await
+        .unwrap();
     let fewer = batch(&[(2, "b", "v", "upsert")])
         .project(&[0, 1, 3])
         .unwrap();
@@ -251,7 +257,7 @@ async fn validate_accepts_a_valid_slice_and_writes_nothing() {
     assert_eq!(s.query(0).unwrap().total, 0);
     assert_eq!((s.stats().rows, s.stats().parts), (0, 0));
     // Nothing was fixed either: a different schema is still accepted.
-    s.ingest(batch(&[(1, "a", "v", "upsert")]).project(&[0, 3]).unwrap())
+    s.ingest_one(batch(&[(1, "a", "v", "upsert")]).project(&[0, 3]).unwrap())
         .await
         .unwrap();
     assert_eq!(s.query(0).unwrap().total, 1);
@@ -282,10 +288,10 @@ async fn a_multi_column_key_partitions_by_every_key_column() {
         )
         .unwrap()
     };
-    s.ingest(rows(&[(1, 2, "v2-old"), (1, 1, "v1-old")]))
+    s.ingest_one(rows(&[(1, 2, "v2-old"), (1, 1, "v1-old")]))
         .await
         .unwrap();
-    s.ingest(rows(&[(1, 1, "v1-new")])).await.unwrap();
+    s.ingest_one(rows(&[(1, 1, "v1-new")])).await.unwrap();
     let out = s.query(0).unwrap().rows.unwrap();
     let versions = out
         .column_by_name("version")
@@ -315,10 +321,10 @@ async fn null_keys_are_one_key_and_sort_first() {
         )
         .unwrap()
     };
-    s.ingest(rows(&[(Some(1), "one"), (None, "null-old")]))
+    s.ingest_one(rows(&[(Some(1), "one"), (None, "null-old")]))
         .await
         .unwrap();
-    s.ingest(rows(&[(None, "null-new")])).await.unwrap();
+    s.ingest_one(rows(&[(None, "null-new")])).await.unwrap();
     let out = s.query(0).unwrap().rows.unwrap();
     let ids = out
         .column_by_name("id")
@@ -350,7 +356,7 @@ async fn a_batch_with_duplicate_column_names_is_invalid() {
         ],
     )
     .unwrap();
-    let err = s.ingest(dup.clone()).await.unwrap_err();
+    let err = s.ingest_one(dup.clone()).await.unwrap_err();
     assert!(
         matches!(&err, StoreError::InvalidBatch(m) if m == "batch has duplicate column names: ['value']"),
         "{err}"
@@ -365,11 +371,13 @@ async fn a_batch_with_duplicate_column_names_is_invalid() {
 #[tokio::test]
 async fn column_order_may_differ_between_batches() {
     let s = store(4, 8);
-    s.ingest(batch(&[(1, "a", "v1", "upsert")])).await.unwrap();
+    s.ingest_one(batch(&[(1, "a", "v1", "upsert")]))
+        .await
+        .unwrap();
     let reordered = batch(&[(1, "a", "v2", "upsert")])
         .project(&[3, 2, 1, 0])
         .unwrap();
-    s.ingest(reordered).await.unwrap();
+    s.ingest_one(reordered).await.unwrap();
     assert_eq!(values(&s), [(1, "v2".to_owned())]);
 }
 
@@ -387,7 +395,9 @@ async fn readers_see_a_consistent_snapshot_while_the_writer_merges() {
         tokio::spawn(async move {
             start.await.unwrap();
             for i in 0..300_i64 {
-                s.ingest(batch(&[(i, "n", "v", "upsert")])).await.unwrap();
+                s.ingest_one(batch(&[(i, "n", "v", "upsert")]))
+                    .await
+                    .unwrap();
             }
         })
     };
@@ -433,10 +443,12 @@ async fn readers_see_a_consistent_snapshot_while_the_writer_merges() {
 #[tokio::test]
 async fn a_newer_version_supersedes_the_old_row_on_write() {
     let s = store(4, 8);
-    s.ingest(batch(&[(1, "a", "v1", "upsert"), (2, "b", "v1", "upsert")]))
+    s.ingest_one(batch(&[(1, "a", "v1", "upsert"), (2, "b", "v1", "upsert")]))
         .await
         .unwrap();
-    s.ingest(batch(&[(1, "a", "v2", "upsert")])).await.unwrap();
+    s.ingest_one(batch(&[(1, "a", "v2", "upsert")]))
+        .await
+        .unwrap();
     assert_eq!(values(&s), [(1, "v2".to_owned()), (2, "v1".to_owned())]);
     assert_eq!(live_bits(&s), [vec![false, true], vec![true]]);
 }
@@ -445,10 +457,10 @@ async fn a_newer_version_supersedes_the_old_row_on_write() {
 #[tokio::test]
 async fn a_delete_hides_the_key_and_is_not_stored() {
     let s = store(4, 8);
-    s.ingest(batch(&[(1, "a", "v1", "upsert"), (2, "b", "v1", "upsert")]))
+    s.ingest_one(batch(&[(1, "a", "v1", "upsert"), (2, "b", "v1", "upsert")]))
         .await
         .unwrap();
-    s.ingest(batch(&[(1, "a", "", "delete"), (3, "c", "", "delete")]))
+    s.ingest_one(batch(&[(1, "a", "", "delete"), (3, "c", "", "delete")]))
         .await
         .unwrap();
     assert_eq!(values(&s), [(2, "v1".to_owned())]);
@@ -459,9 +471,15 @@ async fn a_delete_hides_the_key_and_is_not_stored() {
 #[tokio::test]
 async fn reinsert_after_delete_wins() {
     let s = store(2, 2);
-    s.ingest(batch(&[(1, "a", "v1", "upsert")])).await.unwrap();
-    s.ingest(batch(&[(1, "a", "", "delete")])).await.unwrap();
-    s.ingest(batch(&[(1, "a", "v3", "upsert")])).await.unwrap();
+    s.ingest_one(batch(&[(1, "a", "v1", "upsert")]))
+        .await
+        .unwrap();
+    s.ingest_one(batch(&[(1, "a", "", "delete")]))
+        .await
+        .unwrap();
+    s.ingest_one(batch(&[(1, "a", "v3", "upsert")]))
+        .await
+        .unwrap();
     assert_eq!(values(&s), [(1, "v3".to_owned())]);
 }
 
@@ -469,7 +487,7 @@ async fn reinsert_after_delete_wins() {
 #[tokio::test]
 async fn the_last_row_for_a_key_within_a_batch_wins() {
     let s = store(4, 8);
-    s.ingest(batch(&[
+    s.ingest_one(batch(&[
         (1, "a", "first", "upsert"),
         (1, "a", "second", "upsert"),
         (2, "b", "x", "upsert"),
@@ -487,7 +505,9 @@ async fn the_last_row_for_a_key_within_a_batch_wins() {
 async fn layers_count_batches_in_base_p_and_only_the_top_layer_overflows() {
     let s = store(3, 3);
     for n in 1..=40_i64 {
-        s.ingest(upserts(n * 10..n * 10 + 5, "v")).await.unwrap();
+        s.ingest_one(upserts(n * 10..n * 10 + 5, "v"))
+            .await
+            .unwrap();
         let n = n as usize;
         assert_eq!(
             s.layer_parts(),
@@ -510,7 +530,9 @@ async fn write_amplification_is_at_most_the_layer_count() {
     let s = store(3, 4);
     // 128 = 8 x 4^2 batches: every row has crossed both merges.
     for n in 0..128_i64 {
-        s.ingest(upserts(n * 10..n * 10 + 10, "v")).await.unwrap();
+        s.ingest_one(upserts(n * 10..n * 10 + 10, "v"))
+            .await
+            .unwrap();
     }
     let ingested = 128 * 10;
     assert_eq!(s.rows_written(), ingested * 3);
@@ -521,8 +543,8 @@ async fn write_amplification_is_at_most_the_layer_count() {
 #[tokio::test]
 async fn a_merge_drops_dead_rows() {
     let s = store(3, 2);
-    s.ingest(upserts(0..10, "old")).await.unwrap();
-    s.ingest(upserts(5..15, "new")).await.unwrap();
+    s.ingest_one(upserts(0..10, "old")).await.unwrap();
+    s.ingest_one(upserts(5..15, "new")).await.unwrap();
     assert_eq!(s.layer_parts(), [0, 1, 0]);
     assert_eq!(
         s.stats().rows,
@@ -539,8 +561,8 @@ async fn a_merge_drops_dead_rows() {
 #[tokio::test]
 async fn a_part_with_no_live_rows_is_dropped() {
     let s = store(4, 8);
-    s.ingest(upserts(0..3, "old")).await.unwrap();
-    s.ingest(upserts(0..3, "new")).await.unwrap();
+    s.ingest_one(upserts(0..3, "old")).await.unwrap();
+    s.ingest_one(upserts(0..3, "new")).await.unwrap();
     assert_eq!(s.layer_parts(), [1, 0, 0, 0]);
     assert_eq!(s.stats().rows, 3);
 }
@@ -552,6 +574,91 @@ fn capped(max_rows: usize) -> LsmStore {
     })
 }
 
+/// A message is admitted whole: its stored rows are summed and checked
+/// against the cap once, so a second batch that would overflow refuses the
+/// first too. Nothing is written and the store freezes.
+#[tokio::test]
+async fn a_message_whose_second_batch_would_overflow_writes_nothing() {
+    let s = capped(5);
+    write(&s, upserts(0..3, "a")).await;
+    let err = s
+        .ingest(vec![upserts(10..11, "b"), upserts(20..22, "b")])
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            StoreError::Full {
+                held: 3,
+                max_rows: 5
+            }
+        ),
+        "{err}"
+    );
+    check(&s);
+    assert_eq!(ids(&s), [0, 1, 2]);
+    assert_eq!((s.stats().rows, s.stats().parts), (3, 1));
+    assert!(s.stats().full);
+    assert_eq!(s.stats().refused_batches_total, 2, "both batches refused");
+}
+
+/// On an empty store the first batch of a message fixes the schema its
+/// later batches are checked against, and the batches apply in order: a
+/// later batch supersedes an earlier one of the same message.
+#[tokio::test]
+async fn a_two_batch_first_message_is_checked_and_applied_in_order() {
+    let s = store(4, 8);
+    let reordered = batch(&[(1, "a", "v2", "upsert")])
+        .project(&[3, 2, 1, 0])
+        .unwrap();
+    s.ingest(vec![upserts(0..2, "v1"), reordered])
+        .await
+        .unwrap();
+    check(&s);
+    assert_eq!(values(&s), [(0, "v1".to_owned()), (1, "v2".to_owned())]);
+    assert_eq!(s.layer_parts(), [2, 0, 0, 0]);
+}
+
+/// A later batch that disagrees with the first one's schema refuses the
+/// whole first message, and nothing is fixed.
+#[tokio::test]
+async fn a_first_message_whose_batches_disagree_writes_and_fixes_nothing() {
+    let s = store(4, 8);
+    let fewer = batch(&[(2, "b", "v", "upsert")])
+        .project(&[0, 1, 3])
+        .unwrap();
+    let err = s
+        .ingest(vec![upserts(0..1, "v"), fewer.clone()])
+        .await
+        .unwrap_err();
+    assert!(matches!(err, StoreError::InvalidBatch(_)), "{err}");
+    check(&s);
+    assert_eq!((s.stats().rows, s.stats().parts), (0, 0));
+    assert!(s.core.snapshot.load().schema.is_none());
+    // Nothing was fixed: the narrower schema is still accepted.
+    s.ingest(vec![fewer]).await.unwrap();
+    assert_eq!(s.query(0).unwrap().total, 1);
+}
+
+/// Validation comes before capacity, also on a frozen store: an invalid
+/// batch is still invalid, not full.
+#[tokio::test]
+async fn a_frozen_store_still_reports_an_invalid_message_as_invalid() {
+    let s = capped(1);
+    assert!(matches!(
+        s.ingest_one(upserts(0..2, "a")).await,
+        Err(StoreError::Full { .. })
+    ));
+    let no_op = batch(&[(1, "x", "v", "upsert")])
+        .project(&[0, 1, 2])
+        .unwrap();
+    assert!(matches!(
+        s.ingest(vec![upserts(5..6, "b"), no_op]).await,
+        Err(StoreError::InvalidBatch(_))
+    ));
+    assert_eq!(s.stats().refused_batches_total, 1);
+}
+
 /// A batch that would take the rows held over `max_rows` is refused whole:
 /// no index change, no kill, no part. The store then freezes: every later
 /// non-empty batch is refused too, even one that would fit or only deletes,
@@ -561,7 +668,7 @@ async fn a_batch_over_max_rows_is_refused_whole_and_freezes_the_store() {
     let s = capped(10);
     write(&s, upserts(0..8, "a")).await;
     // Ids 6 and 7 would supersede rows of the first part, 8..12 are new.
-    let err = s.ingest(upserts(6..12, "b")).await.unwrap_err();
+    let err = s.ingest_one(upserts(6..12, "b")).await.unwrap_err();
     assert!(
         matches!(
             err,
@@ -585,7 +692,7 @@ async fn a_batch_over_max_rows_is_refused_whole_and_freezes_the_store() {
     // Frozen: a batch that fits, and one that only deletes, are refused.
     for frozen in [upserts(20..21, "c"), batch(&[(1, "n", "", "delete")])] {
         assert!(matches!(
-            s.ingest(frozen).await,
+            s.ingest_one(frozen).await,
             Err(StoreError::Full {
                 held: 8,
                 max_rows: 10
@@ -609,7 +716,7 @@ async fn dead_rows_count_toward_max_rows() {
     assert_eq!((s.stats().rows, s.stats().live_rows), (4, 3));
     // 3 live + 1 would fit a live-row cap; 4 held + 1 does not.
     assert!(matches!(
-        s.ingest(upserts(5..6, "c")).await,
+        s.ingest_one(upserts(5..6, "c")).await,
         Err(StoreError::Full {
             held: 4,
             max_rows: 4
@@ -653,7 +760,7 @@ async fn a_batch_is_measured_by_the_rows_it_would_store() {
 async fn a_first_batch_over_max_rows_fixes_no_schema() {
     let s = capped(2);
     assert!(matches!(
-        s.ingest(upserts(0..3, "a")).await,
+        s.ingest_one(upserts(0..3, "a")).await,
         Err(StoreError::Full {
             held: 0,
             max_rows: 2
@@ -665,7 +772,7 @@ async fn a_first_batch_over_max_rows_fixes_no_schema() {
         .project(&[0, 1, 2])
         .unwrap();
     assert!(matches!(
-        s.ingest(no_op).await,
+        s.ingest_one(no_op).await,
         Err(StoreError::InvalidBatch(_))
     ));
 }
@@ -675,13 +782,15 @@ async fn a_first_batch_over_max_rows_fixes_no_schema() {
 #[tokio::test]
 async fn reads_merge_parts_in_key_order_and_page() {
     let s = store(4, 8);
-    s.ingest(batch(&[(5, "e", "v", "upsert"), (1, "a", "v", "upsert")]))
+    s.ingest_one(batch(&[(5, "e", "v", "upsert"), (1, "a", "v", "upsert")]))
         .await
         .unwrap();
-    s.ingest(batch(&[(3, "c", "v", "upsert"), (4, "d", "v", "upsert")]))
+    s.ingest_one(batch(&[(3, "c", "v", "upsert"), (4, "d", "v", "upsert")]))
         .await
         .unwrap();
-    s.ingest(batch(&[(2, "b", "v", "upsert")])).await.unwrap();
+    s.ingest_one(batch(&[(2, "b", "v", "upsert")]))
+        .await
+        .unwrap();
     let ids = |limit: usize| -> Vec<i64> {
         let result = s.query(limit).unwrap();
         assert_eq!(result.total, 5);
@@ -701,7 +810,9 @@ async fn reads_merge_parts_in_key_order_and_page() {
 #[tokio::test]
 async fn query_drops_the_order_and_op_columns() {
     let s = store(4, 8);
-    s.ingest(batch(&[(1, "a", "v", "upsert")])).await.unwrap();
+    s.ingest_one(batch(&[(1, "a", "v", "upsert")]))
+        .await
+        .unwrap();
     let rows = s.query(0).unwrap().rows.unwrap();
     let names: Vec<&str> = rows
         .schema_ref()
@@ -724,7 +835,7 @@ async fn an_empty_store_has_no_rows() {
 #[tokio::test]
 async fn live_batches_share_the_stores_buffers() {
     let s = store(4, 8);
-    s.ingest(upserts(0..4, "v")).await.unwrap();
+    s.ingest_one(upserts(0..4, "v")).await.unwrap();
     let first = s.live_batches().unwrap();
     let second = s.live_batches().unwrap();
     let id_buffer =
@@ -750,7 +861,7 @@ async fn a_batch_with_a_live_column_is_invalid() {
     let mut columns = b.columns().to_vec();
     columns.push(Arc::new(arrow::array::BooleanArray::from(vec![true])));
     let reserved = RecordBatch::try_new(Arc::new(Schema::new(fields)), columns).unwrap();
-    let err = s.ingest(reserved.clone()).await.unwrap_err();
+    let err = s.ingest_one(reserved.clone()).await.unwrap_err();
     assert!(
         matches!(&err, StoreError::InvalidBatch(m) if m == "batch uses reserved column names: ['_live']"),
         "{err}"
@@ -767,9 +878,9 @@ async fn a_batch_with_a_live_column_is_invalid() {
 #[tokio::test]
 async fn a_view_taken_before_a_write_is_unchanged_by_it() {
     let s = store(4, 8);
-    s.ingest(upserts(0..4, "old")).await.unwrap();
+    s.ingest_one(upserts(0..4, "old")).await.unwrap();
     let before = s.live_batches().unwrap();
-    s.ingest(upserts(0..2, "new")).await.unwrap();
+    s.ingest_one(upserts(0..2, "new")).await.unwrap();
     let live = |b: &RecordBatch| -> Vec<bool> {
         b.column_by_name(LIVE_COLUMN)
             .unwrap()
@@ -843,7 +954,7 @@ fn check(s: &LsmStore) {
 
 /// `ingest`, then `check`.
 async fn write(s: &LsmStore, b: RecordBatch) {
-    s.ingest(b).await.unwrap();
+    s.ingest_one(b).await.unwrap();
     check(s);
 }
 
@@ -954,7 +1065,8 @@ async fn random_writes_match_a_model() {
             })
             .collect();
         // What the batch would store: the last row of each key, unless that
-        // row is a delete.
+        // row is a delete. `held` comes from the store because it depends on
+        // which parts merged or died; `check` verifies it against the parts.
         let mut last: BTreeMap<i64, &str> = BTreeMap::new();
         for (id, _, op) in &rows {
             last.insert(*id, op);
@@ -966,7 +1078,7 @@ async fn random_writes_match_a_model() {
             .iter()
             .map(|(id, value, op)| (*id, "n", value.as_str(), *op))
             .collect();
-        let result = s.ingest(batch(&refs)).await;
+        let result = s.ingest_one(batch(&refs)).await;
         check(&s);
         if frozen {
             refused += 1;
@@ -1043,13 +1155,13 @@ async fn a_panicked_write_poisons_the_store() {
     let s = store(4, 8);
     write(&s, upserts(0..2, "a")).await;
     s.core.panic_next_write.store(true, Ordering::Relaxed);
-    let err = s.ingest(upserts(0..1, "b")).await.unwrap_err();
+    let err = s.ingest_one(upserts(0..1, "b")).await.unwrap_err();
     assert!(
         matches!(&err, StoreError::Internal(m) if m.contains("panicked")),
         "{err}"
     );
     assert!(s.stats().poisoned);
-    let err = s.ingest(upserts(5..6, "c")).await.unwrap_err();
+    let err = s.ingest_one(upserts(5..6, "c")).await.unwrap_err();
     assert!(
         matches!(&err, StoreError::Internal(m) if m == "LSM store poisoned by a panicked write"),
         "{err}"

@@ -57,7 +57,7 @@ pub async fn get_cached_data(
         (status = 413, description = "Body over max_request_body_bytes, or a decoded batch over max_ingest_batch_bytes; nothing written", body = ErrorResponse),
         (status = 422, description = "A batch is missing a column, conflicts with the store schema or has a null field; nothing written", body = ErrorResponse),
         (status = 503, description = "Too many ingest requests in flight", body = ErrorResponse),
-        (status = 507, description = "The LSM store is full (rows held at LSM_MAX_ROWS) and refuses every new batch until it is rebuilt", body = ErrorResponse)
+        (status = 507, description = "The LSM store is full (rows held at LSM_MAX_ROWS) and refuses every new message whole until it is rebuilt", body = ErrorResponse)
     )
 )]
 pub async fn ingest_batch(

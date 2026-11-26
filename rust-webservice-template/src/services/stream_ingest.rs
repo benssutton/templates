@@ -6,13 +6,14 @@
 //! | every batch written                                    | accept     |
 //! | store error                                            | fail + jittered, doubling, capped backoff |
 //! | invalid batch, or decoded size > max_ingest_batch_bytes | reject    |
-//! | store full (it refuses every new batch)                | reject     |
+//! | store full (it refuses every new message)              | reject     |
 //! | payload not Arrow IPC                                  | rejected inside the consumer |
 //!
 //! `POST /data/ingest` goes through the same `ingest` call, so both paths
 //! apply the same rules: every batch is size-checked and validated (by the
 //! store and against the read model `GET /data/cache` serves) before any is
-//! written, so a refused message leaves nothing in the store.
+//! written, and the store then writes the message under one lock, all its
+//! batches or none, so a refused message leaves nothing in the store.
 //!
 //! Resilience: five consecutive `next_delivery()` errors, or the transport
 //! staying out of CONNECTED longer than `ingest_max_disconnect_seconds`,
@@ -67,9 +68,8 @@ pub enum IngestError {
     /// A batch can never be stored or served; nothing was written.
     #[error("{0}")]
     Invalid(String),
-    /// The store is full and refuses every new batch until it is rebuilt.
-    /// The refused batch was not written; earlier batches of the same
-    /// message may have been, if it was the one that filled the store.
+    /// The store is full and refuses every new message until it is
+    /// rebuilt; nothing of this one was written.
     #[error("{0}")]
     Full(String),
     /// The write itself failed; may be transient.
@@ -229,17 +229,8 @@ impl StreamIngestService {
     /// stream and `POST /data/ingest`.
     pub async fn ingest(&self, batches: Vec<RecordBatch>) -> Result<(), IngestError> {
         self.admit(&batches).await?;
-        // One narrow race remains: a concurrent writer can fix the store's
-        // schema between `admit` and a later batch's write; that batch is
-        // then refused with earlier ones already written. Newest-wins merge
-        // makes a redelivered message re-apply harmlessly.
-        timed("ingest.lsm_write", async {
-            for batch in batches {
-                self.write(batch).await?;
-            }
-            Ok(())
-        })
-        .await
+        timed("ingest.lsm_write", self.write(batches)).await?;
+        Ok(())
     }
 
     /// Size, then the store's rules and the read model's, on the blocking
@@ -268,24 +259,25 @@ impl StreamIngestService {
         Ok(())
     }
 
-    /// Write one batch, then record it (`last_batch_at`, the row total,
+    /// Write one message, then record it (`last_batch_at`, the row total,
     /// `ingest_rows_ingested_total`). The write and its bookkeeping are one
     /// detached task: if this future is dropped (an HTTP client disconnects)
-    /// the task still runs to the end, so a committed batch is always
+    /// the task still runs to the end, so a committed message is always
     /// counted. The caller's span (the request id) is carried into it.
-    async fn write(&self, batch: RecordBatch) -> Result<(), StoreError> {
+    async fn write(&self, batches: Vec<RecordBatch>) -> Result<(), StoreError> {
         let store = self.store.clone();
         let progress = self.progress.clone();
         let metrics = self.metrics.clone();
         let task = async move {
-            let rows = batch.num_rows() as u64;
-            store.ingest(batch).await?;
+            let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
+            let count = batches.len();
+            store.ingest(batches).await?;
             *lock(&progress.last_batch_at) = Some(Utc::now().trunc_subsecs(6));
             progress.rows_total.fetch_add(rows, Ordering::Relaxed);
             if let Some(m) = &metrics {
                 m.record_ingested_rows(rows);
             }
-            tracing::debug!(rows, "ingested batch");
+            tracing::debug!(rows, batches = count, "ingested batch");
             Ok(())
         };
         tokio::spawn(task.instrument(tracing::Span::current()))

@@ -170,7 +170,7 @@ struct FailingStore;
 
 #[async_trait::async_trait]
 impl StreamStore for FailingStore {
-    async fn ingest(&self, _batch: RecordBatch) -> Result<(), StoreError> {
+    async fn ingest(&self, _batches: Vec<RecordBatch>) -> Result<(), StoreError> {
         Err(StoreError::Internal("simulated storage failure".into()))
     }
     fn validate(&self, _batches: &[RecordBatch]) -> Result<(), StoreError> {
@@ -956,6 +956,28 @@ async fn a_full_store_rejects_every_later_message_and_never_requests_shutdown() 
     let stats = svc.ingest_health().store;
     assert!(stats.full);
     assert_eq!(stats.refused_batches_total, 3);
+    svc.close().await;
+}
+
+/// A message is all or nothing: a second batch that would overflow the cap
+/// rejects the message with nothing of it written.
+#[tokio::test]
+async fn a_message_whose_second_batch_overflows_rejects_and_writes_nothing() {
+    let log = Log::default();
+    let store = capped_lsm(2);
+    let batches = vec![
+        make_batch(&[(1, "a", "v1", "upsert")]),
+        make_batch(&[(2, "b", "v1", "upsert"), (3, "c", "v1", "upsert")]),
+    ];
+    let (svc, _) = start(
+        ScriptedConsumer::new(vec![delivery(batches, &log)], ConnectionState::Connected),
+        store.clone(),
+        settings(),
+    );
+    assert_eq!(wait_for_settlements(&log, 1).await, ["reject"]);
+    assert_eq!(store.query(0).unwrap().total, 0);
+    assert_eq!(svc.ingest_health().rows_ingested_total, 0);
+    assert!(store.stats().full);
     svc.close().await;
 }
 

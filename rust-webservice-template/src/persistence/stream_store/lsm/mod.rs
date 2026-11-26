@@ -28,11 +28,14 @@
 //! until the part merges or dies; a top-layer part never merges.
 //!
 //! Capacity: `max_rows` caps the rows held (live rows plus the dead rows
-//! still inside parts). A batch whose stored rows (its upserts after the
-//! newest-per-key dedup) would take the rows held over the cap is refused
-//! whole with `StoreError::Full`, and the store freezes: from then on every
-//! non-empty batch is refused, deletes included, so the store goes stale
-//! rather than partly updated. Every refusal is logged as a fatal error.
+//! still inside parts). A message (one `ingest` call) is admitted whole:
+//! if its stored rows (its upserts after the newest-per-key dedup, counted
+//! before any rows it supersedes are freed) would take the rows held over
+//! the cap, the whole message is refused with `StoreError::Full`, and the
+//! store freezes: from then on every valid non-empty message is refused,
+//! deletes included, so the store goes stale rather than partly updated.
+//! An invalid batch is still refused as invalid. Every refusal is logged as
+//! a fatal error.
 //! Reads keep serving everything received to date; only rebuilding the
 //! store (a restart, or a refresh from a persistent store) unfreezes it.
 //!
@@ -58,7 +61,9 @@ use arrow::array::{ArrayRef, RecordBatch, UInt64Array};
 use arrow::compute::interleave_record_batch;
 use arrow::datatypes::{Schema, SchemaRef};
 use arrow::row::RowConverter;
-use kernels::{conform, drop_columns, key_converter, key_rows, merge_parts, prepare, quoted_list};
+use kernels::{
+    Prepared, conform, drop_columns, key_converter, key_rows, merge_parts, prepare, quoted_list,
+};
 pub use part::LIVE_COLUMN;
 use part::Part;
 use std::collections::HashMap;
@@ -273,6 +278,12 @@ impl LsmStore {
             .collect()
     }
 
+    /// A message of one batch.
+    #[cfg(test)]
+    async fn ingest_one(&self, batch: RecordBatch) -> Result<(), StoreError> {
+        self.ingest(vec![batch]).await
+    }
+
     #[cfg(test)]
     fn rows_written(&self) -> u64 {
         self.core.written_total.load(Ordering::Relaxed)
@@ -342,13 +353,13 @@ impl Core {
     /// `apply`, refused once poisoned. A panic in it poisons the store
     /// before the writer lock is released, so no queued write runs on the
     /// state it left behind.
-    fn write(&self, w: &mut Writer, batch: &RecordBatch) -> Result<(), StoreError> {
+    fn write(&self, w: &mut Writer, batches: &[RecordBatch]) -> Result<(), StoreError> {
         if self.poisoned.load(Ordering::Acquire) {
             return Err(StoreError::Internal(
                 "LSM store poisoned by a panicked write".into(),
             ));
         }
-        std::panic::catch_unwind(AssertUnwindSafe(|| self.apply(w, batch))).unwrap_or_else(|_| {
+        std::panic::catch_unwind(AssertUnwindSafe(|| self.apply(w, batches))).unwrap_or_else(|_| {
             self.poisoned.store(true, Ordering::Release);
             tracing::error!("LSM write panicked; the store refuses every later write");
             Err(StoreError::Internal(
@@ -358,38 +369,73 @@ impl Core {
     }
 
     /// The CPU half of `ingest`, run on the blocking pool with the writer
-    /// lock held.
-    fn apply(&self, w: &mut Writer, batch: &RecordBatch) -> Result<(), StoreError> {
+    /// lock held: one message, all its batches or none. Every fallible step
+    /// (check, prepare, admit) runs on every batch before the first change
+    /// to the writer, so a refused or failed message leaves the store as it
+    /// was; readers see the whole message at once.
+    fn apply(&self, w: &mut Writer, batches: &[RecordBatch]) -> Result<(), StoreError> {
         let keys = &self.config.key_columns;
         // Re-checked under the lock: the schema may have been fixed since a
-        // caller's `validate`.
-        let (schema, mut columns) = self.check(batch, w.schema.as_ref())?;
-        let rows = batch.num_rows();
-        if rows == 0 {
-            return Ok(());
+        // caller's `validate`. On an empty store the message's first
+        // non-empty batch fixes the schema its later batches must match.
+        let mut schema = w.schema.clone();
+        let mut checked = Vec::new();
+        for batch in batches {
+            let (frame_schema, columns) = self.check(batch, schema.as_ref())?;
+            if batch.num_rows() > 0 {
+                schema.get_or_insert_with(|| frame_schema.clone());
+                checked.push((frame_schema, columns));
+            }
         }
-        let start = w.seqno;
-        columns
-            .push(Arc::new(UInt64Array::from_iter_values(start..start + rows as u64)) as ArrayRef);
-        let frame = RecordBatch::try_new(schema.clone(), columns)?;
-        // Every fallible step runs before the first change to the writer, so
-        // a refused or failed write leaves the store as it was. The first
-        // write's converter is kept only once the write has gone through.
+        let (Some(schema), false) = (schema, checked.is_empty()) else {
+            return Ok(());
+        };
+        let rows: usize = checked.iter().map(|(_, c)| c[0].len()).sum();
+        if self.full.load(Ordering::Acquire) {
+            // Frozen: skip the sort and key encoding of a batch refused anyway.
+            return Err(self.refuse(w, checked.len(), rows, None));
+        }
+        // The first write's converter is kept only once the write commits.
         let mut fresh = None;
         let converter = match &w.converter {
             Some(converter) => converter,
             None => fresh.insert(key_converter(&schema, keys)?),
         };
-        let prepared = prepare(&frame, keys, converter)?;
-        self.admit(w, rows, prepared.stored.num_rows())?;
+        let mut seqno = w.seqno;
+        let mut prepared = Vec::with_capacity(checked.len());
+        for (frame_schema, mut columns) in checked {
+            let n = columns[0].len() as u64;
+            columns.push(Arc::new(UInt64Array::from_iter_values(seqno..seqno + n)) as ArrayRef);
+            seqno += n;
+            let frame = RecordBatch::try_new(frame_schema, columns)?;
+            prepared.push(prepare(&frame, keys, converter)?);
+        }
+        // Counted before any of the message's superseded rows are freed.
+        let stored: usize = prepared.iter().map(|p| p.stored.num_rows()).sum();
+        let held = w.held_rows();
+        if held
+            .checked_add(stored)
+            .is_none_or(|total| total > self.config.max_rows)
+        {
+            return Err(self.refuse(w, prepared.len(), rows, Some(stored)));
+        }
         if let Some(converter) = fresh {
             w.converter = Some(converter);
         }
         w.schema = Some(schema);
-        w.seqno += rows as u64;
+        w.seqno = seqno;
+        for batch in prepared {
+            self.commit(w, batch);
+        }
+        self.publish(w);
+        Ok(())
+    }
 
-        // Supersede: the previous version of every key written here dies; a
-        // delete is not stored.
+    /// Supersede, add the batch's part to layer 0, cascade. Infallible: the
+    /// message was admitted.
+    fn commit(&self, w: &mut Writer, prepared: Prepared) {
+        // The previous version of every key written here dies; a delete is
+        // not stored.
         let part_id = w.next_part_id();
         let mut dead: HashMap<u64, Vec<usize>> = HashMap::new();
         let mut stored_row = 0;
@@ -424,38 +470,32 @@ impl Core {
                 .fetch_add(stored as u64, Ordering::Relaxed);
         }
         self.cascade(w);
-        self.publish(w);
-        Ok(())
     }
 
-    /// Refuse the batch if the store is full, or if storing `stored` more
-    /// rows would take the rows held over `max_rows`; that first refusal
-    /// makes the store full. Called before the first change to the writer.
-    fn admit(&self, w: &Writer, rows: usize, stored: usize) -> Result<(), StoreError> {
-        let max_rows = self.config.max_rows;
+    /// Refuse a message of `batches` non-empty batches (`rows` rows), and
+    /// freeze the store. `stored` is what it would have stored; unknown when
+    /// the store was already frozen.
+    fn refuse(&self, w: &Writer, batches: usize, rows: usize, stored: Option<usize>) -> StoreError {
         let held = w.held_rows();
-        let fits = held
-            .checked_add(stored)
-            .is_some_and(|total| total <= max_rows);
-        if fits && !self.full.load(Ordering::Acquire) {
-            return Ok(());
-        }
+        let max_rows = self.config.max_rows;
         self.full.store(true, Ordering::Release);
-        self.refused_total.fetch_add(1, Ordering::Relaxed);
+        self.refused_total
+            .fetch_add(batches as u64, Ordering::Relaxed);
         // tracing has no FATAL level: the prefix and the field mark it.
         tracing::error!(
             fatal = true,
             held,
             max_rows,
+            batches,
             rows,
             stored,
-            "FATAL: LSM store full; batch discarded. The store refuses every \
+            "FATAL: LSM store full; message discarded. The store refuses every \
              new batch until it is rebuilt"
         );
-        Err(StoreError::Full {
+        StoreError::Full {
             held: held as u64,
             max_rows: max_rows as u64,
-        })
+        }
     }
 
     /// Merge every lower layer that holds `P` parts into the next one up.
@@ -544,11 +584,11 @@ impl StreamStore for LsmStore {
     /// by a merge. The owned guard moves into the task, so the commit stays
     /// atomic and writes stay serialised. The task cannot be cancelled: once
     /// started, a write commits even if this future is dropped.
-    async fn ingest(&self, batch: RecordBatch) -> Result<(), StoreError> {
+    async fn ingest(&self, batches: Vec<RecordBatch>) -> Result<(), StoreError> {
         let mut guard = self.writer.clone().lock_owned().await;
         let core = self.core.clone();
         let span = tracing::Span::current();
-        tokio::task::spawn_blocking(move || span.in_scope(|| core.write(&mut guard, &batch)))
+        tokio::task::spawn_blocking(move || span.in_scope(|| core.write(&mut guard, &batches)))
             .await
             .map_err(|e| StoreError::Internal(format!("LSM write task failed: {e}")))?
     }

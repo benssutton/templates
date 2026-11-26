@@ -34,7 +34,7 @@ pub enum AppError {
     /// 422: the body parsed but is not valid. The message is safe to return.
     #[error("{0}")]
     Unprocessable(String),
-    /// 507: the stream store is full and refuses every new batch until it is
+    /// 507: the stream store is full and refuses every new message until it is
     /// rebuilt. Retrying cannot succeed. The message is safe to return.
     #[error("{0}")]
     InsufficientStorage(String),

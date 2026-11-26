@@ -308,6 +308,22 @@ async fn a_stream_with_one_invalid_batch_writes_nothing() {
     assert_eq!(cache(&app).await["total"], 0);
 }
 
+/// A stream whose second batch would take the store over `LSM_MAX_ROWS` is
+/// 507 with none of its batches written.
+#[tokio::test]
+async fn a_stream_whose_second_batch_overflows_is_507_and_writes_nothing() {
+    let app = TestApp::spawn(Settings {
+        lsm_max_rows: 2,
+        ..settings().await
+    })
+    .await;
+    let first = make_batch(&[(420, "a", "v1", "upsert")]);
+    let second = make_batch(&[(421, "b", "v1", "upsert"), (422, "c", "v1", "upsert")]);
+    let response = post_ipc(&app, encode_stream(&[first, second]).unwrap(), None).await;
+    assert_eq!(response.status(), 507);
+    assert_eq!(cache(&app).await["total"], 0);
+}
+
 #[tokio::test]
 async fn the_request_id_is_on_the_store_write_log_line() {
     let (logs, _guard) = logs::capture();

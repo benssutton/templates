@@ -42,7 +42,7 @@ fn filled(runtime: &tokio::runtime::Runtime, batches: &[RecordBatch]) -> LsmStor
     let store = LsmStore::new(LsmConfig::default());
     runtime.block_on(async {
         for b in batches {
-            store.ingest(b.clone()).await.expect("ingest");
+            store.ingest(vec![b.clone()]).await.expect("ingest");
         }
     });
     store

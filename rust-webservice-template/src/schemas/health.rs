@@ -56,8 +56,8 @@ pub struct StreamStoreStats {
     pub parts: u64,
     /// The cap on `rows`.
     pub max_rows: u64,
-    /// A batch would have taken `rows` over `max_rows`, so the store refuses
-    /// every new batch until it is rebuilt. Reads still serve the rows
+    /// A message would have taken `rows` over `max_rows`, so the store refuses
+    /// every new message until it is rebuilt. Reads still serve the rows
     /// received to date, so readiness stays up.
     pub full: bool,
     /// Non-empty batches refused because the store is full.
