@@ -366,6 +366,7 @@ async fn cache_limit_is_validated_like_data() {
 /// metrics report the store as full.
 #[tokio::test]
 async fn a_full_store_answers_507_and_keeps_serving() {
+    logs::ensure_installed();
     let app = TestApp::spawn(Settings {
         lsm_max_rows: 2,
         ..settings().await
