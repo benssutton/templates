@@ -1,19 +1,25 @@
-"""CompressionMiddleware on a minimal app: real HTTP through ASGITransport, raw
+"""The content-coding middlewares on a minimal app: real HTTP through ASGITransport, raw
 (undecoded) bodies, so each test sees exactly what a client receives."""
 
 import gzip
+import json
 import os
 from typing import Any
 
 from httpx import ASGITransport, AsyncClient
 from httpx import Response as HttpxResponse
 from starlette.applications import Starlette
+from starlette.datastructures import Headers
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 from starlette.types import Message, Receive, Scope, Send
 
-from core.compression import CompressionMiddleware
+from core.compression import (
+    ContentNegotiationMiddleware,
+    ResponseCompressionMiddleware,
+    add_content_coding,
+)
 from core.request_limits import MaxBodySizeMiddleware
 from core.zstd_compat import zstd
 
@@ -142,7 +148,7 @@ def make_app(**options: Any) -> Starlette:
         ]
     )
     app.add_middleware(MaxBodySizeMiddleware, max_bytes=LIMIT)
-    app.add_middleware(CompressionMiddleware, max_body_bytes=LIMIT, **options)
+    add_content_coding(app, max_body_bytes=LIMIT, **options)
     return app
 
 
@@ -283,7 +289,7 @@ async def call_raw(messages: list[Message]) -> list[Message]:
         "path": "/file",
         "headers": [(b"accept-encoding", b"zstd")],
     }
-    await CompressionMiddleware(app, max_body_bytes=LIMIT)(scope, receive, record)
+    await ResponseCompressionMiddleware(app)(scope, receive, record)
     return sent
 
 
@@ -519,3 +525,105 @@ async def test_disabled_errors_do_not_vary() -> None:
         )
         assert r.status_code == code
         assert "vary" not in r.headers
+
+
+async def test_the_app_sees_only_the_winning_coding() -> None:
+    """Negotiation rewrites Accept-Encoding to the one coding the response
+    layer will use (zstd wins ties; a `*` entry counts), or removes it."""
+    seen: list[str | None] = []
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        seen.append(Headers(scope=scope).get("accept-encoding"))
+        await Response(b"ok")(scope, receive, send)
+
+    negotiation = ContentNegotiationMiddleware(app)
+    async with AsyncClient(
+        transport=ASGITransport(app=negotiation), base_url="http://t"
+    ) as c:
+        for accept in ("gzip;q=0.5, zstd", "gzip, zstd;q=0.1", "*", "identity"):
+            await c.get("/x", headers={"accept-encoding": accept})
+    assert seen == ["zstd", "gzip", "zstd", None]
+
+
+async def test_strict_mode_compresses_request_decoding_errors_like_any_response() -> (
+    None
+):
+    """Request decoding sits inside the response layer, so its JSON errors
+    are compressed in strict mode like any other response."""
+    r, raw = await send(
+        make_app(require_zstd=True),
+        "/echo",
+        method="POST",
+        accept="zstd",
+        headers={"content-encoding": "zstd"},
+        content=b"not zstd",
+    )
+    assert r.status_code == 400
+    assert r.headers["content-encoding"] == "zstd"
+    assert vary(r) == ["accept-encoding"]
+    assert json.loads(zstd.decompress(raw)) == {
+        "detail": "Malformed compressed request body"
+    }
+
+
+async def test_request_decompression_answers_413_without_the_body_limit_layer() -> None:
+    """The decompression layer stands alone: an oversized decoded body is
+    refused, never passed on truncated."""
+    reached: list[bool] = []
+
+    async def handler(request: Request) -> Response:
+        reached.append(True)
+        return Response(await request.body())
+
+    app = Starlette(routes=[Route("/echo", handler, methods=["POST"])])
+    add_content_coding(app, max_body_bytes=100)
+    r, _ = await send(
+        app,
+        "/echo",
+        method="POST",
+        headers={"content-encoding": "zstd"},
+        content=zstd.compress(b"a" * 10_000),
+    )
+    assert r.status_code == 413
+    assert reached == []
+
+
+async def test_gzip_decompression_bomb_is_413_without_full_expansion() -> None:
+    bomb = gzip.compress(b"\0" * (LIMIT * 1000))
+    assert len(bomb) < LIMIT * 10
+    r, _ = await send(
+        make_app(),
+        "/echo",
+        method="POST",
+        headers={"content-encoding": "gzip"},
+        content=bomb,
+    )
+    assert r.status_code == 413
+
+
+async def test_app_error_before_any_body_is_a_clean_500() -> None:
+    async def boom(_: Request) -> Response:
+        raise RuntimeError("boom")
+
+    app = Starlette(routes=[Route("/boom", boom)])
+    add_content_coding(app, max_body_bytes=LIMIT)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        r = await c.get("/boom", headers={"accept-encoding": "zstd"})
+    assert r.status_code == 500
+    assert "content-encoding" not in r.headers
+
+
+async def test_disabled_compression_leaves_accept_encoding_alone() -> None:
+    seen: list[str | None] = []
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        seen.append(Headers(scope=scope).get("accept-encoding"))
+        await Response(b"ok")(scope, receive, send)
+
+    negotiation = ContentNegotiationMiddleware(app, enabled=False)
+    async with AsyncClient(
+        transport=ASGITransport(app=negotiation), base_url="http://t"
+    ) as c:
+        await c.get("/x", headers={"accept-encoding": "gzip;q=0.5, br"})
+    assert seen == ["gzip;q=0.5, br"]

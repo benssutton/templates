@@ -65,24 +65,28 @@ StreamIngestService (for ingest health); it imports no other service.
 **Middleware is pure ASGI only.** Never add `BaseHTTPMiddleware` /
 `@app.middleware("http")`: it runs `receive()` in a task group, turning the 413
 raised mid-read into an ExceptionGroup (FastAPI then answers 400). Order
-(outermost first): canonical path, compression, body limit, correlation,
-CORS, auth (if enabled), Server-Timing, last request. Compression must stay
-outside the body limit: it decompresses request bodies (at most limit + 1 bytes),
-so the limit counts decompressed bytes.
+(outermost first): canonical path, content negotiation, response
+compression, request decompression, body limit, correlation, CORS, auth (if
+enabled), Server-Timing, last request. Request decompression must stay outside
+the body limit: it expands request bodies (at most limit + 1 bytes), so the
+limit counts decompressed bytes.
 
 **Errors.** Every error body is `{"detail": ...}`. Raise `HTTPException` in routes;
 driver connection/timeout errors (`core/errors.STORE_UNAVAILABLE_ERRORS`) become
 503 without any code in the service; anything else becomes a generic 500. The
 mounted MCP app's plain-text rejections are rewritten by `JsonErrorBodyMiddleware`.
 
-**Compression.** `core/compression.py` compresses text-based responses with zstd
-(preferred) or gzip from Accept-Encoding (`core/content_coding.py` parses it; a
-missing header means identity), from `compression_min_bytes` (1024) at
-`compression_zstd_level` (3). zstd/gzip request bodies are decompressed before the
-app sees them; other codings get 415, undecodable bodies 400. Strict mode
-(`compression_require_zstd`) answers 406 unless the client accepts zstd, except on
-/health/live, /health/ready, /metrics, /mcp and OPTIONS. Import zstd from
-`core/zstd_compat.py`, never directly (3.12 needs the backport).
+**Compression.** `core/compression/` holds three layers, installed by
+`add_content_coding()`, one job each:
+`negotiation.py` (strict mode's 406 unless the client accepts zstd, except on
+/health/live, /health/ready, /metrics, /mcp and OPTIONS; 415 for a request
+coding other than zstd/gzip; rewrites Accept-Encoding to the winning coding),
+`response.py` (zstd preferred, else gzip, from `compression_min_bytes` (1024)
+at `compression_zstd_level` (3); Vary on every text response; a small
+state machine of dataclass states) and `request.py` (zstd/gzip request bodies,
+400 when undecodable). `core/content_coding.py` parses Accept-Encoding; a
+missing header means identity. Import zstd from `core/zstd_compat.py`, never
+directly (3.12 needs the backport).
 
 **Stores.** Each client is an async context manager that connects with backoff,
 smoke-tests and (Postgres, ClickHouse) applies migrations in `__aenter__`. All
