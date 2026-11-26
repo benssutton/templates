@@ -163,15 +163,14 @@ public class HealthService {
     }
 
     /**
-     * With the noop transport there is nothing to be connected to, so ingest never blocks
-     * readiness.
+     * The noop consumer reports CONNECTED until it is closed, so with no transport ingest never
+     * blocks readiness; no special case is needed for it.
      */
     private static boolean ingestUp(IngestHealth ingest, boolean staleFailsReadiness) {
         if (staleFailsReadiness && ingest.stale()) {
             return false;
         }
-        return "noop".equals(ingest.transport())
-                || ingest.connectionState() == ConnectionState.CONNECTED;
+        return ingest.connectionState() == ConnectionState.CONNECTED;
     }
 
     public DetailedStatusResponse detailedStatus() {

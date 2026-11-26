@@ -119,6 +119,7 @@ class HealthServiceTest {
             double timeoutSeconds,
             double cacheTtlSeconds,
             boolean staleFailsReadiness,
+            ConnectionState ingestState,
             DependencyHealthProbe... probes) {
         AppSettings defaults = TestSettings.app(timeoutSeconds, 5, 1.0, 30.0);
         AppSettings settings =
@@ -157,20 +158,25 @@ class HealthServiceTest {
                 settings,
                 ingestSettings,
                 List.of(probes),
-                () ->
-                        new IngestHealth(
-                                "noop", ConnectionState.CONNECTED, true, null, null, 0, 0, true),
+                () -> new IngestHealth("noop", ingestState, true, null, null, 0, 0, true),
                 new SystemMetrics(),
                 new LastRequestTracker());
     }
 
     private static HealthService service(
             double timeoutSeconds, double cacheTtlSeconds, DependencyHealthProbe... probes) {
-        return service(timeoutSeconds, cacheTtlSeconds, false, probes);
+        return service(timeoutSeconds, cacheTtlSeconds, false, ConnectionState.CONNECTED, probes);
     }
 
     private static HealthService service(double timeoutSeconds, DependencyHealthProbe... probes) {
-        return service(timeoutSeconds, 0, false, probes);
+        return service(timeoutSeconds, 0, false, ConnectionState.CONNECTED, probes);
+    }
+
+    /** Readiness follows the transport's state for every transport, noop included. */
+    @Test
+    void ingestThatIsNotConnectedFailsReadiness() {
+        assertThat(service(1.0, 0, false, ConnectionState.DOWN).readiness().status())
+                .isEqualTo(ReadinessStatus.NOT_READY);
     }
 
     @Test
@@ -187,8 +193,10 @@ class HealthServiceTest {
     /** The stub ingest is stale: it fails readiness only when stale-fails-readiness is on. */
     @Test
     void staleIngestFailsReadinessOnlyWhenConfigured() {
-        assertThat(service(1.0, 0, false).readiness().status()).isEqualTo(ReadinessStatus.READY);
-        assertThat(service(1.0, 0, true).readiness().status()).isEqualTo(ReadinessStatus.NOT_READY);
+        assertThat(service(1.0, 0, false, ConnectionState.CONNECTED).readiness().status())
+                .isEqualTo(ReadinessStatus.READY);
+        assertThat(service(1.0, 0, true, ConnectionState.CONNECTED).readiness().status())
+                .isEqualTo(ReadinessStatus.NOT_READY);
     }
 
     /*
