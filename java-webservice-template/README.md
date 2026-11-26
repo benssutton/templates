@@ -151,7 +151,8 @@ ingest down if the broker is unreachable. Two independent limits then exit the p
 (`System.exit(3)`, so an orchestrator restarts it): `max-consecutive-failures` transport
 failures in a row without a successful bind (default 5), and the watchdog when the
 transport stays disconnected for `max-disconnect-seconds` (default 60). Setting either
-to 0 disables only that one. The noop consumer reports `connected` until shutdown, so with `noop` ingest never blocks readiness.
+to 0 disables only that one. The noop consumer reports `connected` until shutdown, so
+with `noop` ingest never blocks readiness.
 
 ## Run with Docker Compose (HTTPS on 443)
 

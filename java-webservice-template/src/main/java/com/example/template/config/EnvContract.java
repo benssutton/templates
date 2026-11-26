@@ -113,6 +113,10 @@ public final class EnvContract implements ApplicationContextConfigurer {
         if (!array.isArray()) {
             throw new IllegalArgumentException("MCP_ALLOWED_HOSTS: not a JSON array: " + s);
         }
+        if (!s.substring(arrayEnd(s)).isBlank()) {
+            throw new IllegalArgumentException(
+                    "MCP_ALLOWED_HOSTS: unexpected content after the JSON array: " + s);
+        }
         List<String> out = new ArrayList<>();
         for (JsonNode item : array.values()) {
             if (!item.isString()) {
@@ -122,6 +126,32 @@ public final class EnvContract implements ApplicationContextConfigurer {
             out.add(item.getStringValue().strip());
         }
         return out;
+    }
+
+    /**
+     * Index just past the array's closing bracket. The mapper stops reading there and ignores
+     * whatever follows, so this finds the end itself to let the caller refuse trailing content.
+     */
+    private static int arrayEnd(String s) {
+        int depth = 0;
+        boolean inString = false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (inString) {
+                if (c == '\\') {
+                    i++;
+                } else if (c == '"') {
+                    inString = false;
+                }
+            } else if (c == '"') {
+                inString = true;
+            } else if (c == '[') {
+                depth++;
+            } else if (c == ']' && --depth == 0) {
+                return i + 1;
+            }
+        }
+        return s.length();
     }
 
     private static long millis(String seconds) {
