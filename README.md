@@ -89,6 +89,12 @@ tower-http layer stack, with sqlx migrations, OpenAPI generated from the routes
 kernels (with a criterion benchmark), and Solace is consumed over AMQP 1.0 behind
 the `solace` Cargo feature.
 
+Only the Rust service implements the "Stream store (LSM)" decision so far: layered,
+supersede on write, and frozen once `LSM_MAX_ROWS` is reached, admitting each
+message whole. The Python and Java services still use their earlier stores
+(a memtable with sorted runs and full compaction; Java evicts the oldest rows at
+its row cap) until they are ported.
+
 All three share the HTTP contract above, migrate their own Postgres and ClickHouse
 schemas at startup, log JSON with a configurable level, and export OpenTelemetry
 traces when an OTLP endpoint is configured.
