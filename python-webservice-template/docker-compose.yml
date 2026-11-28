@@ -108,7 +108,7 @@ services:
   # One-shot: writes the dev key/cert only if absent. Runs as root because a new
   # named volume is root-owned; the files are handed to the app user (uid 10001).
   certs:
-    image: python:3.12.16-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b
+    image: python:3.15.1-slim@sha256:533b0b2f9b5d46fd097091cf826f27902f1d6c3bca714b6dc74551356aa97a51
     volumes:
       - certs:/certs
     entrypoint:
