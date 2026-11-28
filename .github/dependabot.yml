@@ -38,9 +38,11 @@ updates:
     schedule: { interval: monthly }
     open-pull-requests-limit: 2
     cooldown: { default-days: 7 }
-    # The JDK stays on LTS releases (25, then 29); skip the non-LTS majors between.
+    # The JDK stays on LTS releases; moving to the next one (29) is a deliberate migration,
+    # so only minor/patch JDK updates are proposed. (`versions: ["27.x"]` does not match
+    # Docker tags such as 27.0.1.1_4-jdk.)
     ignore:
-      - { dependency-name: "eclipse-temurin", versions: ["26.x", "27.x", "28.x"] }
+      - { dependency-name: "eclipse-temurin", update-types: ["version-update:semver-major"] }
   - package-ecosystem: docker
     directory: /rust-webservice-template
     schedule: { interval: monthly }
@@ -60,9 +62,11 @@ updates:
     open-pull-requests-limit: 2
     cooldown: { default-days: 7 }
     groups: { compose: { patterns: ["*"] } }
-    # The JDK stays on LTS releases (25, then 29); skip the non-LTS majors between.
+    # The JDK stays on LTS releases; moving to the next one (29) is a deliberate migration,
+    # so only minor/patch JDK updates are proposed. (`versions: ["27.x"]` does not match
+    # Docker tags such as 27.0.1.1_4-jdk.)
     ignore:
-      - { dependency-name: "eclipse-temurin", versions: ["26.x", "27.x", "28.x"] }
+      - { dependency-name: "eclipse-temurin", update-types: ["version-update:semver-major"] }
   - package-ecosystem: docker-compose
     directory: /rust-webservice-template
     schedule: { interval: monthly }

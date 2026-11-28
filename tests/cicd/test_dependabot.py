@@ -55,15 +55,15 @@ def test_docker_compose_covers_service_compose_files():
         assert f"/{svc}" in _dirs("docker-compose")
 
 
-def test_java_images_skip_non_lts_jdks():
-    """Both Java image entries (Dockerfile, compose) ignore the non-LTS JDKs between 25 and 29."""
+def test_java_images_skip_jdk_majors():
+    """Both Java image entries (Dockerfile, compose) ignore JDK major bumps (LTS moves are manual)."""
     for eco in ("docker", "docker-compose"):
         (entry,) = [
             u for u in _updates()
             if u["package-ecosystem"] == eco and u["directory"] == "/java-webservice-template"
         ]
-        rules = {r["dependency-name"]: r.get("versions", []) for r in entry.get("ignore", [])}
-        assert rules.get("eclipse-temurin") == ["26.x", "27.x", "28.x"], eco
+        rules = {r["dependency-name"]: r.get("update-types", []) for r in entry.get("ignore", [])}
+        assert rules.get("eclipse-temurin") == ["version-update:semver-major"], eco
 
 
 def test_github_actions_covered():
