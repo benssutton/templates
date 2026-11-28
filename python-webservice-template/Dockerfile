@@ -1,5 +1,5 @@
 # Python 3.12: the version CI tests the service against (.github/workflows/service-python.yml).
-FROM python:3.12.16-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b
+FROM python:3.15.1-slim@sha256:533b0b2f9b5d46fd097091cf826f27902f1d6c3bca714b6dc74551356aa97a51
 WORKDIR /app
 # CVE-2026-124851: the latest base digest still ships libzstd1 1.5.7+dfsg-1.
 # Drop this layer once a base digest includes the fixed package.
