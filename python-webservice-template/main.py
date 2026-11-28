@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
 from core.auth import BearerAuthMiddleware
@@ -50,7 +50,7 @@ _CONSUMERS = {
 
 def create_lifespan(
     settings: Settings,
-    mcp: FastMCP,
+    mcp: MCPServer,
     last_request: LastRequest,
     metrics_service: MetricsService | None,
 ):
@@ -113,7 +113,7 @@ def create_lifespan(
 def mcp_transport_security(settings: Settings) -> TransportSecuritySettings:
     """DNS-rebinding protection for /mcp built from `mcp_allowed_hosts`.
 
-    FastMCP's own default only trusts `localhost:<port>`/`127.0.0.1:<port>` over
+    The SDK's own default only trusts `localhost:<port>`/`127.0.0.1:<port>` over
     http, which rejects `Host: localhost` on 443 and every deployed host name.
     """
     hosts: list[str] = []
@@ -131,18 +131,16 @@ def mcp_transport_security(settings: Settings) -> TransportSecuritySettings:
 
 
 def create_app(settings: Settings) -> FastAPI:
-    """Build a fully isolated app: services, the FastMCP server (its session manager
+    """Build a fully isolated app: services, the MCPServer (its session manager
     runs only once per instance) and the lifespan are created per call, so several
     apps can coexist in one process (e.g. tests with different transports)."""
     configure_logging(settings.log_level)
     last_request = LastRequest()
     metrics_service = MetricsService(settings) if settings.metrics_enabled else None
 
-    mcp = FastMCP(
+    mcp = MCPServer(
         name=settings.mcp_name,
-        streamable_http_path="/",
         instructions=settings.mcp_instructions,
-        transport_security=mcp_transport_security(settings),
     )
 
     app = FastAPI(
@@ -167,7 +165,7 @@ def create_app(settings: Settings) -> FastAPI:
     # ResponseCompression, RequestDecompression (so the body limit counts
     # decompressed bytes), MaxBodySize, CorrelationId, CORS, BearerAuth (if
     # enabled), ServerTiming, LastRequest, then routing and the /mcp mount
-    # (whose Host allow-list is FastMCP's own).
+    # (whose Host allow-list is the MCP SDK's own).
     app.add_middleware(LastRequestMiddleware, last_request=last_request)
     # Just outside LastRequestMiddleware, so `total` covers handler + downstream I/O.
     app.add_middleware(ServerTimingMiddleware)
@@ -205,7 +203,11 @@ def create_app(settings: Settings) -> FastAPI:
         metrics_service.instrument(app)
         app.include_router(metrics.router)
 
-    app.mount("/mcp", JsonErrorBodyMiddleware(mcp.streamable_http_app()))
+    mcp_app = mcp.streamable_http_app(
+        streamable_http_path="/",
+        transport_security=mcp_transport_security(settings),
+    )
+    app.mount("/mcp", JsonErrorBodyMiddleware(mcp_app))
     app.state.tracer_provider = configure_tracing(app, settings)
 
     @app.get("/", tags=["API Root Page"])

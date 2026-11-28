@@ -50,7 +50,7 @@ tests/             pytest (+ support/ helpers, publishers/, performance/ k6)
 
 ## Key Patterns
 
-**App isolation.** `create_app` builds everything per app (services, FastMCP whose
+**App isolation.** `create_app` builds everything per app (services, the MCPServer whose
 session manager runs once per instance, lifespan). Nothing app-scoped is
 module-level except `app = create_app(get_settings())`. A second app means a
 second `create_app` call, never a second lifespan on the same app.
@@ -124,7 +124,7 @@ listener directly.
 `"unavailable"`/`"timeout"`. The JWT seam (`core/auth.py`) is off by default; when
 on it covers `/mcp` and exempts only `/health/live` and `/health/ready`.
 `/mcp` Host/Origin allow-list comes from `mcp_allowed_hosts`; never rely on
-FastMCP's default.
+the SDK's default.
 
 **Testing.** Tests call real endpoints through `tests/app_client.lifespan_test_client`
 (lifespan in its own task; fails fast if startup raises) against real containers.

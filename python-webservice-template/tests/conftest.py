@@ -86,7 +86,7 @@ def redis_container():
 # ── Async Test Client ──────────────────────────────────────────────────────
 #
 # Each client fixture builds its OWN isolated app via main.create_app — its
-# own DI container, FastMCP instance, and lifespan — so multiple client
+# own DI container, MCPServer instance, and lifespan — so multiple client
 # fixtures (noop / HTTP-ingest / Solace) can coexist in one pytest process
 # without sharing state.
 

@@ -17,7 +17,7 @@ pydantic-settings>=2.14,<3.0
 python-dotenv>=1.0,<2.0
 
 # MCP
-mcp>=1.27,<2.0
+mcp>=2.3,<3.0
 
 # Auth seam (JWT bearer validation, off by default)
 PyJWT>=2.10,<3.0

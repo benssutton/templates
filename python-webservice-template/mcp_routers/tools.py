@@ -4,7 +4,7 @@ method as its route and returns the REST body as one text content item."""
 import json
 from collections.abc import Callable
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import CallToolResult, TextContent
 from pydantic import Field, TypeAdapter
 
@@ -19,11 +19,11 @@ _CONFIG_LIST = TypeAdapter(list[ConfigEntry])
 def _text(payload: str, *, is_error: bool = False) -> CallToolResult:
     """One text item holding the REST body, as every template's tools return."""
     return CallToolResult(
-        content=[TextContent(type="text", text=payload)], isError=is_error
+        content=[TextContent(type="text", text=payload)], is_error=is_error
     )
 
 
-def register(mcp: FastMCP, services: Callable[[], AppServices]) -> None:
+def register(mcp: MCPServer, services: Callable[[], AppServices]) -> None:
     # MCP tools run outside FastAPI's request DI; `services` resolves the owning
     # app's services at call time (they exist only once the lifespan has started).
 

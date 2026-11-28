@@ -18,7 +18,7 @@ async def test_client_http(
     postgres_container, clickhouse_container, test_clickhouse_client, redis_container
 ):
     settings = app_settings(postgres_container, clickhouse_container, redis_container)
-    # Isolated app: own container, own FastMCP, own lifespan.
+    # Isolated app: own container, own MCPServer, own lifespan.
     async with lifespan_test_client(settings) as client:
         yield client
 
