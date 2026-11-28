@@ -21,7 +21,7 @@ services:
       retries: 10
 
   clickhouse:
-    image: clickhouse/clickhouse-server:26.10.4.207
+    image: clickhouse/clickhouse-server:26.10.9.12
     environment:
       # A password lets the `default` user log in over the network.
       CLICKHOUSE_PASSWORD: clickhouse

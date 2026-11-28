@@ -12,7 +12,7 @@ services:
       timeout: 3s
       retries: 10
   clickhouse:
-    image: clickhouse/clickhouse-server:26.10.4.207
+    image: clickhouse/clickhouse-server:26.10.9.12
     environment:
       CLICKHOUSE_PASSWORD: clickhouse   # clickhouse-jdbc rejects an empty password; set an explicit one
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
