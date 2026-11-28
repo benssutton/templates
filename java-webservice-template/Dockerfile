@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM eclipse-temurin:25.0.5_8-jdk@sha256:884a2f8692cc1e2c7e21f95914adf0ae0eafee9a7eb663a12169cc44468256ec AS build
+FROM eclipse-temurin:27.0.1.1_4-jdk@sha256:a235abaaf912abaa4e806f6977009dc999ef04f1a75c9156626780884e807ee1 AS build
 WORKDIR /build
 COPY .mvn ./.mvn
 COPY mvnw pom.xml ./
@@ -18,7 +18,7 @@ USER 10001
 ENV JAVA_TOOL_OPTIONS="--add-opens=java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow"
 CMD ["sh", "-c", "exec java -cp target/classes:target/test-classes:$(cat target/classpath.txt) com.example.template.publisher.ExampleSolacePublisher"]
 
-FROM eclipse-temurin:25.0.5_8-jre@sha256:945247f9d092703e0c6be92243ef3c51640229e23ab34d353c8dcdc73e6cd4e6
+FROM eclipse-temurin:27.0.1.1_4-jre@sha256:9723bc085e2a7bd142b78c9a293427941c309962276d8ef28053a61f73238930
 WORKDIR /app
 # curl backs the HEALTHCHECK; it is not in the base JRE image.
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
