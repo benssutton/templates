@@ -1,6 +1,6 @@
 # Java Template
 
-Micronaut 5 (platform 5.2.5) on Java 25. Read [README.md](README.md) for endpoints,
+Micronaut 5 (platform 5.2.6) on Java 25. Read [README.md](README.md) for endpoints,
 config, ingest semantics and the "Adding things" recipes. The wire contract (paths,
 snake_case JSON, `{"detail"}` errors, statuses, env vars) is pinned by raw-JSON tests
 (`ContractTest`) and the shared k6 contract (`tests/performance/contract.js`); change it

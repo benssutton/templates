@@ -7,7 +7,7 @@ JSON, `{"detail"}` errors, status codes, env vars) is fixed and pinned by contra
 tests; inside, it is idiomatic Micronaut.
 
 ## Stack
-- **Micronaut 5** (platform 5.2.5) on **Java 25**, Maven, Netty, virtual threads
+- **Micronaut 5** (platform 5.2.6) on **Java 25**, Maven, Netty, virtual threads
   (`@ExecuteOn(TaskExecutors.BLOCKING)`)
 - **Micronaut Data JDBC** + HikariCP + **Flyway** (Postgres, pgvector image),
   **clickhouse-jdbc** with app-applied versioned migrations, **Jedis** + RedisJSON
